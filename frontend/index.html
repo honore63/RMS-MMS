@@ -1,0 +1,174 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>RMS — End-of-Unit Assessment Management</title>
+  <link rel="icon" type="image/webp" href="public/logo.webp">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Poppins:ital,wght@0,400;0,500;0,600;0,700;0,800;1,600&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="css/styles.css">
+  <script src="https://unpkg.com/lucide@latest"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+</head>
+<body>
+  <div id="app">
+    <div id="loading-screen" class="loading-screen">
+      <img src="public/logo.webp" alt="RMS Logo" style="width:56px;height:56px;object-fit:contain;margin-bottom:12px">
+      <div class="spinner"></div>
+      <p style="color:var(--gray-500);font-size:14px;font-weight:500">Loading...</p>
+    </div>
+
+    <div id="login-page" class="login-page" style="display:none">
+      <div class="login-shell">
+        <div class="login-brand">
+          <div class="login-brand-top">
+            <div class="login-brand-logo" id="login-logo-tile" style="background:#fff;padding:5px;border-radius:12px;display:flex;align-items:center;justify-content:center">
+              <img id="login-logo-img" alt="School logo" style="width:48px;height:48px;object-fit:contain" hidden>
+              <i data-lucide="graduation-cap" id="login-logo-fallback" style="color:#0d2f6b"></i>
+            </div>
+            <p class="login-brand-kicker">ENGAGE &middot; ASSESS &middot; ACHIEVE</p>
+          </div>
+          <div class="login-brand-mid">
+            <h1 class="login-brand-title" id="login-school-name">Rukara Model School</h1>
+            <p class="login-brand-subtitle">End-of-Unit Assessment Management System</p>
+            <p class="login-brand-tagline">Rukara Model School is committed to providing holistic education that empowers students with knowledge, character, and practical skills to thrive in a rapidly changing world.</p>
+            <p class="login-brand-motto" id="login-brand-motto">Education, Work &amp; Success</p>
+            <div class="login-features">
+              <div class="login-feature"><i data-lucide="clipboard-check"></i><span>Unit assessments &amp; marks entry</span></div>
+              <div class="login-feature"><i data-lucide="shield-check"></i><span>Approve &amp; lock official results</span></div>
+              <div class="login-feature"><i data-lucide="printer"></i><span>Printable school reports</span></div>
+            </div>
+          </div>
+          <div class="login-brand-bottom">
+            <div class="login-contact" id="login-contact">
+              <p><i data-lucide="map-pin"></i><span id="login-contact-address"></span></p>
+              <p><i data-lucide="phone"></i><span id="login-contact-phone"></span></p>
+              <p><i data-lucide="mail"></i><span id="login-contact-email"></span></p>
+            </div>
+          </div>
+        </div>
+
+        <div class="login-auth">
+          <div class="login-card" id="login-signin-view">
+            <div class="login-card-icon"><i data-lucide="lock"></i></div>
+            <h2 class="login-card-title">Welcome Back</h2>
+            <p class="login-card-sub">Sign in to access the assessment portal</p>
+
+            <div id="login-error" class="login-error" style="display:none" role="alert"></div>
+
+            <form id="login-form" novalidate>
+              <div class="form-group">
+                <label for="login-identifier">Email / Phone / Teacher Code</label>
+                <input type="text" id="login-identifier" class="input-field" placeholder="Email, Phone number, or 11-digit Code"
+                       autocomplete="username" spellcheck="false" autocapitalize="none">
+              </div>
+              <div class="form-group">
+                <label for="login-password">Password</label>
+                <div class="input-wrap">
+                  <input type="password" id="login-password" class="input-field" placeholder="Enter your password"
+                         autocomplete="current-password">
+                  <button type="button" id="toggle-password" class="login-eye" aria-label="Show password" aria-pressed="false">
+                    <i data-lucide="eye"></i>
+                  </button>
+                </div>
+              </div>
+              <div class="login-options">
+                <button type="button" class="forgot-link" id="forgot-link">Forgot password?</button>
+              </div>
+              <button type="submit" id="login-btn" class="btn btn-primary btn-full login-submit">
+                <i data-lucide="log-in" style="width:18px;height:18px"></i> Sign In
+              </button>
+            </form>
+
+            <p class="login-secure"><i data-lucide="shield-check"></i> Secure RMS Authentication &middot; All sign-ins are encrypted and protected</p>
+          </div>
+
+          <div class="login-card" id="login-reset-view" style="display:none">
+            <div class="login-card-icon"><i data-lucide="key-round"></i></div>
+            <h2 class="login-card-title">Reset Password</h2>
+            <p class="login-card-sub">Enter your email and we'll send you a secure reset link</p>
+
+            <div id="reset-message" class="login-reset-message" style="display:none" role="status"></div>
+
+            <form id="reset-form" novalidate>
+              <div class="form-group">
+                <label for="reset-email">Email Address</label>
+                <input type="email" id="reset-email" class="input-field" placeholder="you@school.edu"
+                       autocomplete="email" spellcheck="false" autocapitalize="none">
+              </div>
+              <button type="submit" id="reset-btn" class="btn btn-primary btn-full login-submit">
+                <i data-lucide="send" style="width:18px;height:18px"></i> Send Reset Link
+              </button>
+            </form>
+
+            <button type="button" class="forgot-link reset-back" id="reset-back">
+              <i data-lucide="arrow-left"></i> Back to Sign In
+            </button>
+          </div>
+
+          <footer class="login-footer">
+            <p>&copy; <span id="login-year"></span> &nbsp; <span id="login-footer-school">Rukara Model School</span> &middot; All rights reserved.</p>
+            <p class="login-footer-sub">RMS &middot; End-of-Unit Assessment Management</p>
+          </footer>
+        </div>
+      </div>
+    </div>
+
+    <div id="app-layout" class="app-layout" style="display:none">
+      <aside id="sidebar" class="sidebar"></aside>
+      <div id="sidebar-backdrop" class="sidebar-backdrop" onclick="Sidebar.closeMobile()"></div>
+      <div class="main-wrapper">
+        <header id="app-header" class="app-header">
+          <div style="display:flex;align-items:center;gap:12px">
+            <button class="sidebar-toggle-btn" id="sidebar-toggle" onclick="Sidebar.toggle()" aria-controls="sidebar">
+              <i data-lucide="menu"></i>
+            </button>
+            <h2 id="header-title" style="margin:0;font-size:16px;font-weight:600;color:var(--gray-800);display:none">RMS</h2>
+          </div>
+          <div class="header-right" style="display:flex;align-items:center;gap:12px;margin-left:auto">
+            <div class="acad-year-selector" style="display:flex;align-items:center;gap:8px;background:white;padding:4px 8px;border-radius:var(--radius);border:1px solid var(--gray-200)">
+              <i data-lucide="calendar" style="width:16px;height:16px;color:var(--gray-500)"></i>
+              <span class="text-xs font-semibold" style="color:var(--gray-500);display:none" id="acad-year-label">Academic Year:</span>
+              <select id="global-year-select" class="select-field" style="border:none;background:transparent;padding:0;font-weight:600;color:var(--blue-700);width:auto;cursor:pointer" onchange="App.setGlobalYear(this.value)">
+                <option value="">Loading...</option>
+              </select>
+            </div>
+          </div>
+        </header>
+        <main id="main-content" class="main-content"></main>
+      </div>
+    </div>
+
+    <div id="modal-root"></div>
+    <div id="toast-container" class="toast-container"></div>
+  </div>
+
+  <script src="js/config.js"></script>
+  <script src="js/auth.js"></script>
+  <script src="js/db.js"></script>
+  <script src="js/utils.js"></script>
+  <script src="js/router.js"></script>
+  <script src="js/realtime.js"></script>
+  <script src="js/components/ui.js"></script>
+  <script src="js/components/sidebar.js"></script>
+  <script src="js/pages/admin-dashboard.js"></script>
+  <script src="js/pages/admin-academic.js"></script>
+  <script src="js/pages/admin-teachers.js"></script>
+  <script src="js/pages/admin-learners.js"></script>
+  <script src="js/pages/admin-assignments.js"></script>
+  <script src="js/pages/admin-assessments.js"></script>
+  <script src="js/pages/admin-marks.js"></script>
+  <script src="js/pages/admin-reports.js"></script>
+  <script src="js/pages/admin-documents.js"></script>
+  <script src="js/reports.js"></script>
+  <script src="js/pages/teacher-pages.js"></script>
+  <script src="js/pages/teacher-account.js"></script>
+  <script src="js/pages/teacher-enter-marks.js"></script>
+  <script src="js/marks-import.js"></script>
+  <script src="js/sync-registry.js"></script>
+  <script src="js/app.js"></script>
+</body>
+</html>
