@@ -51,8 +51,8 @@ const Sidebar = {
           <img src="public/logo.webp" alt="RMS Logo" style="width:100%;height:100%;object-fit:contain;background:#fff;border-radius:8px;padding:3px">
         </div>
         <div class="sidebar-brand">
-          <h3>Rukara Model School</h3>
-          <p>End-of-Unit Assessment<br>Management System</p>
+          <h3>RMS-MIS</h3>
+          <p>Rukara Model School<br>Marks Information System</p>
         </div>
         <button class="sidebar-toggle" onclick="Sidebar.toggle()" aria-label="Close navigation"><i data-lucide="x"></i></button>
       </div>
@@ -79,8 +79,12 @@ const Sidebar = {
         <i data-lucide="layout-dashboard"></i> Dashboard</a>
       <div class="sidebar-section">
         <div class="sidebar-section-title">School Management</div>
+        <a class="nav-link" data-route="admin/classes" onclick="Router.go('admin/classes')">
+          <i data-lucide="school"></i> Class Management</a>
+        <a class="nav-link" data-route="admin/subjects" onclick="Router.go('admin/subjects')">
+          <i data-lucide="book-open"></i> Subject Management</a>
         <a class="nav-link" data-route="admin/academic" onclick="Router.go('admin/academic')">
-          <i data-lucide="book-open"></i> Academic Setup</a>
+          <i data-lucide="calendar"></i> Academic Setup</a>
         <a class="nav-link" data-route="admin/teachers" onclick="Router.go('admin/teachers')">
           <i data-lucide="users"></i> Teachers</a>
         <a class="nav-link" data-route="admin/learners" onclick="Router.go('admin/learners')">

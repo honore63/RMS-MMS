@@ -373,6 +373,8 @@ async function showApp() {
 function registerRoutes() {
   Router.register('admin/dashboard', renderAdminDashboard);
   Router.register('admin/academic', renderAcademic);
+  Router.register('admin/classes', renderClasses);
+  Router.register('admin/subjects', renderSubjects);
   Router.register('admin/teachers', renderTeachers);
   Router.register('admin/learners', renderLearners);
   Router.register('admin/assignments', renderAssignments);
