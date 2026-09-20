@@ -2,9 +2,10 @@ let assessFilter = 'all';
 async function renderAssessments() {
   setHeader('Assessment Approval', 'Review, approve, or reject teacher-submitted assessments');
   setContent(Utils.loading());
-  const [assessments, teachers, classes, subjects, years, terms] = await Promise.all([
+  const [assessments, teachers, classes, subjects, years, terms, types] = await Promise.all([
     DB.query('assessments', '*', {}, { column: 'created_at', asc: false }),
-    DB.get('teachers'), DB.get('classes'), DB.get('subjects'), DB.get('academic_years'), DB.get('terms')
+    DB.get('teachers'), DB.get('classes'), DB.get('subjects'), DB.get('academic_years'), DB.get('terms'),
+    getAssessmentTypes()
   ]);
   const filtered = assessFilter === 'all' ? assessments : assessments.filter(a => a.status === assessFilter);
 
@@ -22,8 +23,9 @@ async function renderAssessments() {
     }
     return `<tr>
       <td class="col-name">${Utils.escapeHtml(a.name)}</td>
+      <td>${Utils.escapeHtml(assessmentTypeName(types, a.assessment_type_id, 'End-of-Unit Assessment'))}</td>
       <td>${Utils.escapeHtml(c?.name || '-')}</td><td>${Utils.escapeHtml(s?.name || '-')}</td>
-      <td>${Utils.escapeHtml(a.unit)}</td><td>${Utils.escapeHtml(t?.full_name || '-')}</td>
+      <td>${Utils.escapeHtml(a.unit || '-')}</td><td>${Utils.escapeHtml(t?.full_name || '-')}</td>
       <td class="text-center font-semibold">${marksInfo}</td>
       <td>${a.maximum_mark}</td>
       <td><span class="badge ${Utils.statusColor(a.status)}"><i data-lucide="${Utils.statusIcon(a.status)}"></i> ${a.status}</span></td>
@@ -49,8 +51,8 @@ async function renderAssessments() {
       </div>
     </div>
     <div class="card"><div class="table-container"><table class="data-table">
-      <thead><tr><th>Name</th><th>Class</th><th>Subject</th><th>Unit</th><th>Teacher</th><th>Marks</th><th>Max</th><th>Status</th><th>Actions</th></tr></thead>
-      <tbody>${rowsHtml || `<tr><td colspan="9">${Utils.empty('No assessments', 'file-text')}</td></tr>`}</tbody></table></div></div>`);
+      <thead><tr><th>Name</th><th>Type</th><th>Class</th><th>Subject</th><th>Unit</th><th>Teacher</th><th>Marks</th><th>Max</th><th>Status</th><th>Actions</th></tr></thead>
+      <tbody>${rowsHtml || `<tr><td colspan="10">${Utils.empty('No assessments', 'file-text')}</td></tr>`}</tbody></table></div></div>`);
 }
 
 async function assessView(id) {
@@ -65,6 +67,7 @@ async function assessView(id) {
     DB.query('marks', '*', { assessment_id: id }),
     DB.query('learners', '*', { class_id: assessment.class_id, status: 'active' }, { column: 'full_name', asc: true })
   ]);
+  const types = await getAssessmentTypes();
   const scale = await getGrading();
   const settingsData = await DB.query('school_settings', '*');
   const passMark = settingsData[0]?.pass_mark || 50;
@@ -92,7 +95,7 @@ async function assessView(id) {
   const total = learners.length;
 
   Modal.show(`${Utils.escapeHtml(sub?.[0]?.name || '')} — ${Utils.escapeHtml(cls?.[0]?.name || '')}`, `
-    <p class="text-sm text-muted mb-3"><strong style="color:var(--gray-800)">End-of-Unit Assessment:</strong> ${Utils.escapeHtml(assessment.unit)}</p>
+    <p class="text-sm text-muted mb-3"><strong style="color:var(--gray-800)">${Utils.escapeHtml(assessmentTypeName(types, assessment.assessment_type_id, 'Assessment'))}:</strong> ${Utils.escapeHtml(assessment.name)}${assessment.unit ? ' — ' + Utils.escapeHtml(assessment.unit) : ''}</p>
     <div style="background:var(--gray-50);border:1px solid var(--gray-200);border-radius:var(--radius);padding:14px 16px;margin-bottom:16px;display:grid;grid-template-columns:1fr 1fr;gap:8px 16px">
       <div><span class="text-xs text-muted">Created by</span><div class="text-sm font-semibold">${Utils.escapeHtml(teacher?.[0]?.full_name || '-')}</div></div>
       <div><span class="text-xs text-muted">Maximum Mark</span><div class="text-sm font-semibold">${assessment.maximum_mark}</div></div>
@@ -113,24 +116,40 @@ async function assessView(id) {
 }
 
 async function assessForm() {
-  const [teachers, classes, subjects, years, terms] = await Promise.all([
+  const [teachers, classes, subjects, years, terms, types] = await Promise.all([
     DB.query('teachers', '*', { status: 'active' }), DB.get('classes'),
-    DB.query('subjects', '*', { status: 'active' }), DB.get('academic_years'), DB.get('terms')
+    DB.query('subjects', '*', { status: 'active' }), DB.get('academic_years'), DB.get('terms'),
+    getAssessmentTypes()
   ]);
+  const activeTypes = types.filter(t => t.status === 'active');
   const selYear = (typeof getActiveYearId === 'function' ? getActiveYearId(years) : null) || '';
   const selTerm = selYear ? (terms.find(t => t.academic_year_id === selYear && t.is_active)?.id || '') : '';
   Modal.show('Create Assessment (DOS)', `
-    <div class="form-group"><label>Name <span class="required">*</span></label><input id="asf-name" class="input-field" placeholder="e.g., End-of-Unit Assessment"></div>
+    <div class="form-group"><label>Name <span class="required">*</span></label><input id="asf-name" class="input-field" placeholder="e.g., Unit 3 Quiz, Terminal Exam S2, PRACTICAL 1"></div>
+    <div class="form-group"><label>Assessment Type <span class="required">*</span></label><select id="asf-type" class="select-field" onchange="assessTypeChanged()">${activeTypes.map((t, i) => `<option value="${t.id}" data-default-max="${t.default_maximum_mark ?? ''}" ${i === 0 ? 'selected' : ''}>${Utils.escapeHtml(t.name)}${t.weight != null ? ' (w=' + t.weight + ')' : ''}</option>`).join('')}</select></div>
     <div class="form-row"><div class="form-group"><label>Academic Year</label><select id="asf-year" class="select-field"><option value="">Select</option>${years.map(y => `<option value="${y.id}" ${y.id === selYear ? 'selected' : ''}>${y.name}</option>`).join('')}</select></div>
     <div class="form-group"><label>Term</label><select id="asf-term" class="select-field"><option value="">Select</option>${terms.map(t => `<option value="${t.id}" ${t.id === selTerm ? 'selected' : ''}>${t.name}</option>`).join('')}</select></div></div>
     <div class="form-row"><div class="form-group"><label>Class <span class="required">*</span></label><select id="asf-class" class="select-field"><option value="">Select</option>${classes.map(c => `<option value="${c.id}">${c.name}</option>`).join('')}</select></div>
     <div class="form-group"><label>Subject <span class="required">*</span></label><select id="asf-subject" class="select-field"><option value="">Select</option>${subjects.map(s => `<option value="${s.id}">${s.name}</option>`).join('')}</select></div></div>
     <div class="form-group"><label>Teacher <span class="required">*</span></label><select id="asf-teacher" class="select-field"><option value="">Select</option>${teachers.map(t => `<option value="${t.id}">${t.full_name}</option>`).join('')}</select></div>
-    <div class="form-row"><div class="form-group"><label>Unit <span class="required">*</span></label><input id="asf-unit" class="input-field" placeholder="e.g., Unit 3 - Whole Numbers"></div>
-    <div class="form-group"><label>Maximum Mark</label><input id="asf-max" type="number" class="input-field" value="30"></div></div>
-    <div class="form-group"><label>Date</label><input id="asf-date" type="date" class="input-field" value="${new Date().toISOString().split('T')[0]}"></div>`,
+    <div class="form-group"><label>Unit <span class="text-muted">(only for unit-based types, e.g. End-of-Unit Assessment)</span></label><input id="asf-unit" class="input-field" placeholder="e.g., Unit 3 - Whole Numbers"></div>
+    <div class="form-row">
+      <div class="form-group"><label>Maximum Mark</label><input id="asf-max" type="number" class="input-field" value="${activeTypes[0]?.default_maximum_mark ?? 30}"></div>
+      <div class="form-group"><label>Weight <span class="text-muted">(optional)</span></label><input id="asf-weight" type="number" min="0" step="any" class="input-field" placeholder="blank = use type default"></div>
+    </div>
+    <div class="form-group"><label>Date</label><input id="asf-date" type="date" class="input-field" value="${new Date().toISOString().split('T')[0]}"></div>
+    <div class="form-group"><label>Description</label><textarea id="asf-desc" class="textarea-field" placeholder="Optional notes about this assessment"></textarea></div>`,
     `<button class="btn btn-secondary" onclick="Modal.close()">Cancel</button>
      <button class="btn btn-primary" onclick="assessSave(this)"><i data-lucide="save"></i> Create</button>`);
+}
+
+function assessTypeChanged() {
+  const sel = document.getElementById('asf-type');
+  const max = document.getElementById('asf-max');
+  const opt = sel && sel.selectedOptions[0];
+  if (sel && max && opt && opt.dataset.defaultMax) {
+    max.value = opt.dataset.defaultMax;
+  }
 }
 
 async function assessSave(btn) {
@@ -140,14 +159,17 @@ async function assessSave(btn) {
   }
   const d = {
     name: document.getElementById('asf-name').value.trim(),
-    unit: document.getElementById('asf-unit').value.trim(),
+    assessment_type_id: document.getElementById('asf-type').value || null,
+    unit: document.getElementById('asf-unit').value.trim() || null,
     class_id: document.getElementById('asf-class').value,
     subject_id: document.getElementById('asf-subject').value,
     teacher_id: document.getElementById('asf-teacher').value,
     academic_year_id: document.getElementById('asf-year').value,
     term_id: document.getElementById('asf-term').value,
     maximum_mark: parseInt(document.getElementById('asf-max').value) || 30,
+    weight: document.getElementById('asf-weight').value.trim() === '' ? null : parseFloat(document.getElementById('asf-weight').value),
     assessment_date: document.getElementById('asf-date').value,
+    description: document.getElementById('asf-desc').value.trim() || null,
     status: 'draft'
   };
   if (!d.name || !d.class_id || !d.subject_id || !d.teacher_id) return Utils.toast('Fill all required fields', 'error');

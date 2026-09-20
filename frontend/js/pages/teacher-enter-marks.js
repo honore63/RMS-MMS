@@ -15,7 +15,7 @@ async function renderEnterMarks() {
 
   const ok = await loadTeacherContext();
   if (!ok) {
-    setHeader('Marks Recording', 'Enter and manage marks for your End-of-Unit Assessments.');
+    setHeader('Marks Recording', 'Enter and manage marks for your assessments.');
     setContent(Utils.empty('No teacher profile found', 'user-x'));
     return;
   }
@@ -44,14 +44,15 @@ async function loadTeacherContext() {
 }
 
 async function renderAssessmentList() {
-  setHeader('Marks Recording', 'Enter and manage marks for your End-of-Unit Assessments.');
+  setHeader('Marks Recording', 'Enter and manage marks for your assessments.');
   setContent(Utils.loading());
 
   const teacherId = Auth.getTeacherId();
-  const [assessments, classes, subjects] = await Promise.all([
+  const [assessments, classes, subjects, types] = await Promise.all([
     DB.query('assessments', '*', { teacher_id: teacherId }, { column: 'assessment_date', asc: false }),
     DB.get('classes'),
-    DB.get('subjects')
+    DB.get('subjects'),
+    getAssessmentTypes()
   ]);
 
   let progressMap = {};
@@ -74,7 +75,7 @@ async function renderAssessmentList() {
     const q = listSearch.toLowerCase();
     const cls = classes.find(c => c.id === a.class_id);
     const sub = subjects.find(s => s.id === a.subject_id);
-    return (a.name + ' ' + a.unit + ' ' + (cls?.name || '') + ' ' + (sub?.name || '')).toLowerCase().includes(q);
+    return (a.name + ' ' + (a.unit || '') + ' ' + assessmentTypeName(types, a.assessment_type_id, '') + ' ' + (cls?.name || '') + ' ' + (sub?.name || '')).toLowerCase().includes(q);
   });
 
   const grouped = {};
@@ -137,7 +138,8 @@ async function renderAssessmentList() {
       return `<tr>
         <td class="col-name">${Utils.escapeHtml(sub?.name || '-')}</td>
         <td class="text-muted">${Utils.escapeHtml(cls?.name || '-')}</td>
-        <td><span class="font-semibold">${Utils.escapeHtml(a.unit)}</span><div class="text-xs text-muted">${Utils.escapeHtml(a.name)}</div></td>
+        <td>${Utils.escapeHtml(assessmentTypeName(types, a.assessment_type_id, 'End-of-Unit Assessment'))}</td>
+        <td><span class="font-semibold">${Utils.escapeHtml(a.unit || a.name)}</span><div class="text-xs text-muted">${Utils.escapeHtml(a.name)}</div></td>
         <td class="text-center font-semibold">${a.maximum_mark}</td>
         <td class="text-muted">${Utils.dateStr(a.assessment_date)}</td>
         <td>${progressCell(a)}</td>
@@ -145,7 +147,7 @@ async function renderAssessmentList() {
         <td class="col-actions">${actionBtn(a)}</td>
       </tr>`;
     }).join('');
-    return `<tr><td colspan="8" style="background:var(--gray-50);padding:8px 16px;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.5px;color:var(--gray-500)">${Utils.escapeHtml(subjName)}</td></tr>${rows}`;
+    return `<tr><td colspan="9" style="background:var(--gray-50);padding:8px 16px;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.5px;color:var(--gray-500)">${Utils.escapeHtml(subjName)}</td></tr>${rows}`;
   }).join('');
 
   setContent(`
@@ -158,7 +160,7 @@ async function renderAssessmentList() {
         <button class="tab-btn ${listFilter === 'rejected' ? 'active' : ''}" onclick="listFilter='rejected';renderEnterMarks()">Rejected</button>
         <button class="tab-btn ${listFilter === 'locked' ? 'active' : ''}" onclick="listFilter='locked';renderEnterMarks()">Locked</button>
       </div>
-      <button class="btn btn-primary" onclick="openCreateAssessment()"><i data-lucide="plus"></i> Create End-of-Unit Assessment</button>
+      <button class="btn btn-primary" onclick="openCreateAssessment()"><i data-lucide="plus"></i> Create Assessment</button>
       <button class="btn btn-secondary" onclick="MarksImport.open()"><i data-lucide="file-up"></i> Import Marks</button>
     </div>
     <div class="filter-bar">
@@ -169,8 +171,8 @@ async function renderAssessmentList() {
     </div>
     <div class="card">
       <div class="table-container"><table class="data-table">
-        <thead><tr><th>Subject</th><th>Class</th><th>Unit / Assessment</th><th>Max</th><th>Date</th><th>Progress</th><th>Status</th><th>Action</th></tr></thead>
-        <tbody>${tableRows || `<tr><td colspan="8">${Utils.empty('No assessments yet', 'clipboard-list')}</td></tr>`}</tbody>
+        <thead><tr><th>Subject</th><th>Class</th><th>Type</th><th>Unit / Assessment</th><th>Max</th><th>Date</th><th>Progress</th><th>Status</th><th>Action</th></tr></thead>
+        <tbody>${tableRows || `<tr><td colspan="9">${Utils.empty('No assessments yet', 'clipboard-list')}</td></tr>`}</tbody>
       </table></div>
     </div>`);
 }
@@ -199,14 +201,15 @@ async function openCreateAssessment() {
     return;
   }
 
-  const [classes, subjects] = await Promise.all([DB.get('classes'), DB.get('subjects')]);
+const [classes, subjects, types] = await Promise.all([DB.get('classes'), DB.get('subjects'), getAssessmentTypes()]);
   const assignedSubjectIds = [...new Set(teacherAssignments.map(a => a.subject_id))];
   const subjectOptions = subjects.filter(s => assignedSubjectIds.includes(s.id));
+  const activeTypes = types.filter(t => t.status === 'active');
+  casAutoName = '';
 
   const dateStr = new Date().toISOString().split('T')[0];
-  const maxOptions = [10, 20, 30, 40, 50, 100];
 
-  Modal.show('Create End-of-Unit Assessment', `
+  Modal.show('Create Assessment', `
     <div class="form-group">
       <label>Subject <span class="required">*</span></label>
       <select id="cas-subject" class="select-field" onchange="casSubjectChanged()">
@@ -223,24 +226,31 @@ async function openCreateAssessment() {
       <p class="form-hint">Only classes assigned to you for the selected subject are shown.</p>
     </div>
     <div class="form-group">
-      <label>Unit <span class="required">*</span></label>
-      <input id="cas-unit" class="input-field" placeholder="e.g., Unit 4 â€” Fractions" oninput="casSuggestName()">
+      <label>Assessment Type <span class="required">*</span></label>
+      <select id="cas-type" class="select-field" onchange="casTypeChanged()">
+        ${activeTypes.map((t, i) => `<option value="${t.id}" data-default-max="${t.default_maximum_mark ?? ''}" ${i === 0 ? 'selected' : ''}>${Utils.escapeHtml(t.name)}${t.weight != null ? ' (w=' + t.weight + ')' : ''}</option>`).join('')}
+      </select>
     </div>
     <div class="form-group">
-      <label>Assessment Name</label>
-      <input id="cas-name" class="input-field" placeholder="End-of-Unit Assessment â€” Unit 4">
-      <p class="form-hint">Auto-suggested. You can edit it.</p>
+      <label>Unit <span class="text-muted">(only for unit-based types)</span></label>
+      <input id="cas-unit" class="input-field" placeholder="e.g., Unit 4 - Fractions" oninput="casSuggestName()">
+    </div>
+    <div class="form-group">
+      <label>Assessment Name <span class="required">*</span></label>
+      <input id="cas-name" class="input-field" placeholder="e.g., Unit 4 Quiz">
+      <p class="form-hint">Auto-suggested from type and unit. You can edit it.</p>
     </div>
     <div class="form-row">
       <div class="form-group"><label>Assessment Date <span class="required">*</span></label><input id="cas-date" type="date" class="input-field" value="${dateStr}"></div>
       <div class="form-group"><label>Maximum Marks <span class="required">*</span></label>
-        <select id="cas-max" class="select-field">${maxOptions.map(m => `<option value="${m}" ${m === 30 ? 'selected' : ''}>${m}</option>`).join('')}</select>
+        <select id="cas-max" class="select-field">${[10, 20, 30, 40, 50, 100].map(m => `<option value="${m}" ${m === (activeTypes[0]?.default_maximum_mark ?? 30) ? 'selected' : ''}>${m}</option>`).join('')}</select>
       </div>
     </div>
     <div class="form-row">
+      <div class="form-group"><label>Weight <span class="text-muted">(optional)</span></label><input id="cas-weight" type="number" min="0" step="any" class="input-field" placeholder="blank = use type default"></div>
       <div class="form-group"><label>Academic Year</label><input class="input-field" value="${Utils.escapeHtml(activeYear?.name || '')}" disabled></div>
-      <div class="form-group"><label>Term</label><input class="input-field" value="${Utils.escapeHtml(activeTerm?.name || '')}" disabled></div>
-    </div>`,
+    </div>
+    <div class="form-group"><label>Description</label><textarea id="cas-desc" class="textarea-field" placeholder="Optional notes about this assessment"></textarea></div>`,
     `<button class="btn btn-secondary" onclick="Modal.close()">Cancel</button>
      <button class="btn btn-secondary" onclick="casSave('draft', this)"><i data-lucide="save"></i> Save Draft</button>
      <button class="btn btn-primary" onclick="casSave('enter', this)"><i data-lucide="arrow-right"></i> Create & Enter Marks</button>`);
@@ -258,11 +268,28 @@ function casSubjectChanged() {
   casSuggestName();
 }
 
+function casTypeChanged() {
+  const sel = document.getElementById('cas-type');
+  const opt = sel && sel.selectedOptions[0];
+  const maxEl = document.getElementById('cas-max');
+  if (maxEl && opt && opt.dataset.defaultMax) maxEl.value = opt.dataset.defaultMax;
+  casSuggestName();
+}
+
+let casAutoName = '';
+
 function casSuggestName() {
-  const unit = document.getElementById('cas-unit')?.value.trim();
+  const sel = document.getElementById('cas-type');
+  const typeName = (sel && sel.selectedOptions[0]) ? sel.selectedOptions[0].textContent.trim() : 'End-of-Unit Assessment';
+  const unit = document.getElementById('cas-unit')?.value.trim() || '';
   const nameField = document.getElementById('cas-name');
-  if (!unit) return;
-  nameField.value = 'End-of-Unit Assessment â€” ' + unit;
+  if (!nameField) return;
+  const current = nameField.value.trim();
+  const auto = unit ? typeName + ' - ' + unit : '';
+  if (!current || current === casAutoName) {
+    nameField.value = auto;
+    casAutoName = auto;
+  }
 }
 
 async function casSave(mode, btn) {
@@ -274,14 +301,19 @@ async function casSave(mode, btn) {
   }
   const subjectId = document.getElementById('cas-subject').value;
   const classId = document.getElementById('cas-class').value;
+  const typeSelect = document.getElementById('cas-type');
+  const typeId = typeSelect ? typeSelect.value : null;
+  const typeName = (typeSelect && typeSelect.selectedOptions[0]) ? typeSelect.selectedOptions[0].textContent.trim() : 'End-of-Unit Assessment';
   const unit = document.getElementById('cas-unit').value.trim();
   const name = document.getElementById('cas-name').value.trim();
   const date = document.getElementById('cas-date').value;
   const maximumMark = parseInt(document.getElementById('cas-max').value) || 30;
+  const weightRaw = document.getElementById('cas-weight') ? document.getElementById('cas-weight').value.trim() : '';
+  const desc = document.getElementById('cas-desc') ? document.getElementById('cas-desc').value.trim() : '';
 
   if (!subjectId) return Utils.toast('Select a subject', 'error');
   if (!classId) return Utils.toast('Select a class', 'error');
-  if (!unit) return Utils.toast('Enter the unit being assessed', 'error');
+  if (!unit && !name) { if (btn) { btn.disabled = false; btn.innerHTML = btn.dataset.original; if (typeof lucide !== 'undefined') lucide.createIcons(); } return Utils.toast('Enter a unit or an assessment name', 'error'); }
   if (!date) return Utils.toast('Select the assessment date', 'error');
 
   const allowed = teacherAssignments.some(a => a.subject_id === subjectId && a.class_id === classId);
@@ -293,15 +325,18 @@ async function casSave(mode, btn) {
 
   const teacherId = Auth.getTeacherId();
   const data = {
-    name: name || ('End-of-Unit Assessment â€” ' + unit),
-    unit,
+    name: name || (unit ? typeName + ' - ' + unit : typeName),
+    assessment_type_id: typeId || null,
+    unit: unit || null,
     class_id: classId,
     subject_id: subjectId,
     teacher_id: teacherId,
     academic_year_id: activeYear?.id,
     term_id: activeTerm?.id,
     maximum_mark: maximumMark,
+    weight: weightRaw === '' ? null : parseFloat(weightRaw),
     assessment_date: date,
+    description: desc || null,
     status: 'draft'
   };
 
@@ -337,12 +372,13 @@ async function renderMarksEntry(assessId) {
     return;
   }
 
-  const [existingMarks, gradingData, settingsData, clsData, subData] = await Promise.all([
+  const [existingMarks, gradingData, settingsData, clsData, subData, types] = await Promise.all([
     DB.query('marks', '*', { assessment_id: assessId }),
     getGrading(),
     DB.query('school_settings', '*'),
     DB.getRelated('classes', '*', { id: markAssessment.class_id }),
-    DB.getRelated('subjects', '*', { id: markAssessment.subject_id })
+    DB.getRelated('subjects', '*', { id: markAssessment.subject_id }),
+    getAssessmentTypes()
   ]);
 
   const settings = settingsData[0] || { pass_mark: 50, assessment_roster_policy: 'auto_add' };
@@ -420,7 +456,7 @@ async function renderMarksEntry(assessId) {
       <div class="flex justify-between items-center" style="flex-wrap:wrap;gap:16px">
         <div>
           <h2 class="font-bold" style="font-size:20px;color:var(--gray-900)">${Utils.escapeHtml(sub?.name || '')} â€” ${Utils.escapeHtml(cls?.name || '')}</h2>
-          <p class="text-sm text-muted" style="margin-top:2px"><strong style="color:var(--gray-700)">End-of-Unit Assessment:</strong> ${Utils.escapeHtml(markAssessment.unit)}</p>
+          <p class="text-sm text-muted" style="margin-top:2px"><strong style="color:var(--gray-700)">${Utils.escapeHtml(assessmentTypeName(types, markAssessment.assessment_type_id, 'Assessment'))}:</strong> ${Utils.escapeHtml(markAssessment.name)}${markAssessment.unit ? ' - ' + Utils.escapeHtml(markAssessment.unit) : ''}</p>
           <p class="text-sm text-muted" style="margin-top:2px">${Utils.dateStr(markAssessment.assessment_date)} | Maximum Mark: <strong style="color:var(--blue-600)">${maxM}</strong></p>
         </div>
         <div class="flex items-center gap-2">
@@ -708,7 +744,7 @@ async function openSubmitConfirm() {
     <div style="background:var(--gray-50);border:1px solid var(--gray-200);border-radius:var(--radius);padding:16px;margin-bottom:16px">
       <div class="flex justify-between mb-2"><span class="text-sm text-muted">Class</span><span class="text-sm font-semibold">${Utils.escapeHtml(cls?.name || '-')}</span></div>
       <div class="flex justify-between mb-2"><span class="text-sm text-muted">Subject</span><span class="text-sm font-semibold">${Utils.escapeHtml(sub?.name || '-')}</span></div>
-      <div class="flex justify-between mb-2"><span class="text-sm text-muted">Unit</span><span class="text-sm font-semibold">${Utils.escapeHtml(markAssessment.unit)}</span></div>
+      <div class="flex justify-between mb-2"><span class="text-sm text-muted">Assessment</span><span class="text-sm font-semibold">${Utils.escapeHtml(markAssessment.name || markAssessment.unit || '-')}</span></div>
       <div class="flex justify-between mb-2"><span class="text-sm text-muted">Learners</span><span class="text-sm font-semibold">${total}</span></div>
       <div class="flex justify-between mb-2"><span class="text-sm text-muted">Marks entered</span><span class="text-sm font-semibold">${entered}</span></div>
       <div class="flex justify-between"><span class="text-sm text-muted">Marks missing</span><span class="text-sm font-semibold" style="color:${missing > 0 ? 'var(--red-500)' : 'var(--green-600)'}">${missing}</span></div>
@@ -785,7 +821,7 @@ async function submitMarks() {
     const notifications = (dosUsers || []).map(dos => ({
       user_id: dos.id,
       title: 'Marks Submitted',
-      message: `${Auth.currentUser?.full_name} submitted marks for ${markAssessment.unit} (${Utils.escapeHtml(sub?.name || '')})`,
+      message: `${Auth.currentUser?.full_name} submitted marks for ${markAssessment.name || markAssessment.unit} (${Utils.escapeHtml(sub?.name || '')})`,
       type: 'success',
       read: false
     }));
@@ -820,7 +856,7 @@ async function renderTeacherReports() {
   const tabs = `
     <div class="report-tabs mb-6">
       <button class="report-tab ${teacherReportMode === 'single' ? 'active' : ''}" onclick="setTeacherReportMode('single')"><i data-lucide="file-text"></i> Single Assessment</button>
-      <button class="report-tab ${teacherReportMode === 'combined' ? 'active' : ''}" onclick="setTeacherReportMode('combined')"><i data-lucide="layers"></i> Combined End-of-Unit</button>
+      <button class="report-tab ${teacherReportMode === 'combined' ? 'active' : ''}" onclick="setTeacherReportMode('combined')"><i data-lucide="layers"></i> Combined Assessments</button>
     </div>`;
 
   const singleCard = `
@@ -828,7 +864,7 @@ async function renderTeacherReports() {
       <div class="card-header">
         <div>
           <h3><i data-lucide="file-bar-chart" style="width:18px;height:18px;vertical-align:middle;margin-right:8px;color:var(--blue-600)"></i>Single Assessment Report</h3>
-          <p class="text-sm text-muted mt-1">Generate an official report for one of your End-of-Unit assessments.</p>
+          <p class="text-sm text-muted mt-1">Generate an official report for one of your assessments.</p>
         </div>
       </div>
       <div class="flex gap-4 items-end" style="flex-wrap:wrap">
@@ -839,7 +875,7 @@ async function renderTeacherReports() {
             ${sorted.map(a => {
               const c = classes.find(x => x.id === a.class_id);
               const s = subjects.find(x => x.id === a.subject_id);
-              return `<option value="${a.id}">${c?.name || ''} â€” ${s?.name || ''} â€” ${a.unit} (${Number(a.maximum_mark) || 0} marks)</option>`;
+              return `<option value="${a.id}">${c?.name || ''} - ${s?.name || ''} - ${a.unit || a.name} (${Number(a.maximum_mark) || 0} marks)</option>`;
             }).join('')}
           </select></div>
         </div>
@@ -851,8 +887,8 @@ async function renderTeacherReports() {
     <div class="card mb-6">
       <div class="card-header" style="flex-wrap:wrap;gap:12px">
         <div>
-          <h3><i data-lucide="layers" style="width:18px;height:18px;vertical-align:middle;margin-right:8px;color:var(--blue-600)"></i>Combined End-of-Unit Report</h3>
-          <p class="text-sm text-muted mt-1">Select 2 or more of your assessments of the SAME Class and Subject to produce one combined report with totals, averages, grade distribution and unit performance.</p>
+          <h3><i data-lucide="layers" style="width:18px;height:18px;vertical-align:middle;margin-right:8px;color:var(--blue-600)"></i>Combined Assessment Report</h3>
+          <p class="text-sm text-muted mt-1">Select 2 or more of your assessments of the SAME Class and Subject to produce one combined report with totals, averages, grade distribution and assessment performance.</p>
         </div>
         <div class="flex gap-2">
           <button class="btn btn-sm btn-outline" onclick="setTeacherCombinedAll(true)"><i data-lucide="check-square"></i> Select All</button>
@@ -869,7 +905,7 @@ async function renderTeacherReports() {
             <label class="report-cb-item">
               <input type="checkbox" class="cb-rpt-t" value="${a.id}" data-class="${a.class_id}" data-subject="${a.subject_id}">
               <span class="report-cb-body">
-                <span class="report-cb-title">${Utils.escapeHtml(a.unit)} &mdash; ${Utils.escapeHtml(a.name)}</span>
+                <span class="report-cb-title">${Utils.escapeHtml(a.unit || a.name)} &bull; ${Utils.escapeHtml(a.name)}</span>
                 <span class="report-cb-meta">${Utils.escapeHtml(c?.name || '-')} &bull; ${Utils.escapeHtml(s?.name || '-')} &bull; ${Number(a.maximum_mark) || 0} marks ${a.assessment_date ? '&bull; ' + Utils.dateStr(a.assessment_date) : ''}</span>
               </span>
               <span class="badge ${Utils.statusColor(a.status)}"><i data-lucide="${Utils.statusIcon(a.status)}"></i> ${Utils.escapeHtml(a.status)}</span>

@@ -96,14 +96,16 @@ const Sidebar = {
         <div class="sidebar-section-title">Evaluations & Reports</div>
         <a class="nav-link" data-route="admin/assessments" onclick="Router.go('admin/assessments')">
           <i data-lucide="file-text"></i> Assessments</a>
+        <a class="nav-link" data-route="admin/assessment-types" onclick="Router.go('admin/assessment-types')">
+          <i data-lucide="tags"></i> Assessment Types</a>
         <a class="nav-link" data-route="admin/marks" onclick="Router.go('admin/marks')">
           <i data-lucide="list-checks"></i> Marks</a>
-        <a class="nav-link" data-route="admin/import-marks" onclick="Router.go('admin/import-marks')">
-          <i data-lucide="file-up"></i> Import Marks</a>
         <a class="nav-link" data-route="admin/import-history" onclick="Router.go('admin/import-history')">
           <i data-lucide="archive"></i> Import History</a>
         <a class="nav-link" data-route="admin/reports" onclick="Router.go('admin/reports')">
           <i data-lucide="bar-chart-3"></i> Reports</a>
+        <a class="nav-link" data-route="admin/post-assessment-reports" onclick="Router.go('admin/post-assessment-reports')">
+          <i data-lucide="clipboard-check"></i> Post-Assessment Reports</a>
         <a class="nav-link" data-route="admin/documents" onclick="Router.go('admin/documents')">
           <i data-lucide="folder-open"></i> Documents</a>
       </div>
@@ -133,6 +135,10 @@ const Sidebar = {
       </div>
       <a class="nav-link" data-route="teacher/reports" onclick="Router.go('teacher/reports')">
         <i data-lucide="bar-chart-3"></i> Reports</a>
+      <a class="nav-link" data-route="teacher/analytics" onclick="Router.go('teacher/analytics')">
+        <i data-lucide="trending-up"></i> Analytics</a>
+      <a class="nav-link" data-route="teacher/post-assessment-reports" onclick="Router.go('teacher/post-assessment-reports')">
+        <i data-lucide="clipboard-check"></i> Post-Assessment Reports</a>
       <a class="nav-link" data-route="teacher/notifications" onclick="Router.go('teacher/notifications')">
         <i data-lucide="bell"></i> Notifications <span class="nav-badge" id="notif-badge"></span></a>
       <div class="sidebar-section">

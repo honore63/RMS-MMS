@@ -1,12 +1,19 @@
 let marksAssessFilter = 'all';
+let marksTypeFilter = 'all';
 async function renderAdminMarks() {
   setHeader('View All Marks', 'Review and manage all entered marks');
   setContent(Utils.loading());
-  const [marks, assessments] = await Promise.all([
+  const [marks, assessments, types] = await Promise.all([
     DB.query('marks','*',{},{column:'created_at',asc:false}),
-    DB.get('assessments')
+    DB.get('assessments'),
+    getAssessmentTypes()
   ]);
-  const filtered = marksAssessFilter === 'all' ? marks : marks.filter(m => m.assessment_id === marksAssessFilter);
+  const filtered = (marksAssessFilter === 'all' ? marks : marks.filter(m => m.assessment_id === marksAssessFilter))
+    .filter(m => {
+      if (marksTypeFilter === 'all') return true;
+      const a = assessments.find(a => a.id === m.assessment_id);
+      return !!a && (a.assessment_type_id === marksTypeFilter);
+    });
   let rows = '';
   for (const m of filtered) {
     const a = assessments.find(a => a.id === m.assessment_id);
@@ -15,7 +22,7 @@ async function renderAdminMarks() {
     const grade = m.grade || Utils.grade(pct, await getGradingScale());
     const pf = Utils.passFail(pct);
     rows += `<tr>
-      <td class="col-name">${Utils.escapeHtml(a?.name||'-')}</td>
+      <td class="col-name">${Utils.escapeHtml(a?.name||'-')}<div class="text-xs text-muted">${Utils.escapeHtml(assessmentTypeName(types, a?.assessment_type_id, 'End-of-Unit Assessment'))}${a?.unit ? ' - ' + Utils.escapeHtml(a.unit) : ''}</div></td>
       <td>${Utils.escapeHtml(l?.full_name||'-')}</td>
       <td>${m.mark != null ? m.mark + '/' + (a?.maximum_mark||30) : '-'}</td>
       <td class="font-semibold">${pct}%</td>
@@ -26,10 +33,16 @@ async function renderAdminMarks() {
 
   setContent(`
     <div class="flex justify-between items-center mb-6" style="flex-wrap:wrap;gap:12px">
-      <select class="select-field" style="max-width:400px" onchange="marksAssessFilter=this.value;renderAdminMarks()">
-        <option value="all">All Assessments</option>
-        ${assessments.map(a=>`<option value="${a.id}" ${marksAssessFilter===a.id?'selected':''}>${a.name}</option>`).join('')}
-      </select>
+      <div class="flex gap-2" style="flex-wrap:wrap">
+        <select class="select-field" style="max-width:420px" onchange="marksAssessFilter=this.value;renderAdminMarks()">
+          <option value="all">All Assessments</option>
+          ${assessments.map(a=>`<option value="${a.id}" ${marksAssessFilter===a.id?'selected':''}>${a.name} (${Utils.escapeHtml(assessmentTypeName(types, a.assessment_type_id, 'End-of-Unit Assessment'))})${a.unit ? ' - ' + Utils.escapeHtml(a.unit) : ''}</option>`).join('')}
+        </select>
+        <select class="select-field" style="max-width:260px" onchange="marksTypeFilter=this.value;renderAdminMarks()">
+          <option value="all">All Types</option>
+          ${types.filter(t => t.status === 'active').map(t=>`<option value="${t.id}" ${marksTypeFilter===t.id?'selected':''}>${Utils.escapeHtml(t.name)}</option>`).join('')}
+        </select>
+      </div>
       <span class="text-sm text-muted">${filtered.length} marks</span>
       <button class="btn btn-primary" onclick="MarksImport.open()"><i data-lucide="file-up"></i> Import Marks</button>
     </div>

@@ -34,7 +34,10 @@ async function renderSubjects() {
   const rows = filtered.map(s => {
     const st = s.status || 'active';
     return `<tr>
-      <td class="col-name"><strong>${Utils.escapeHtml(s.name)}</strong></td>
+      <td class="col-name">
+        <strong>${Utils.escapeHtml(s.name)}</strong>
+        <div class="text-sm mt-1" style="color:var(--gray-500);font-weight:500">${Utils.escapeHtml(s.level || 'Both')}</div>
+      </td>
       <td><code style="background:var(--gray-100);padding:2px 6px;border-radius:4px;font-size:12px">${Utils.escapeHtml(s.code || '-')}</code></td>
       <td><span class="badge ${Utils.statusColor(st)}"><i data-lucide="${Utils.statusIcon(st)}" style="width:12px;height:12px"></i> ${st}</span></td>
       <td class="col-actions">
@@ -129,6 +132,14 @@ function subjectForm() {
         oninput="this.value=this.value.toUpperCase();this.dataset.userEdited='true'">
     </div>
     <div class="form-group">
+      <label>Level</label>
+      <select id="sf-level" class="select-field">
+        <option value="Both" selected>Both (Primary & Secondary)</option>
+        <option value="Primary">Primary Only</option>
+        <option value="Secondary">Secondary Only</option>
+      </select>
+    </div>
+    <div class="form-group">
       <label>Status</label>
       <select id="sf-status" class="select-field">
         <option value="active" selected>Active</option>
@@ -157,6 +168,7 @@ function subjectAutoCode() {
 async function subjectSave() {
   const name   = document.getElementById('sf-name')?.value?.trim();
   const code   = document.getElementById('sf-code')?.value?.trim().toUpperCase();
+  const level  = document.getElementById('sf-level')?.value || 'Both';
   const status = document.getElementById('sf-status')?.value || 'active';
 
   if (!name) return Utils.toast('Subject name is required', 'error');
@@ -172,7 +184,7 @@ async function subjectSave() {
       return Utils.toast(`A subject with code "${code}" already exists`, 'error');
     }
 
-    await DB.insert('subjects', { name, code, status });
+    await DB.insert('subjects', { name, code, level, status });
     Modal.close();
     Utils.toast('Subject added successfully', 'success');
     renderSubjects();
@@ -199,6 +211,14 @@ function subjectEdit(s) {
         oninput="this.value=this.value.toUpperCase()">
     </div>
     <div class="form-group">
+      <label>Level</label>
+      <select id="se-level" class="select-field">
+        <option value="Both" ${(s.level === 'Both' || !s.level) ? 'selected' : ''}>Both (Primary & Secondary)</option>
+        <option value="Primary" ${s.level === 'Primary' ? 'selected' : ''}>Primary Only</option>
+        <option value="Secondary" ${s.level === 'Secondary' ? 'selected' : ''}>Secondary Only</option>
+      </select>
+    </div>
+    <div class="form-group">
       <label>Status</label>
       <select id="se-status" class="select-field">
         <option value="active" ${(s.status || 'active') === 'active' ? 'selected' : ''}>Active</option>
@@ -213,6 +233,7 @@ function subjectEdit(s) {
 async function subjectUpdate(id) {
   const name   = document.getElementById('se-name')?.value?.trim();
   const code   = document.getElementById('se-code')?.value?.trim().toUpperCase();
+  const level  = document.getElementById('se-level')?.value || 'Both';
   const status = document.getElementById('se-status')?.value || 'active';
 
   if (!name) return Utils.toast('Subject name is required', 'error');
@@ -227,7 +248,7 @@ async function subjectUpdate(id) {
       return Utils.toast(`Code "${code}" is already used by another subject`, 'error');
     }
 
-    await DB.update('subjects', id, { name, code, status });
+    await DB.update('subjects', id, { name, code, level, status });
     Modal.close();
     Utils.toast('Subject updated', 'success');
     renderSubjects();

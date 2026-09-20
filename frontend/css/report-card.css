@@ -1,0 +1,344 @@
+/* ============================================================
+   report-card.css
+   Styles for RMS-MIS Official Student Report Card
+   EXACT MATCH for the provided school blueprint
+   ============================================================ */
+
+/* ── Variables ─────────────────────────────────────────────── */
+:root {
+  --rc-dark-blue:   #154b8a;
+  --rc-med-blue:    #5b8bc4;
+  --rc-light-blue:  #dbe7f2;
+  --rc-border:      #154b8a;
+  --rc-text:        #154b8a;
+  --rc-val-text:    #111827; 
+  --rc-bg:          #ffffff;
+  --rc-font:        Arial, Helvetica, sans-serif;
+}
+
+/* ── Outer paper container ─────────────────────────────────── */
+.rc-paper-outer {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 32px;
+  padding: 0 0 48px 0;
+}
+
+/* ── A4 paper sheet ────────────────────────────────────────── */
+.rc-paper {
+  width:  210mm;
+  min-height: 297mm;
+  background: var(--rc-bg);
+  box-shadow: 0 4px 24px rgba(29,78,216,.18);
+  font-family: var(--rc-font);
+  color: var(--rc-text);
+  padding: 10mm 12mm;
+  box-sizing: border-box;
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+/* ── HEADER ────────────────────────────────────────────────── */
+.rc-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  margin-bottom: 2px;
+}
+
+.rc-title-group {
+  flex: 1;
+}
+.rc-main-title {
+  font-size: 16pt;
+  font-weight: bold;
+  color: var(--rc-dark-blue);
+  letter-spacing: -0.2px;
+}
+.rc-sub-title {
+  font-size: 12pt;
+  font-weight: bold;
+  color: var(--rc-dark-blue);
+}
+.rc-tagline {
+  font-size: 8.5pt;
+  color: var(--rc-val-text);
+  margin-top: 1px;
+}
+.rc-contact-info {
+  font-size: 7.5pt;
+  color: var(--rc-val-text);
+  margin-top: 10px;
+  line-height: 1.35;
+}
+
+.rc-center-badge {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  margin-top: 25px;
+  min-width: 260px;
+}
+.rc-badge-top {
+  background: var(--rc-dark-blue);
+  color: #fff;
+  font-size: 13pt;
+  font-weight: bold;
+  width: 100%;
+  text-align: center;
+  padding: 6px 12px;
+  border-radius: 8px 8px 0 0;
+}
+.rc-badge-bottom {
+  background: var(--rc-light-blue);
+  color: var(--rc-dark-blue);
+  font-size: 11pt;
+  font-weight: bold;
+  width: 100%;
+  text-align: center;
+  padding: 4px;
+  border: 1px solid var(--rc-dark-blue);
+  border-top: none;
+  border-radius: 0 0 8px 8px;
+}
+
+.rc-logo-group {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  flex: 1;
+}
+.rc-logo-wrap {
+  position: relative;
+}
+.rc-logo-img {
+  width: 85px;
+  height: 85px;
+  object-fit: contain;
+}
+.rc-logo-text {
+  background: var(--rc-dark-blue);
+  color: #fff;
+  font-size: 6.5pt;
+  font-weight: bold;
+  padding: 2px 14px;
+  margin-top: 4px;
+  position: relative;
+}
+.rc-logo-text:before, .rc-logo-text:after {
+  content: "";
+  position: absolute;
+  top: 0;
+  border-top: 6px solid transparent;
+  border-bottom: 6px solid transparent;
+}
+.rc-logo-text:before { left: -6px; border-right: 6px solid var(--rc-dark-blue); }
+.rc-logo-text:after { right: -6px; border-left: 6px solid var(--rc-dark-blue); }
+.rc-logo-rms {
+  color: var(--rc-val-text);
+  font-weight: bold;
+  font-size: 9pt;
+  margin-top: 4px;
+}
+
+.rc-divider {
+  border-bottom: 2px solid var(--rc-dark-blue);
+  margin-bottom: 6px;
+}
+
+/* ── STUDENT INFO ──────────────────────────────────────────── */
+.rc-student-block {
+  border: 1.5px solid var(--rc-dark-blue);
+  border-radius: 6px;
+  padding: 6px 12px;
+  display: flex;
+  justify-content: space-between;
+  font-size: 8.5pt;
+  color: var(--rc-val-text);
+  margin-bottom: 6px;
+}
+.rc-lbl-blue {
+  color: var(--rc-dark-blue);
+  font-weight: bold;
+}
+.rc-stu-col1 {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.rc-stu-col2 {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  text-align: left;
+  min-width: 160px;
+}
+
+/* ── TABLE ─────────────────────────────────────────────────── */
+.rc-table-wrapper {
+  margin-bottom: 6px;
+}
+.rc-data-table {
+  width: 100%;
+  border-collapse: collapse;
+  border: 1.5px solid var(--rc-dark-blue);
+  font-size: 7.5pt;
+  table-layout: auto;
+  color: var(--rc-val-text);
+}
+.rc-data-table th, .rc-data-table td {
+  border: 1px solid var(--rc-dark-blue);
+  text-align: center;
+  padding: 3px 2px;
+}
+
+/* Headers */
+.rc-data-table thead th {
+  background-color: var(--rc-light-blue);
+  color: var(--rc-dark-blue);
+  font-weight: bold;
+}
+.rc-th-sub {
+  min-width: 160px;
+}
+.rc-th-top {
+  padding: 5px !important;
+}
+.rc-th-row2 th {
+  font-size: 7pt;
+}
+
+/* Weight / Conduct / Total rows */
+.rc-blue-text {
+  color: var(--rc-dark-blue) !important;
+  font-weight: bold;
+}
+.rc-align-left {
+  text-align: left !important;
+  padding-left: 6px !important;
+}
+.rc-blue-bg-text {
+  background: var(--rc-light-blue);
+  color: var(--rc-dark-blue) !important;
+  padding-left: 6px !important;
+}
+.rc-all-subjects-row td {
+  background-color: var(--rc-med-blue);
+  color: #fff;
+  font-weight: bold;
+  text-align: left !important;
+  padding-left: 6px !important;
+  font-size: 8.5pt;
+}
+.rc-empty-cell {
+  background-color: transparent !important;
+}
+.rc-comment-td {
+  font-size: 7pt;
+  text-align: left !important;
+  padding: 4px 6px !important;
+  vertical-align: top;
+}
+
+/* Signatures */
+.rc-sig-area {
+  padding: 0 !important;
+  vertical-align: bottom;
+}
+.rc-sig-img {
+  height: 25px;
+  width: auto;
+}
+.rc-sig-stub {
+  display: inline-block;
+  width: 80px;
+  border-bottom: 1px solid var(--rc-dark-blue);
+}
+.rc-sig-stub-sm {
+  width: 50px;
+  border-bottom: 1px solid var(--rc-dark-blue);
+  margin-top: 10px;
+  margin-bottom: 4px;
+}
+
+/* ── DESC SECTION ──────────────────────────────────────────── */
+.rc-footer-panels {
+  display: flex;
+  gap: 12px;
+  align-items: stretch;
+}
+.rc-scale-panel {
+  flex: 1.25;
+}
+.rc-scale-tbl {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 7.5pt;
+  color: var(--rc-val-text);
+  border: 1.5px solid var(--rc-dark-blue);
+}
+.rc-scale-tbl td {
+  border: 1px solid var(--rc-dark-blue);
+  padding: 4px;
+  text-align: center;
+}
+.rc-scale-title {
+  background: var(--rc-med-blue);
+  color: #fff;
+  font-weight: bold;
+  width: 65px;
+}
+.rc-scale-blue {
+  background: var(--rc-light-blue);
+  color: var(--rc-dark-blue);
+  font-weight: bold;
+  white-space: nowrap;
+}
+
+.rc-desc-panel {
+  flex: 3;
+  display: flex;
+  border: 1.5px solid var(--rc-dark-blue);
+  border-radius: 4px;
+}
+.rc-desc-box {
+  flex: 1;
+  border-right: 1px solid var(--rc-dark-blue);
+  padding: 4px 6px;
+  display: flex;
+  flex-direction: column;
+}
+.rc-desc-box:last-child {
+  border-right: none;
+}
+.rc-desc-label {
+  font-weight: bold;
+  color: var(--rc-dark-blue);
+  font-size: 7.5pt;
+}
+
+/* ── FOOTER ────────────────────────────────────────────────── */
+.rc-absolute-bottom {
+  position: absolute;
+  bottom: 8mm;
+  left: 12mm;
+  right: 12mm;
+  font-size: 7pt;
+  color: var(--rc-dark-blue);
+}
+
+/* ── PRINT helpers ─────────────────────────────────────────── */
+@media print {
+  @page { margin: 0; size: A4 portrait; }
+  body { margin: 0; padding: 0; }
+  body * { visibility: hidden; }
+  #rc-paper, #rc-paper * { visibility: visible; }
+  #rc-paper { position: absolute; left: 0; top: 0; width: 100%; }
+  .rc-paper { box-shadow: none !important; width: 210mm !important; min-height: 297mm !important; margin: 0; padding: 10mm 12mm !important; page-break-after: always; }
+  .no-print, .report-preview-toolbar-flex { display: none !important; }
+}
+.rc-print-body { background: white; margin:0; padding:0; }
+.rc-print-body .rc-paper { box-shadow: none; margin: 0 auto; }

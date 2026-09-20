@@ -305,9 +305,19 @@ SELECT * FROM (VALUES
   ('P3A','P3','A'), ('P3B','P3','B'),
   ('P4A','P4','A'), ('P4B','P4','B'),
   ('P5A','P5','A'), ('P5B','P5','B'),
-  ('P6A','P6','A'), ('P6B','P6','B')
+  ('P6A','P6','A'), ('P6B','P6','B'),
+  ('S1','S1',NULL),
+  ('S2','S2',NULL),
+  ('S3','S3',NULL),
+  ('S4 – Stream 1','S4','Stream 1'),
+  ('S4 – Stream 2','S4','Stream 2'),
+  ('S5 – Stream 1','S5','Stream 1'),
+  ('S5 – Stream 2','S5','Stream 2'),
+  ('S6 – MEG','S6','MEG'),
+  ('S6 – PCM','S6','PCM'),
+  ('S6 – MCE','S6','MCE')
 ) AS v (name, level, stream)
-WHERE NOT EXISTS (SELECT 1 FROM classes);
+WHERE NOT EXISTS (SELECT 1 FROM classes c WHERE c.name = v.name);
 
 INSERT INTO subjects (name, code)
 SELECT * FROM (VALUES

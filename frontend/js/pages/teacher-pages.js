@@ -292,18 +292,19 @@ let currentTeacherAssessments = [];
 let lastCombinedReportData = null;
 
 async function renderMyAssessments() {
-  setHeader('My Assessments', 'View, manage, and export combined reports for your End-of-Unit assessments');
+  setHeader('My Assessments', 'View, manage, and export combined reports for your assessments');
   setContent(Utils.loading());
 
   const teacherId = Auth.getTeacherId();
   if (!teacherId) { setContent(Utils.empty('No teacher profile associated with your account', 'user-x')); return; }
 
-  const [assessments, classes, subjects, years, terms] = await Promise.all([
+  const [assessments, classes, subjects, years, terms, types] = await Promise.all([
     DB.query('assessments', '*', { teacher_id: teacherId }, { column: 'created_at', asc: false }),
     DB.get('classes'),
     DB.get('subjects'),
     DB.get('academic_years'),
-    DB.get('terms')
+    DB.get('terms'),
+    getAssessmentTypes()
   ]);
 
   currentTeacherAssessments = assessments;
@@ -320,7 +321,8 @@ async function renderMyAssessments() {
         <td class="col-name">${Utils.escapeHtml(cls?.name || '-')}</td>
         <td>${Utils.escapeHtml(sub?.name || '-')}</td>
         <td class="font-semibold">${Utils.escapeHtml(a.name)}</td>
-        <td>${Utils.escapeHtml(a.unit)}</td>
+        <td>${Utils.escapeHtml(assessmentTypeName(types, a.assessment_type_id, 'End-of-Unit Assessment'))}</td>
+        <td>${Utils.escapeHtml(a.unit || '-')}</td>
         <td class="text-center">${a.maximum_mark}</td>
         <td><span class="badge ${Utils.statusColor(a.status)}"><i data-lucide="${Utils.statusIcon(a.status)}"></i> ${a.status}</span></td>
         <td class="col-actions">
@@ -335,7 +337,7 @@ async function renderMyAssessments() {
     <div class="card mb-6">
       <div class="card-header" style="flex-wrap:wrap;gap:12px">
         <div>
-          <h3><i data-lucide="clipboard-list" style="width:18px;height:18px;vertical-align:middle;margin-right:8px;color:var(--blue-600)"></i>My End-of-Unit Assessments</h3>
+          <h3><i data-lucide="clipboard-list" style="width:18px;height:18px;vertical-align:middle;margin-right:8px;color:var(--blue-600)"></i>My Assessments</h3>
           <p class="text-sm text-muted mt-1">Select 2 or more assessments belonging to the same Class and Subject to export a combined report.</p>
         </div>
         <div class="flex gap-2">
@@ -354,6 +356,7 @@ async function renderMyAssessments() {
               <th>Class</th>
               <th>Subject</th>
               <th>Assessment Name</th>
+              <th>Type</th>
               <th>Unit</th>
               <th class="text-center">Max Mark</th>
               <th>Status</th>
@@ -361,7 +364,7 @@ async function renderMyAssessments() {
             </tr>
           </thead>
           <tbody>
-            ${rows || `<tr><td colspan="8">${Utils.empty('No assessments found. Create assessments from Enter Marks.', 'clipboard-list')}</td></tr>`}
+            ${rows || `<tr><td colspan="9">${Utils.empty('No assessments found. Create assessments from Enter Marks.', 'clipboard-list')}</td></tr>`}
           </tbody>
         </table>
       </div>
@@ -396,12 +399,12 @@ async function handleCombinedExport() {
     return Utils.toast('All selected assessments must belong to the SAME Class and Subject for combined export.', 'error');
   }
 
-  Modal.show('Generating Combined Report...', Utils.loading(), '', true);
+  Modal.show('Generating Combined Report...', '<div id="teacher-rpt-modal"></div>', '', true);
 
   try {
-    const reportData = await buildCombinedReportData(selectedIds);
+    const reportData = await ReportEngine.buildCombined(selectedIds);
     lastCombinedReportData = reportData;
-    renderCombinedReportModal(reportData);
+    ReportEngine.render(reportData, 'teacher-rpt-modal');
   } catch (err) {
     console.error('Combined export error:', err);
     Utils.toast('Error generating report: ' + err.message, 'error');
@@ -654,13 +657,13 @@ function printCombinedReport() {
 }
 
 function buildReportFilename(ext) {
-  if (!lastCombinedReportData) return `RMS_Report_${new Date().toISOString().slice(0,10)}.${ext}`;
+  if (!lastCombinedReportData) return `RMS-MIS_Report_${new Date().toISOString().slice(0,10)}.${ext}`;
   const d = lastCombinedReportData;
-  const clsStr = (d.className || 'Class').replace(/[^a-zA-Z0-9]/g, '_');
-  const subStr = (d.subjectName || 'Subject').replace(/[^a-zA-Z0-9]/g, '_');
-  const termStr = (d.term || 'Term').replace(/[^a-zA-Z0-9]/g, '_');
-  const yrStr = (d.academicYear || '2026').replace(/[^a-zA-Z0-9]/g, '_');
-  return `RMS_${clsStr}_${subStr}_Combined_EOU_${termStr}_${yrStr}.${ext}`;
+  const clsStr = (d.cls?.name || 'Class').replace(/[^a-zA-Z0-9]/g, '_');
+  const subStr = (d.sub?.name || 'Subject').replace(/[^a-zA-Z0-9]/g, '_');
+  const termStr = (d.term?.name || 'Term').replace(/[^a-zA-Z0-9]/g, '_');
+  const yrStr = (d.year?.name || 'Year').replace(/[^a-zA-Z0-9]/g, '_');
+  return `RMS-MIS_${clsStr}_${subStr}_Combined_Assessments_${termStr}_${yrStr}.${ext}`;
 }
 
 function exportCombinedCSV() {
@@ -670,27 +673,27 @@ function exportCombinedCSV() {
   let csv = [];
   csv.push(`"${d.settings.school_name || 'Rukara Model School'}"`);
   if (d.settings.school_motto) csv.push(`"${d.settings.school_motto}"`);
-  csv.push(`"END-OF-UNIT ASSESSMENT COMBINED PERFORMANCE REPORT"`);
-  csv.push(`"Class: ${d.className}","Subject: ${d.subjectName}","Academic Year: ${d.academicYear}","Term: ${d.term}","Teacher: ${d.teacherName}"`);
+  csv.push(`"COMBINED ASSESSMENT PERFORMANCE REPORT"`);
+  csv.push(`"Class: ${d.cls?.name || ''}","Subject: ${d.sub?.name || ''}","Academic Year: ${d.year?.name || ''}","Term: ${d.term?.name || ''}","Teacher: ${d.teacher || ''}"`);
   csv.push('');
 
   const headers = ['No.', 'Student Number', 'Learner Name', 'Gender'];
-  d.assessments.forEach(a => headers.push(`${a.unit} (${a.maximum_mark})`));
-  headers.push('Total Marks', 'Maximum Marks', 'Average %', 'Grade', 'Result', 'Rank');
+  d.assessments.forEach(a => headers.push(`${a.unit || a.name} (${a.maximum_mark})`));
+  headers.push('Total Marks', 'Maximum Marks', d.weighted ? 'Weighted %' : 'Average %', 'Grade', 'Result', 'Rank');
 
   csv.push(headers.map(h => `"${h}"`).join(','));
 
-  d.learnerRows.forEach((r, idx) => {
+  d.rows.forEach((r, idx) => {
     const row = [idx + 1, r.learnerCode, r.name, r.gender];
-    d.assessments.forEach(a => {
-      row.push(r.unitMarks[a.id] === 'N/R' ? 'N/R' : r.unitMarks[a.id]);
+    d.assessments.forEach((a, j) => {
+      row.push(r.units[j].hasMark ? r.units[j].mark : 'N/R');
     });
-    row.push(r.totalObtained, r.totalMax, `${r.pct}%`, r.grade, r.pf, r.position);
+    row.push(r.pct == null ? 'N/R' : r.obtained, r.pct == null ? 'N/R' : r.denominator, r.pct == null ? 'N/R' : r.pct + '%', r.grade, r.pf, r.position);
     csv.push(row.map(v => `"${v}"`).join(','));
   });
 
   csv.push('');
-  csv.push(`"Prepared by: ${d.teacherName}","Reviewed by: ${d.settings.dos_name || ''}","Approved by: ${d.settings.headteacher_name || ''}"`);
+  csv.push(`"Prepared by: ${d.teacher || ''}","Reviewed by: ${d.settings.dos_name || ''}","Approved by: ${d.settings.headteacher_name || ''}"`);
 
   const filename = buildReportFilename('csv');
   downloadCSVFile(filename, csv.join('\n'));
@@ -719,11 +722,11 @@ function exportCombinedExcel() {
   <body>
     <h2>${Utils.escapeHtml(d.settings.school_name || 'Rukara Model School')}</h2>
     ${d.settings.school_motto ? `<p class="motto">${Utils.escapeHtml(d.settings.school_motto)}</p>` : ''}
-    <h3>END-OF-UNIT ASSESSMENT COMBINED PERFORMANCE REPORT</h3>
+    <h3>COMBINED ASSESSMENT PERFORMANCE REPORT</h3>
     <table class="header-table" style="border:none">
-      <tr><td>Class: ${Utils.escapeHtml(d.className)}</td><td>Subject: ${Utils.escapeHtml(d.subjectName)}</td></tr>
-      <tr><td>Academic Year: ${Utils.escapeHtml(d.academicYear)}</td><td>Term: ${Utils.escapeHtml(d.term)}</td></tr>
-      <tr><td>Teacher: ${Utils.escapeHtml(d.teacherName)}</td><td>Report Status: ${d.isOfficial ? 'OFFICIAL / APPROVED' : 'DRAFT / WORKING'}</td></tr>
+      <tr><td>Class: ${Utils.escapeHtml(d.cls?.name || '')}</td><td>Subject: ${Utils.escapeHtml(d.sub?.name || '')}</td></tr>
+      <tr><td>Academic Year: ${Utils.escapeHtml(d.year?.name || '')}</td><td>Term: ${Utils.escapeHtml(d.term?.name || '')}</td></tr>
+      <tr><td>Teacher: ${Utils.escapeHtml(d.teacher || '')}</td><td>Report Status: ${d.isOfficial ? 'OFFICIAL / APPROVED' : 'DRAFT / WORKING'}</td></tr>
     </table>
     <br>
     <table>
@@ -733,26 +736,26 @@ function exportCombinedExcel() {
           <th>Student Number</th>
           <th>Learner Name</th>
           <th>Gender</th>
-          ${d.assessments.map(a => `<th>${Utils.escapeHtml(a.unit)} (${a.maximum_mark})</th>`).join('')}
+          ${d.assessments.map(a => `<th>${Utils.escapeHtml(a.unit || a.name)} (${a.maximum_mark})</th>`).join('')}
           <th>Total Marks</th>
           <th>Maximum Marks</th>
-          <th>Average %</th>
+          <th>${d.weighted ? 'Weighted %' : 'Average %'}</th>
           <th>Grade</th>
           <th>Result</th>
           <th>Rank</th>
         </tr>
       </thead>
       <tbody>
-        ${d.learnerRows.map((r, idx) => `
+        ${d.rows.map((r, idx) => `
           <tr>
             <td class="center">${idx + 1}</td>
             <td class="center">${Utils.escapeHtml(r.learnerCode)}</td>
             <td>${Utils.escapeHtml(r.name)}</td>
             <td class="center">${Utils.escapeHtml(r.gender)}</td>
-            ${d.assessments.map(a => `<td class="center">${r.unitMarks[a.id] === 'N/R' ? 'N/R' : r.unitMarks[a.id]}</td>`).join('')}
-            <td class="center bold">${r.totalObtained}</td>
-            <td class="center bold">${r.totalMax}</td>
-            <td class="center bold">${r.pct}%</td>
+            ${d.assessments.map((a, j) => `<td class="center">${r.units[j].hasMark ? r.units[j].mark : 'N/R'}</td>`).join('')}
+            <td class="center bold">${r.pct == null ? 'N/R' : r.obtained}</td>
+            <td class="center bold">${r.pct == null ? 'N/R' : r.denominator}</td>
+            <td class="center bold">${r.pct == null ? 'N/R' : r.pct + '%'}</td>
             <td class="center bold">${r.grade}</td>
             <td class="center ${r.pf === 'PASS' ? 'pass' : 'fail'}">${r.pf}</td>
             <td class="center bold">${r.position}</td>
@@ -763,7 +766,7 @@ function exportCombinedExcel() {
     <br><br>
     <table>
       <tr>
-        <td><strong>Prepared by:</strong> ${Utils.escapeHtml(d.teacherName)}</td>
+        <td><strong>Prepared by:</strong> ${Utils.escapeHtml(d.teacher || '')}</td>
         <td><strong>Reviewed by:</strong> ${Utils.escapeHtml(d.settings.dos_name || '')}</td>
         <td><strong>Approved by:</strong> ${Utils.escapeHtml(d.settings.headteacher_name || '')}</td>
       </tr>

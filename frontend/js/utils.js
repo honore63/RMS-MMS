@@ -8,6 +8,15 @@ const Utils = {
   },
 
   grade(pct, scale) {
+    if (!scale || !scale.length) {
+      if (pct >= 80) return 'A';
+      if (pct >= 75) return 'B';
+      if (pct >= 70) return 'C';
+      if (pct >= 65) return 'D';
+      if (pct >= 60) return 'E';
+      if (pct >= 50) return 'S';
+      return 'F';
+    }
     for (const s of scale) {
       if (pct >= s.minimum_percentage && pct <= s.maximum_percentage) return s.grade;
     }
@@ -15,14 +24,31 @@ const Utils = {
   },
 
   remark(pct, scale) {
-    for (const s of scale) {
-      if (pct >= s.minimum_percentage && pct <= s.maximum_percentage) return s.remark;
+    if (!scale || !scale.length) {
+      if (pct >= 80) return 'Excellent';
+      if (pct >= 75) return 'Very Good';
+      if (pct >= 70) return 'Good';
+      if (pct >= 65) return 'Satisfactory';
+      if (pct >= 60) return 'Adequate';
+      if (pct >= 50) return 'Minimum Pass';
+      return 'Fail';
     }
-    return 'Needs Improvement';
+    for (const s of scale) {
+      if (pct >= s.minimum_percentage && pct <= s.maximum_percentage) return s.descriptor || s.remark;
+    }
+    return 'Fail';
   },
 
   passFail(pct, passMark = 50) {
     return pct >= passMark ? 'PASS' : 'FAIL';
+  },
+
+  /** @deprecated Use GradingEngine.calculateGradeSync instead */
+  gradeInfo(pct, scale) {
+    if (typeof GradingEngine !== 'undefined') {
+      return GradingEngine.calculateGradeSync(pct, scale);
+    }
+    return { grade: this.grade(pct, scale), descriptor: this.remark(pct, scale), isPass: this.passFail(pct, 50) };
   },
 
   classStats(marks, maxMark) {

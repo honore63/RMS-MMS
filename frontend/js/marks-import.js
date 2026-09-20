@@ -118,7 +118,8 @@ const MarksImport = (() => {
       <div><div class="text-xs text-muted">Term</div><div class="text-sm font-semibold">${esc(t ? t.name : '-')}</div></div>
       <div><div class="text-xs text-muted">Class</div><div class="text-sm font-semibold">${esc(c ? c.name : '-')}</div></div>
       <div><div class="text-xs text-muted">Subject</div><div class="text-sm font-semibold">${esc(su ? su.name : '-')}</div></div>
-      <div><div class="text-xs text-muted">Unit</div><div class="text-sm font-semibold">${esc(a ? a.unit : '-')}</div></div>
+      <div><div class="text-xs text-muted">Type</div><div class="text-sm font-semibold">${esc(a ? assessmentTypeName(S.types, a.assessment_type_id, 'End-of-Unit Assessment') : '-')}</div></div>
+      <div><div class="text-xs text-muted">Unit</div><div class="text-sm font-semibold">${esc(a ? (a.unit || a.name) : '-')}</div></div>
       <div><div class="text-xs text-muted">Assessment</div><div class="text-sm font-semibold">${esc(a ? a.name : '-')}</div></div>
       <div><div class="text-xs text-muted">Maximum Mark</div><div class="text-sm font-semibold">${a ? a.maximum_mark : '-'}</div></div>
       <div><div class="text-xs text-muted">Assessed</div><div class="text-sm font-semibold">${a ? (Utils.dateStr ? Utils.dateStr(a.assessment_date) : a.assessment_date || '-') : '-'}</div></div>
@@ -580,16 +581,18 @@ const MarksImport = (() => {
     S.rows = []; S.records = []; S.filter = 'all';
     S.rosterByCode = {}; S.existingMarks = {}; S.grading = []; S.settings = {};
 
-    const [years, terms, classes, subjects] = await Promise.all([
+    const [years, terms, classes, subjects, types] = await Promise.all([
       DB.get('academic_years'),
       DB.get('terms'),
       DB.get('classes'),
-      DB.get('subjects')
+      DB.get('subjects'),
+      getAssessmentTypes()
     ]);
     S.years = years || [];
     S.terms = terms || [];
     S.classes = classes || [];
     S.subjects = subjects || [];
+    S.types = types || [];
     S.assignments = [];
     if (!S.isAdmin && S.teacherId) {
       try { S.assignments = await DB.query('teacher_assignments', '*', { teacher_id: S.teacherId }); } catch (e) { S.assignments = []; }
@@ -752,7 +755,7 @@ const MarksImport = (() => {
       if (!S.isAdmin) items = items.filter(a => a.teacher_id === S.teacherId || allowedAssignment(a));
       S._assessments = items;
       sel.innerHTML = '<option value="">Select assessment</option>' + items.map(a =>
-        `<option value="${a.id}">${esc(a.name)} - ${esc(a.unit)} (${a.maximum_mark} marks)</option>`
+        `<option value="${a.id}">${esc(a.name)} - ${esc(a.unit || a.name)} (${a.maximum_mark} marks)</option>`
       ).join('');
     }).catch(() => {
       sel.innerHTML = '<option value="">No assessments</option>';
@@ -1094,7 +1097,7 @@ const MarksImport = (() => {
     const body = `
       <p class="text-sm text-muted" style="margin-bottom:12px">You are about to save marks for the assessment below. This writes to Supabase immediately.</p>
       <div style="background:var(--gray-50);border:1px solid var(--gray-200);border-radius:var(--radius);padding:14px 16px;margin-bottom:6px">
-        <div class="flex justify-between mb-1"><span class="text-sm text-muted">Assessment</span><span class="text-sm font-semibold">${esc(S.ctx.assessment.name)} - ${esc(S.ctx.assessment.unit)}</span></div>
+        <div class="flex justify-between mb-1"><span class="text-sm text-muted">Assessment</span><span class="text-sm font-semibold">${esc(S.ctx.assessment.name)}${S.ctx.assessment.unit ? ' - ' + esc(S.ctx.assessment.unit) : ''}</span></div>
         <div class="flex justify-between mb-1"><span class="text-sm text-muted">Class / Subject</span><span class="text-sm font-semibold">${esc(S.ctx.class.name)} / ${esc(S.ctx.subject.name)}</span></div>
         <div class="flex justify-between"><span class="text-sm text-muted">Maximum Mark</span><span class="text-sm font-semibold">${S.ctx.assessment.maximum_mark}</span></div>
       </div>

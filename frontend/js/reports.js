@@ -25,14 +25,14 @@ const ReportEngine = {
   },
 
   fileName({ cls, sub, type, unit, term, year, ext }) {
-    const parts = ['RMS'];
+    const parts = ['RMS-MIS'];
     if (cls) parts.push(this.slug(cls));
     if (sub) parts.push(this.slug(sub));
     if (type) parts.push(type);
     if (unit) parts.push(this.slug(unit));
     if (term) parts.push('Term' + this.slug(term).replace(/^Term/i, ''));
     if (year) parts.push(this.slug(year));
-    return (parts.indexOf('RMS') > -1 ? parts.slice(0) : parts).join('_') + '.' + ext;
+    return parts.join('_') + '.' + ext;
   },
 
   statusPill(status, isOfficial) {
@@ -48,7 +48,7 @@ const ReportEngine = {
     el.id = 'rms-print-footer';
     el.className = 'print-page-footer';
     el.innerHTML =
-      '<span class="pf-left">Rukara Model School | End-of-Unit Assessment Management System</span>' +
+      '<span class="pf-left">RMS-MIS | Rukara Model School Marks Information System</span>' +
       '<span class="pf-mid">Generated on: ' + Utils.dateTimeStr(new Date()) + '</span>' +
       '<span class="pf-right pg"></span>';
     document.body.appendChild(el);
@@ -61,10 +61,11 @@ const ReportEngine = {
   /* ---------- Data builders ---------- */
 
   async buildSingle(assessmentId) {
-    const [marks, assessments, settings] = await Promise.all([
+    const [marks, assessments, settings, types] = await Promise.all([
       DB.query('marks', '*', { assessment_id: assessmentId }),
       DB.get('assessments'),
-      this.settings()
+      this.settings(),
+      getAssessmentTypes()
     ]);
     const assessment = assessments.find(a => a.id === assessmentId);
     if (!assessment) throw new Error('Assessment not found');
@@ -114,6 +115,11 @@ const ReportEngine = {
     const stats = this.computeStats(rows.length, assessed.map(r => r.pct), settings.pass_mark);
     const gradeDist = Utils.gradeDist(assessed.map(r => r.grade));
 
+    const typeName = assessmentTypeName(types, assessment.assessment_type_id, '');
+    const title = typeName
+      ? (typeName.toUpperCase() + ' MARKS REPORT')
+      : 'ASSESSMENT MARKS REPORT';
+
     return {
       type: 'single',
       settings,
@@ -126,11 +132,12 @@ const ReportEngine = {
       teacher: teacherRes?.full_name || '',
       status: assessment.status,
       isOfficial: ['approved', 'locked'].includes(assessment.status),
+      assessmentType: typeName || 'End-of-Unit Assessment',
       maxMark,
       rows,
       stats,
       gradeDist,
-      title: 'END-OF-UNIT ASSESSMENT MARKS REPORT',
+      title,
       orientation: 'landscape',
       generatedBy: (typeof Auth !== 'undefined' && Auth.currentUser?.full_name) || ''
     };
@@ -138,7 +145,7 @@ const ReportEngine = {
 
   async buildCombined(assessmentIds) {
     if (!assessmentIds || !assessmentIds.length) throw new Error('No assessments selected');
-    const allAssessments = await DB.get('assessments');
+    const [allAssessments, types] = await Promise.all([DB.get('assessments'), getAssessmentTypes()]);
     const assessments = allAssessments
       .filter(a => assessmentIds.includes(a.id))
       .sort((a, b) => String(a.assessment_date).localeCompare(String(b.assessment_date)) || String(a.name).localeCompare(String(b.name)));
@@ -161,6 +168,15 @@ const ReportEngine = {
       assessments[0].teacher_id ? DB.getRelated('teachers', '*', { id: assessments[0].teacher_id }).then(r => r[0]) : Promise.resolve(null)
     ]);
 
+    const typeWeightOf = a => {
+      if (a == null) return null;
+      if (a.weight != null) return Number(a.weight);
+      const t = types.find(x => x.id === a.assessment_type_id);
+      if (t && t.weight != null) return Number(t.weight);
+      return null;
+    };
+    assessments.forEach(a => { a._typeName = assessmentTypeName(types, a.assessment_type_id, 'End-of-Unit Assessment'); a._effWeight = typeWeightOf(a); });
+
     const marksByAssess = {};
     for (const a of assessments) {
       const { data, error } = await sbClient.from('marks').select('*').eq('assessment_id', a.id);
@@ -179,7 +195,9 @@ const ReportEngine = {
         const hasMark = !!(m && m.mark != null);
         return {
           assessmentId: a.id,
-          unit: a.unit,
+          unit: a.unit || a.name,
+          typeName: a._typeName,
+          weight: a._effWeight,
           max: Number(a.maximum_mark) || 0,
           mark: hasMark ? Number(m.mark) : null,
           pct: hasMark ? Utils.pct(m.mark, a.maximum_mark) : null,
@@ -187,15 +205,28 @@ const ReportEngine = {
         };
       });
       const marked = units.filter(u => u.hasMark);
-      const obtained = marked.reduce((s, u) => s + u.mark, 0);
-      const denominator = marked.reduce((s, u) => s + u.max, 0);
-      const pct = marked.length ? (obtained / denominator) * 100 : null;
+      const weighted = marked.length && marked.every(u => u.weight != null && u.weight > 0);
+      let pct = null;
+      let obtained = 0;
+      let denominator = 0;
+      if (marked.length && weighted) {
+        const num = marked.reduce((s, u) => s + (u.pct * u.weight), 0);
+        const den = marked.reduce((s, u) => s + u.weight, 0);
+        pct = den > 0 ? (num / den) : null;
+        obtained = marked.reduce((s, u) => s + u.mark, 0);
+        denominator = marked.reduce((s, u) => s + u.max, 0);
+      } else if (marked.length) {
+        obtained = marked.reduce((s, u) => s + u.mark, 0);
+        denominator = marked.reduce((s, u) => s + u.max, 0);
+        pct = denominator > 0 ? (obtained / denominator) * 100 : null;
+      }
       return {
         learnerId: l.id,
         learnerCode: l.learner_code || '-',
         name: l.full_name,
         gender: l.gender || '-',
         units,
+        weighted: pct != null && weighted,
         obtained,
         denominator,
         pct: pct == null ? null : Math.round(pct * 100) / 100,
@@ -214,8 +245,11 @@ const ReportEngine = {
     const unitAverages = assessments.map((a, i) => {
       const pcts = rows.map(r => r.units[i]).filter(u => u.hasMark).map(u => u.pct);
       return {
-        unit: a.unit,
+        unit: a.unit || a.name,
+        name: a.name,
+        typeName: a._typeName,
         max: Number(a.maximum_mark) || 0,
+        weight: a._effWeight,
         avg: pcts.length ? Math.round(pcts.reduce((x, y) => x + y, 0) / pcts.length * 100) / 100 : 0,
         count: pcts.length,
         status: a.status
@@ -223,12 +257,7 @@ const ReportEngine = {
     });
 
     const dateStrs = assessments.map(a => a.assessment_date).filter(Boolean).sort();
-    const statuses = [
-      ['approved', 'locked'],
-      ['submitted'],
-      ['rejected'],
-      ['draft']
-    ];
+    const weighted = assessments.length > 0 && assessments.every(a => a._effWeight != null && a._effWeight > 0);
 
     return {
       type: 'combined',
@@ -242,17 +271,113 @@ const ReportEngine = {
       teacher: teacherRes?.full_name || '',
       status: '',
       dateRange: dateStrs.length > 1
-        ? Utils.dateStr(dateStrs[0]) + ' — ' + Utils.dateStr(dateStrs[dateStrs.length - 1])
+        ? Utils.dateStr(dateStrs[0]) + ' - ' + Utils.dateStr(dateStrs[dateStrs.length - 1])
         : (dateStrs[0] ? Utils.dateStr(dateStrs[0]) : ''),
       isOfficial: assessments.every(a => ['approved', 'locked'].includes(a.status)),
+      weighted,
       rows,
       stats,
       gradeDist,
       unitAverages,
-      title: 'END-OF-UNIT COMBINED PERFORMANCE REPORT',
+      title: 'COMBINED ASSESSMENT PERFORMANCE REPORT',
       orientation: 'landscape',
       generatedBy: (typeof Auth !== 'undefined' && Auth.currentUser?.full_name) || ''
     };
+  },
+
+  async buildMissingMarks(assessmentIds) {
+    if (!assessmentIds || !assessmentIds.length) throw new Error('No assessments selected');
+    const [allAssessments, types] = await Promise.all([DB.get('assessments'), getAssessmentTypes()]);
+    const assessments = allAssessments.filter(a => assessmentIds.includes(a.id)).sort((a, b) => String(a.assessment_date).localeCompare(String(b.assessment_date)) || String(a.name).localeCompare(String(b.name)));
+    if (!assessments.length) throw new Error('No matching assessments found');
+
+    const classId = assessments[0].class_id;
+    const subjectId = assessments[0].subject_id;
+    if (assessments.some(a => a.class_id !== classId || a.subject_id !== subjectId)) {
+      throw new Error('All selected assessments must be for the same class and subject.');
+    }
+
+    const settings = await this.settings();
+    const [classes, subjects, years, terms, learners] = await Promise.all([
+      DB.get('classes'),
+      DB.get('subjects'),
+      DB.get('academic_years'),
+      DB.get('terms'),
+      DB.query('learners', '*', { class_id: classId, status: 'active' }, { column: 'full_name', asc: true })
+    ]);
+
+    assessments.forEach(a => { a._typeName = assessmentTypeName(types, a.assessment_type_id, 'End-of-Unit Assessment'); });
+
+    const marksByAssess = {};
+    for (const a of assessments) {
+      const { data, error } = await sbClient.from('marks').select('learner_id').eq('assessment_id', a.id);
+      if (error) throw error;
+      marksByAssess[a.id] = new Set((data || []).map(m => m.learner_id));
+    }
+
+    const rows = learners.map(l => {
+      const units = assessments.map(a => ({
+        assessmentId: a.id,
+        name: a.unit || a.name,
+        typeName: a._typeName,
+        hasMark: marksByAssess[a.id].has(l.id)
+      }));
+      return {
+        learnerId: l.id,
+        learnerCode: l.learner_code || '-',
+        name: l.full_name,
+        gender: l.gender || '-',
+        units,
+        marksCount: units.filter(u => u.hasMark).length,
+        hasAll: units.every(u => u.hasMark)
+      };
+    });
+
+    const cls = classes.find(c => c.id === classId);
+    const sub = subjects.find(s => s.id === subjectId);
+    const year = years.find(y => y.id === assessments[0].academic_year_id);
+    const term = terms.find(t => t.id === assessments[0].term_id);
+
+    return {
+      type: 'missing-marks',
+      settings,
+      cls,
+      sub,
+      year,
+      term,
+      assessments,
+      rows,
+      missing: rows.filter(r => !r.hasAll),
+      methodsEnabled: '',
+      title: 'MISSING MARKS REPORT',
+      orientation: 'landscape',
+      generatedBy: (typeof Auth !== 'undefined' && Auth.currentUser?.full_name) || ''
+    };
+  },
+
+  renderMissingMarks(data, containerId) {
+    this.current = data;
+    this.containerId = containerId || this.containerId;
+    this.ensurePrintFooter();
+
+    const div = document.getElementById(this.containerId);
+    if (!div) return;
+
+    div.innerHTML = `
+      <div class="report-preview-toolbar-flex no-print">
+        <div class="report-preview-title"><h3 style="font-size:16px;font-weight:700;color:var(--gray-800)">Report Preview</h3>
+        <p class="text-sm text-muted">${data.missing.length} of ${data.rows.length} learners missing at least one mark</p></div>
+        ${this.toolbarHtml()}
+      </div>
+      <div class="report-paper-container report-orientation-${data.orientation}">
+        ${this.dosHeaderHtml(data)}
+        ${this.dosMissingBody(data)}
+        ${this.dosSummaryHtml(data)}
+        ${this.dosSignaturesHtml(data)}
+        ${this.dosFooter(data)}
+      </div>`;
+    this.ensureIcons();
+    if (div.scrollIntoView) div.scrollIntoView({ behavior: 'smooth', block: 'start' });
   },
 
   applyRanking(rows, settings) {
@@ -425,12 +550,17 @@ const ReportEngine = {
       : data.type === 'complete-class' ? this.dosCompleteClassBody(data)
       : data.type === 'school-performance' ? this.dosSchoolPerformanceBody(data)
       : data.type === 'class-list' ? this.classListBody(data)
+      : data.type === 'missing-marks' ? this.dosMissingBody(data)
+      : (data.type === 'single' || data.type === 'combined')
+        ? this.tableHtml(data) + this.summaryHtml(data) + this.gradeDistRowsHtml(data) + (data.type === 'combined' ? this.unitPerfHtml(data) : '')
       : '';
 
     const statsInfo = data.type === 'school-performance'
     ? `<p class="text-sm text-muted">${data.subjects?.length || 0} subjects &bull; ${data.classes?.length || 0} classes</p>`
     : data.type === 'class-list'
       ? `<p class="text-sm text-muted">${data.stats?.total || 0} learners in this class</p>`
+      : data.type === 'missing-marks'
+        ? `<p class="text-sm text-muted">${data.missing?.length || 0} learner${(data.missing?.length || 0) === 1 ? '' : 's'} missing marks out of ${data.rows?.length || 0}</p>`
       : data.type !== 'learner-report'
         ? `<p class="text-sm text-muted">${data.rows?.length || 0} learners &bull; ${data.assessments?.length || 0} assessments</p>`
         : `<p class="text-sm text-muted">${data.totalSubjects != null ? data.totalSubjects + ' subjects' : ''}</p>`;
@@ -466,6 +596,15 @@ const ReportEngine = {
     };
     if (data.type === 'learner-report') {
       headerOpts.learner = data.learner;
+    } else if (data.type === 'single') {
+      headerOpts.unit = data.assessments?.[0]?.unit || data.assessments?.[0]?.name;
+      headerOpts.assessmentType = data.assessmentType || 'End-of-Unit Assessment';
+      headerOpts.date = Utils.dateStr(data.assessments?.[0]?.assessment_date);
+    } else if (data.type === 'combined' || data.type === 'missing-marks') {
+      headerOpts.assessmentsList = data.assessments;
+      headerOpts.assessmentsCount = data.assessments?.length;
+      headerOpts.totalMax = (data.assessments || []).reduce((s, a) => s + (Number(a.maximum_mark) || 0), 0);
+      headerOpts.date = data.dateRange;
     }
     const extra = data.type === 'learner-report' && data.learner
       ? `<div class="report-info-item"><span class="label">Student</span><div class="value">${Utils.escapeHtml(data.learner.full_name || '')}</div></div>
@@ -476,6 +615,19 @@ const ReportEngine = {
   },
 
   dosSummaryHtml(data) {
+    if (data.type === 'missing-marks') {
+      const total = data.rows?.length || 0;
+      const miss = data.missing?.length || 0;
+      return `
+        <div class="report-summary-section">
+          <div class="report-summary-grid report-summary-grid-4">
+            <div class="report-stat-card"><div class="val">${total}</div><div class="lbl">Total Learners</div></div>
+            <div class="report-stat-card"><div class="val">${total - miss}</div><div class="lbl">Fully Recorded</div></div>
+            <div class="report-stat-card"><div class="val">${miss}</div><div class="lbl">Missing Marks</div></div>
+            <div class="report-stat-card"><div class="val">${data.assessments?.length || 0}</div><div class="lbl">Assessments</div></div>
+          </div>
+        </div>`;
+    }
     if (data.type === 'class-list') {
       const st = data.stats || { total: 0, boys: 0, girls: 0 };
       return `
@@ -524,7 +676,7 @@ const ReportEngine = {
 
   dosFooter(data) {
     return `<div class="report-doc-footer">
-      <div>${Utils.escapeHtml(data.settings.school_name || 'Rukara Model School')} | End-of-Unit Assessment Management System</div>
+      <div>${Utils.escapeHtml(data.settings.school_name || 'Rukara Model School')} | RMS-MIS - Rukara Model School Marks Information System</div>
       <div>Generated on: ${Utils.dateTimeStr(new Date())} &bull; By: ${Utils.escapeHtml(data.generatedBy || '')}</div>
     </div>`;
   },
@@ -659,6 +811,41 @@ const ReportEngine = {
       </table>`;
   },
 
+  dosMissingBody(data) {
+    const th = data.assessments.map(a => `
+      <th class="th-unit">
+        <div class="unit-th-name">${Utils.escapeHtml(a.unit || a.name)}</div>
+        <div class="unit-th-max">${Utils.escapeHtml(a._typeName || '')}</div>
+      </th>`).join('');
+    const rows = (data.missing && data.missing.length ? data.missing : data.rows).map((d, i) => `
+      <tr>
+        <td class="text-center text-muted">${i + 1}</td>
+        <td class="col-code">${Utils.escapeHtml(d.learnerCode)}</td>
+        <td class="col-learner-name">${Utils.escapeHtml(d.name)}</td>
+        <td class="text-center">${Utils.escapeHtml(d.gender)}</td>
+        ${data.assessments.map((a, j) => {
+          const u = d.units[j];
+          return `<td class="text-center ${u && u.hasMark ? '' : 'missing-cell'}">${u && u.hasMark ? 'Y' : 'MISSING'}</td>`;
+        }).join('')}
+        <td class="text-center font-bold">${d.marksCount}/${data.assessments.length}</td>
+      </tr>`).join('');
+    return `
+      <div class="report-sub-title" style="margin:6px 0 12px">Learners missing marks for one or more selected assessments. Y = recorded.</div>
+      <div class="report-table-scroll">
+        <table class="report-marks-table compact">
+          <thead><tr>
+            <th style="width:32px">No.</th>
+            <th>Student Number</th>
+            <th class="th-left">Learner Name</th>
+            <th style="width:38px">Gen</th>
+            ${th}
+            <th>Marks</th>
+          </tr></thead>
+          <tbody>${rows || '<tr><td colspan="7" class="text-center text-nr">All learners have complete marks</td></tr>'}</tbody>
+        </table>
+      </div>`;
+  },
+
   headerHtml(data) {
     const headerOpts = {
       settings: data.settings,
@@ -672,9 +859,10 @@ const ReportEngine = {
       generatedBy: data.generatedBy || ''
     };
     if (data.type === 'single') {
-      headerOpts.unit = data.assessments[0].unit;
+      headerOpts.unit = data.assessments[0].unit || data.assessments[0].name;
+      headerOpts.assessmentType = data.assessmentType;
       headerOpts.date = Utils.dateStr(data.assessments[0].assessment_date);
-    } else if (data.type !== 'class-list') {
+    } else if (data.type !== 'class-list' && data.type !== 'missing-marks') {
       headerOpts.assessmentsList = data.assessments;
       headerOpts.assessmentsCount = data.assessments.length;
       headerOpts.totalMax = data.assessments.reduce((s, a) => s + (Number(a.maximum_mark) || 0), 0);
@@ -684,10 +872,13 @@ const ReportEngine = {
   },
 
   toolbarHtml() {
-    const back = this.containerId === 'trpt-content' ? 'showTeacherReportSelection()' : 'showAdminReportSelection()';
+    const backTarget = this.containerId === 'trpt-content' ? 'showTeacherReportSelection()' : 'showAdminReportSelection()';
+    const backBtn = ['rpt-content', 'trpt-content'].includes(this.containerId)
+      ? `<button class="btn btn-secondary" onclick="${backTarget}"><i data-lucide="arrow-left"></i> Back</button>`
+      : '';
     return `
       <div class="flex gap-2" style="flex-wrap:wrap">
-        <button class="btn btn-secondary" onclick="${back}"><i data-lucide="arrow-left"></i> Back</button>
+        ${backBtn}
         <button class="btn btn-secondary" onclick="rmsPrintReport()"><i data-lucide="printer"></i> Print</button>
         <button class="btn btn-secondary" onclick="rmsExportPdf()"><i data-lucide="file-down"></i> Export PDF</button>
         <button class="btn btn-secondary" onclick="rmsExportWord()"><i data-lucide="file-text"></i> Export Word</button>
@@ -738,12 +929,12 @@ const ReportEngine = {
           <th style="width:38px">Gen</th>
           ${data.assessments.map((a, i) => `
             <th class="th-unit">
-              <div class="unit-th-name">${Utils.escapeHtml(String(a.unit).replace(/^Unit\s*/i, 'Unit '))}</div>
+              <div class="unit-th-name">${Utils.escapeHtml(String(a.unit || a.name).replace(/^Unit\s*/i, 'Unit '))}</div>
               <div class="unit-th-max">(${Number(a.maximum_mark) || 0})</div>
             </th>`).join('')}
           <th>Total</th>
           <th>Max</th>
-          <th>Avg %</th>
+          <th>${data.weighted ? 'Weighted %' : 'Avg %'}</th>
           <th>Grade</th>
           <th>Result</th>
           <th>Rank</th>
@@ -810,14 +1001,14 @@ const ReportEngine = {
       const barClass = u.avg >= 70 ? 'green' : u.avg >= 50 ? 'amber' : 'red';
       return `
         <div class="unit-perf-row">
-          <div class="unit-perf-name">${Utils.escapeHtml(u.unit)} <span class="text-muted">(${u.max} marks)</span></div>
+          <div class="unit-perf-name">${Utils.escapeHtml(u.typeName || '')} - ${Utils.escapeHtml(u.unit)} <span class="text-muted">(${u.max} marks${u.weight != null ? ', weight ' + u.weight : ''})</span></div>
           <div class="unit-perf-track"><div class="unit-perf-fill ${barClass}" style="width:${Math.max(2, Math.min(100, pct))}%"></div></div>
           <div class="unit-perf-val">${u.count ? pct + '%' : 'N/R'}</div>
         </div>`;
     }).join('');
     return `
       <div class="report-unit-section">
-        <h4 class="report-section-title">UNIT PERFORMANCE</h4>
+        <h4 class="report-section-title">ASSESSMENT PERFORMANCE</h4>
         <p class="text-sm text-muted mb-3">Average percentage per assessment across learners with recorded marks.</p>
         ${entries}
       </div>`;
@@ -894,11 +1085,20 @@ const ReportEngine = {
   },
 
   _subjectGrade(pct, scale) {
+    if (typeof GradingEngine !== 'undefined') {
+      return GradingEngine.calculateGradeSync(pct, scale);
+    }
     for (const s of scale) { if (pct >= s.minimum_percentage && pct <= s.maximum_percentage) return { grade: s.grade, remark: s.remark }; }
     return { grade: 'F', remark: 'Needs Improvement' };
   },
 
-  _pf(pct, passMark) { return pct >= passMark ? 'PASS' : 'FAIL'; },
+  _pf(pct, passMark, scale) { 
+    if (typeof GradingEngine !== 'undefined' && scale) {
+      const info = GradingEngine.calculateGradeSync(pct, scale);
+      return info.isPass ? 'PASS' : 'FAIL';
+    }
+    return pct >= passMark ? 'PASS' : 'FAIL'; 
+  },
 
   /* --- A. Complete Learner Report (all subjects) --- */
   async buildLearnerReport(learnerId, classId, yearId, termId) {
@@ -937,7 +1137,7 @@ const ReportEngine = {
         pct: pct != null ? Math.round(pct * 100) / 100 : null,
         grade: gradeInfo.grade,
         remark: gradeInfo.remark,
-        pf: pct != null ? this._pf(pct, passMark) : 'N/R',
+        pf: pct != null ? this._pf(pct, passMark, scale) : 'N/R',
         assessments: subAssessments.map(a => {
           const mark = allMarks.marks.find(m => m.assessment_id === a.id && m.learner_id === learnerId);
           const mk = mark && mark.mark != null ? Number(mark.mark) : null;
@@ -1022,7 +1222,7 @@ const ReportEngine = {
         pct,
         grade: gradeInfo.grade,
         remark: gradeInfo.remark,
-        pf: pct != null ? this._pf(pct, passMark) : 'N/R',
+        pf: pct != null ? this._pf(pct, passMark, scale) : 'N/R',
         position: '-',
         hasMark
       };
@@ -1226,10 +1426,13 @@ const ReportEngine = {
       return this.fileName({ type: 'School_Performance', term: t, year: y, ext });
     }
     if (data.type === 'combined') {
-      return this.fileName({ cls: c, sub: data.sub?.name, type: 'Combined_EOU', term: t, year: y, ext });
+      return this.fileName({ cls: c, sub: data.sub?.name, type: 'Combined_Assessments', term: t, year: y, ext });
+    }
+    if (data.type === 'missing-marks') {
+      return this.fileName({ cls: c, sub: data.sub?.name, type: 'Missing_Marks', term: t, year: y, ext });
     }
     const a = data.assessments[0];
-    return this.fileName({ cls: c, sub: data.sub?.name, type: 'EOU', unit: a.unit, term: t, year: y, ext });
+    return this.fileName({ cls: c, sub: data.sub?.name, type: this.slug(data.assessmentType || 'End-of-Unit Assessment'), unit: a.unit || a.name, term: t, year: y, ext });
   },
 
   buildExportTable(data) {
@@ -1275,13 +1478,25 @@ const ReportEngine = {
       const body = data.subjects.map((s, i) => [i + 1, s.subjectName, s.marksCount, s.avg + '%', s.passRate + '%']);
       return { cols, body };
     }
+    if (data.type === 'missing-marks') {
+      const cols = ['No.', 'Student Number', 'Learner Name', 'Gender'];
+      data.assessments.forEach(a => cols.push((a.unit || a.name) + ' (' + (a._typeName || '') + ')'));
+      cols.push('Marks', 'Status');
+      const body = (data.missing && data.missing.length ? data.missing : data.rows).map((d, i) => {
+        const row = [i + 1, d.learnerCode, d.name, d.gender];
+        data.assessments.forEach((a, j) => row.push(d.units[j] && d.units[j].hasMark ? 'Y' : 'MISSING'));
+        row.push(d.marksCount + '/' + data.assessments.length, d.hasAll ? 'Complete' : 'Incomplete');
+        return row;
+      });
+      return { cols, body };
+    }
     const cols = ['No.', 'Student Number', 'Learner Name', 'Gender'];
     if (data.type === 'single') {
       cols.push('Mark (' + data.maxMark + ')', 'Percentage %', 'Grade', 'Result', 'Remark');
       if (data.rows.some(r => r.position !== '-')) cols.push('Rank');
     } else {
-      data.assessments.forEach((a, i) => cols.push('Unit ' + (i + 1) + ' (' + (Number(a.maximum_mark) || 0) + ')'));
-      cols.push('Total', 'Maximum', 'Average %', 'Grade', 'Result');
+      data.assessments.forEach(a => cols.push((a.unit || a.name).replace(/^Unit\s*/i, 'Unit ') + ' (' + (Number(a.maximum_mark) || 0) + ')'));
+      cols.push('Total', 'Maximum', data.weighted ? 'Weighted %' : 'Average %', 'Grade', 'Result');
       if (data.rows.some(r => r.position !== '-')) cols.push('Rank');
     }
     const body = data.rows.map((r, i) => {
@@ -1316,7 +1531,9 @@ const ReportEngine = {
 
     const infoLine = [
       data.cls?.name || '', data.sub?.name || '',
-      data.type === 'single' ? data.assessments[0]?.unit : data.type === 'combined' ? 'Combined Assessment' : data.type === 'class-list' ? 'Class List' : (data.year?.name || '') && data.term?.name ? 'Term Report' : 'Performance Report',
+      data.type === 'single' ? (data.assessmentType || '') + ' - ' + ((data.assessments[0]?.unit) || data.assessments[0]?.name)
+        : data.type === 'combined' ? 'Combined Assessment' : data.type === 'missing-marks' ? 'Missing Marks'
+        : data.type === 'class-list' ? 'Class List' : (data.year?.name || '') && data.term?.name ? 'Term Report' : 'Performance Report',
       data.year?.name || '', data.term?.name || ''
     ].filter(Boolean).join(' | ');
 
@@ -1361,8 +1578,9 @@ const ReportEngine = {
 
     if (data.type === 'combined') {
       rows.push([]);
-      rows.push(['UNIT PERFORMANCE']);
-      data.unitAverages.forEach(u => rows.push([u.unit, u.count ? this.pct(u.avg) + ' (%)' : 'N/R', u.count + ' learners']));
+      rows.push(['ASSESSMENT PERFORMANCE']);
+      data.unitAverages.forEach(u => rows.push([u.typeName + ' - ' + u.unit, u.max + ' marks', u.weight != null ? 'weight ' + u.weight : '', u.count ? this.pct(u.avg) + ' (%)' : 'N/R', u.count + ' learners']));
+      if (data.weighted) rows.push(['', '', '', 'Method: weighted average (all assessments have weights)']);
     }
 
     const ws = XLSX.utils.aoa_to_sheet(rows);
@@ -1398,7 +1616,7 @@ const ReportEngine = {
       try { ws['!views'] = [{ state: 'frozen', ySplit: headerRow, xSplit: 0 }]; } catch (e) {}
     }
 
-    const sheetName = data.type === 'combined' ? 'Combined Marks' : data.type === 'class-list' ? 'Class List' : 'Marks Report';
+    const sheetName = data.type === 'combined' ? 'Combined Marks' : data.type === 'missing-marks' ? 'Missing Marks' : data.type === 'class-list' ? 'Class List' : 'Marks Report';
     XLSX.utils.book_append_sheet(wb, ws, sheetName.slice(0, 31));
 
     // Title row styling

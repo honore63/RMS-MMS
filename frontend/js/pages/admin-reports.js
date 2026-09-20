@@ -8,6 +8,7 @@ let dosTermId = '';
 let dosClassId = '';
 let dosSubjectId = '';
 let dosLearnerId = '';
+let dosMissingTypeId = '';
 
 async function getGrading() {
   if (!gradingScaleCache) gradingScaleCache = await DB.get('grading_scales');
@@ -74,6 +75,7 @@ function schoolReportHeader(title, opts = {}) {
       ${opts.className ? `<div class="report-info-item"><span class="label">Class</span><div class="value">${Utils.escapeHtml(opts.className)}</div></div>` : ''}
       ${opts.subject ? `<div class="report-info-item"><span class="label">Subject</span><div class="value">${Utils.escapeHtml(opts.subject)}</div></div>` : ''}
       ${opts.unit ? `<div class="report-info-item"><span class="label">Unit</span><div class="value">${Utils.escapeHtml(opts.unit)}</div></div>` : ''}
+      ${opts.assessmentType ? `<div class="report-info-item"><span class="label">Assessment Type</span><div class="value">${Utils.escapeHtml(opts.assessmentType)}</div></div>` : ''}
       ${opts.teacher ? `<div class="report-info-item"><span class="label">Teacher</span><div class="value">${Utils.escapeHtml(opts.teacher)}</div></div>` : ''}
       ${opts.date ? `<div class="report-info-item"><span class="label">Assessment Date</span><div class="value">${Utils.escapeHtml(opts.date)}</div></div>` : ''}
       ${opts.totalMax ? `<div class="report-info-item"><span class="label">Total Possible Marks</span><div class="value">${opts.totalMax} Marks</div></div>` : ''}
@@ -86,13 +88,14 @@ function schoolReportHeader(title, opts = {}) {
       <div class="report-assess-tbl-title">Assessments Included</div>
       <table class="report-assess-tbl">
         <thead>
-          <tr><th style="width:44px">No.</th><th>Unit</th><th>Assessment</th><th>Max Mark</th><th>Date</th><th>Status</th></tr>
+          <tr><th style="width:44px">No.</th><th>Unit</th><th>Type</th><th>Assessment</th><th>Max Mark</th><th>Date</th><th>Status</th></tr>
         </thead>
         <tbody>
           ${opts.assessmentsList.map((a, i) => `
             <tr>
               <td class="text-center">${i + 1}</td>
-              <td class="font-semibold">${Utils.escapeHtml(a.unit)}</td>
+              <td class="font-semibold">${Utils.escapeHtml(a.unit || a.name)}</td>
+              <td>${Utils.escapeHtml(a._typeName || '-')}</td>
               <td>${Utils.escapeHtml(a.name)}</td>
               <td class="text-center">${Number(a.maximum_mark) || 0}</td>
               <td class="text-center">${a.assessment_date ? Utils.dateStr(a.assessment_date) : '-'}</td>
@@ -134,7 +137,7 @@ function schoolSignatureSection(teacherName, dosName, headTeacherName, schoolNam
       </div>
     </div>
     <div class="report-doc-footer">
-      <div>${Utils.escapeHtml(school)} | End-of-Unit Assessment Management System</div>
+      <div>${Utils.escapeHtml(school)} | RMS-MIS - Rukara Model School Marks Information System</div>
       <div>Generated on: ${Utils.dateTimeStr(new Date())}</div>
     </div>`;
 }
@@ -146,12 +149,12 @@ function resetSettingsCache() { schoolSettingsCache = null; }
    ============================================================ */
 
 const DOS_REPORT_TABS = [
+  { id: 'official', icon: 'file-badge', label: 'Official Report Cards' },
   { id: 'single', icon: 'file-text', label: 'Single Assessment' },
-  { id: 'combined', icon: 'layers', label: 'Combined EOU' },
+  { id: 'combined', icon: 'layers', label: 'Combined Assessments' },
+  { id: 'missing', icon: 'clipboard-alert', label: 'Missing Marks' },
   { id: 'class-list', icon: 'list', label: 'Class List' },
-  { id: 'student', icon: 'user-round', label: 'Student Report' },
   { id: 'class-subject', icon: 'book-open-text', label: 'Class / Subject' },
-  { id: 'complete-class', icon: 'users-round', label: 'Complete Class' },
   { id: 'school', icon: 'school', label: 'School Performance' },
   { id: 'search', icon: 'search', label: 'Student Search' }
 ];
@@ -159,8 +162,8 @@ const DOS_REPORT_TABS = [
 async function renderAdminReports() {
   setHeader('Reports', 'Generate and export assessment & performance reports');
   setContent(Utils.loading());
-  const [assessments, classes, subjects, years, terms] = await Promise.all([
-    DB.get('assessments'), DB.get('classes'), DB.get('subjects'), DB.get('academic_years'), DB.get('terms')
+  const [assessments, classes, subjects, years, terms, types] = await Promise.all([
+    DB.get('assessments'), DB.get('classes'), DB.get('subjects'), DB.get('academic_years'), DB.get('terms'), getAssessmentTypes()
   ]);
 
   const sorted = [...assessments].sort((a, b) => {
@@ -206,6 +209,7 @@ async function renderAdminReports() {
     </select></div>`;
 
   const dosCards = {
+    official: typeof getOfficialReportCardHtml === 'function' ? getOfficialReportCardHtml(years, classes, subjects, terms, termsFiltered) : '',
     'class-list': `
       <div class="card mb-6">
         <div class="card-header">
@@ -283,6 +287,31 @@ async function renderAdminReports() {
             </select></div>
         </div>
         <div id="dos-search-results"></div>
+      </div>`,
+    missing: `
+      <div class="card mb-6">
+        <div class="card-header">
+          <div><h3><i data-lucide="clipboard-alert" style="width:18px;height:18px;vertical-align:middle;margin-right:8px;color:var(--red-600)"></i>Missing Marks Report</h3>
+          <p class="text-sm text-muted mt-1">Identify learners who are missing marks for one or more selected assessments of the same Class and Subject.</p></div>
+        </div>
+        <div class="flex gap-4 items-end" style="flex-wrap:wrap">
+          ${selClass}${selSubject}
+          <div class="form-group"><label>Assessment Type (optional)</label>
+            <select id="dos-missing-type" class="select-field" onchange="dosMissingTypeChanged(this.value)">
+              <option value="">All Types</option>
+              ${types.map(t => `<option value="${t.id}" ${dosMissingTypeId === t.id ? 'selected' : ''}>${Utils.escapeHtml(t.name)}</option>`).join('')}
+            </select></div>
+        </div>
+        <div class="flex gap-2 mt-3">
+          <button class="btn btn-sm btn-outline" onclick="dosMissingSelectAll(true)"><i data-lucide="check-square"></i> Select All</button>
+          <button class="btn btn-sm btn-outline" onclick="dosMissingSelectAll(false)"><i data-lucide="square"></i> Clear</button>
+        </div>
+        <div class="form-group mt-3">
+          <label>Select Assessments</label>
+          <div class="report-cb-grid" id="dos-missing-options"></div>
+        </div>
+        <p class="text-sm text-muted mb-3">Assessments are shown for the selected class, subject and type.</p>
+        <button class="btn btn-primary" onclick="dosGenerateMissing()"><i data-lucide="clipboard-alert"></i> Generate Missing Marks Report</button>
       </div>`
   };
 
@@ -291,7 +320,7 @@ async function renderAdminReports() {
       <div class="card-header">
         <div>
           <h3><i data-lucide="file-bar-chart" style="width:18px;height:18px;vertical-align:middle;margin-right:8px;color:var(--blue-600)"></i>Single Assessment Report</h3>
-          <p class="text-sm text-muted mt-1">Generate an official report for one End-of-Unit assessment.</p>
+          <p class="text-sm text-muted mt-1">Generate an official report for one assessment of any type (quiz, assignment, End-of-Unit assessment, etc.).</p>
         </div>
       </div>
       <div class="flex gap-4 items-end" style="flex-wrap:wrap">
@@ -302,7 +331,8 @@ async function renderAdminReports() {
             ${sorted.map(a => {
               const c = classes.find(x => x.id === a.class_id);
               const s = subjects.find(x => x.id === a.subject_id);
-              return `<option value="${a.id}">${c?.name || ''} — ${s?.name || ''} — ${a.unit} (${Number(a.maximum_mark) || 0} marks)</option>`;
+              const tn = assessmentTypeName(types, a.assessment_type_id, 'End-of-Unit Assessment');
+              return `<option value="${a.id}">${c?.name || ''} — ${s?.name || ''} — ${a.unit || a.name} (${tn}, ${Number(a.maximum_mark) || 0} marks)</option>`;
             }).join('')}
           </select></div>
         </div>
@@ -314,8 +344,8 @@ async function renderAdminReports() {
     <div class="card mb-6">
       <div class="card-header" style="flex-wrap:wrap;gap:12px">
         <div>
-          <h3><i data-lucide="layers" style="width:18px;height:18px;vertical-align:middle;margin-right:8px;color:var(--blue-600)"></i>Combined End-of-Unit Report</h3>
-          <p class="text-sm text-muted mt-1">Select 2 or more assessments of the SAME Class and Subject to produce one combined report with totals, averages, grade distribution and unit performance.</p>
+          <h3><i data-lucide="layers" style="width:18px;height:18px;vertical-align:middle;margin-right:8px;color:var(--blue-600)"></i>Combined Assessment Report</h3>
+          <p class="text-sm text-muted mt-1">Select 2 or more assessments of the SAME Class and Subject to produce one combined report with totals, averages (weighted when all assessments have weights), grade distribution and per-assessment performance.</p>
         </div>
         <div class="flex gap-2">
           <button class="btn btn-sm btn-outline" onclick="setAdminCombinedAll(true)"><i data-lucide="check-square"></i> Select All</button>
@@ -328,12 +358,13 @@ async function renderAdminReports() {
           ${sorted.map(a => {
             const c = classes.find(x => x.id === a.class_id);
             const s = subjects.find(x => x.id === a.subject_id);
+            const tn = assessmentTypeName(types, a.assessment_type_id, 'End-of-Unit Assessment');
             return `
             <label class="report-cb-item">
               <input type="checkbox" class="cb-rpt" value="${a.id}" data-class="${a.class_id}" data-subject="${a.subject_id}">
               <span class="report-cb-body">
-                <span class="report-cb-title">${Utils.escapeHtml(a.unit)} &mdash; ${Utils.escapeHtml(a.name)}</span>
-                <span class="report-cb-meta">${Utils.escapeHtml(c?.name || '-')} &bull; ${Utils.escapeHtml(s?.name || '-')} &bull; ${Number(a.maximum_mark) || 0} marks ${a.assessment_date ? '&bull; ' + Utils.dateStr(a.assessment_date) : ''}</span>
+                <span class="report-cb-title">${Utils.escapeHtml(a.unit || a.name)} &mdash; ${Utils.escapeHtml(a.name)}</span>
+                <span class="report-cb-meta">${Utils.escapeHtml(c?.name || '-')} &bull; ${Utils.escapeHtml(s?.name || '-')} &bull; ${Utils.escapeHtml(tn)} &bull; ${Number(a.maximum_mark) || 0} marks ${a.assessment_date ? '&bull; ' + Utils.dateStr(a.assessment_date) : ''}</span>
               </span>
               <span class="badge ${Utils.statusColor(a.status)}"><i data-lucide="${Utils.statusIcon(a.status)}"></i> ${Utils.escapeHtml(a.status)}</span>
             </label>`;
@@ -351,6 +382,7 @@ async function renderAdminReports() {
 
   if (reportMode === 'student' && dosClassId) dosPickClass(dosClassId);
   if (reportMode === 'search') dosSearchLearners('');
+  if (reportMode === 'missing') dosRefreshMissingOptions();
 }
 
 function setAdminReportMode(m) {
@@ -407,6 +439,7 @@ async function dosPickTerm(id) { dosTermId = id; }
 
 async function dosPickClass(id) {
   dosClassId = id; dosLearnerId = '';
+  if (reportMode === 'missing') { dosRefreshMissingOptions(); return; }
   if (reportMode !== 'student') return;
   const sel = document.getElementById('dos-learner');
   if (!sel) return;
@@ -415,7 +448,56 @@ async function dosPickClass(id) {
   sel.innerHTML = '<option value="">Select Student</option>' + learners.map(l => `<option value="${l.id}">${l.learner_code} — ${Utils.escapeHtml(l.full_name)}</option>`).join('');
 }
 
-function dosPickSubject(id) { dosSubjectId = id; }
+function dosPickSubject(id) { dosSubjectId = id; if (reportMode === 'missing') dosRefreshMissingOptions(); }
+
+async function dosRefreshMissingOptions() {
+  const box = document.getElementById('dos-missing-options');
+  if (!box) return;
+  const kept = new Set(Array.from(document.querySelectorAll('.dos-cb-miss:checked')).map(n => n.value));
+  const [assessments, types] = await Promise.all([DB.get('assessments'), getAssessmentTypes()]);
+  const list = assessments
+    .filter(a => !dosClassId || a.class_id === dosClassId)
+    .filter(a => !dosSubjectId || a.subject_id === dosSubjectId)
+    .filter(a => !dosMissingTypeId || a.assessment_type_id === dosMissingTypeId)
+    .sort((a, b) => String(a.assessment_date).localeCompare(String(b.assessment_date)) || String(a.name).localeCompare(String(b.name)));
+  if (!list.length) {
+    box.innerHTML = '<p class="text-sm text-muted" style="padding:12px 0">No assessments match the current filters. Choose a class, subject, or assessment type.</p>';
+    return;
+  }
+  box.innerHTML = list.map(a => {
+    const tn = assessmentTypeName(types, a.assessment_type_id, 'End-of-Unit Assessment');
+    return `
+    <label class="report-cb-item">
+      <input type="checkbox" class="dos-cb-miss" value="${a.id}" ${kept.has(a.id) ? 'checked' : ''}>
+      <span class="report-cb-body">
+        <span class="report-cb-title">${Utils.escapeHtml(a.unit || a.name)} &mdash; ${Utils.escapeHtml(a.name)}</span>
+        <span class="report-cb-meta">${Utils.escapeHtml(tn)} &bull; ${Number(a.maximum_mark) || 0} marks ${a.assessment_date ? '&bull; ' + Utils.dateStr(a.assessment_date) : ''}</span>
+      </span>
+      <span class="badge ${Utils.statusColor(a.status)}"><i data-lucide="${Utils.statusIcon(a.status)}"></i> ${Utils.escapeHtml(a.status)}</span>
+    </label>`;
+  }).join('');
+  if (typeof lucide !== 'undefined') lucide.createIcons();
+}
+
+function dosMissingTypeChanged(id) { dosMissingTypeId = id; dosRefreshMissingOptions(); }
+
+function dosMissingSelectAll(checked) {
+  document.querySelectorAll('.dos-cb-miss').forEach(cb => cb.checked = checked);
+}
+
+async function dosGenerateMissing() {
+  const selected = Array.from(document.querySelectorAll('.dos-cb-miss:checked')).map(n => n.value);
+  if (!selected.length) return Utils.toast('Select at least 1 assessment', 'error');
+  const rptDiv = document.getElementById('rpt-content');
+  rptDiv.innerHTML = Utils.loading();
+  try {
+    const data = await ReportEngine.buildMissingMarks(selected);
+    ReportEngine.renderMissingMarks(data, 'rpt-content');
+  } catch (e) {
+    rptDiv.innerHTML = '';
+    Utils.toast(e.message || 'Error generating report', 'error');
+  }
+}
 
 /* ---------- DOS report generators ---------- */
 
@@ -537,148 +619,6 @@ function showAdminReportSelection() {
   renderAdminReports();
 }
 
-
-/* ============================================================
-   ANALYTICS
-   ============================================================ */
-
-async function renderAnalytics() {
-  setHeader('Analytics', 'Performance analytics and insights');
-  setContent(Utils.loading());
-  const [assessments, classes, subjects, marks, learners] = await Promise.all([
-    DB.get('assessments'), DB.get('classes'), DB.get('subjects'), DB.get('marks'), DB.get('learners')
-  ]);
-  const scale = await getGrading();
-  const settings = await getSchoolSettings();
-
-  const approvedIds = new Set(assessments.filter(a => a.status === 'approved' || a.status === 'locked').map(a => a.id));
-  const approvedMarks = marks.filter(m => approvedIds.has(m.assessment_id));
-  const allPcts = [];
-  const classStats = {};
-  const subjectStats = {};
-  for (const a of assessments) {
-    const cls = classes.find(c => c.id === a.class_id);
-    const sub = subjects.find(s => s.id === a.subject_id);
-    const clsName = cls?.name || 'Unknown';
-    const subName = sub?.name || 'Unknown';
-    if (!classStats[clsName]) classStats[clsName] = [];
-    if (!subjectStats[subName]) subjectStats[subName] = [];
-    const aMarks = marks.filter(m => m.assessment_id === a.id && m.mark != null);
-    for (const m of aMarks) {
-      const pct = Utils.pct(m.mark, a.maximum_mark);
-      classStats[clsName].push(pct);
-      subjectStats[subName].push(pct);
-      allPcts.push(pct);
-    }
-  }
-  const passMark = settings.pass_mark || 50;
-  const overallAvg = allPcts.length ? Math.round(allPcts.reduce((a, b) => a + b, 0) / allPcts.length * 100) / 100 : 0;
-  const overallPassRate = allPcts.length ? Math.round(allPcts.filter(p => p >= passMark).length / allPcts.length * 10000) / 100 : 0;
-
-  const subjectAveraged = Object.entries(subjectStats).map(([name, pcts]) => ({
-    name,
-    avg: pcts.length ? Math.round(pcts.reduce((a, b) => a + b, 0) / pcts.length * 100) / 100 : 0,
-    count: pcts.length,
-    passRate: pcts.length ? Math.round(pcts.filter(p => p >= passMark).length / pcts.length * 100) : 0
-  }));
-  const classAveraged = Object.entries(classStats).map(([name, pcts]) => ({
-    name,
-    avg: pcts.length ? Math.round(pcts.reduce((a, b) => a + b, 0) / pcts.length * 100) / 100 : 0,
-    count: pcts.length,
-    passRate: pcts.length ? Math.round(pcts.filter(p => p >= passMark).length / pcts.length * 100) : 0
-  }));
-
-  const topSubjects = subjectAveraged.filter(s => s.count > 0).sort((a, b) => b.avg - a.avg).slice(0, 5);
-  const bottomSubjects = subjectAveraged.filter(s => s.count > 0).sort((a, b) => a.avg - b.avg).slice(0, 5);
-  const topClasses = classAveraged.filter(c => c.count > 0).sort((a, b) => b.avg - a.avg).slice(0, 5);
-  const bottomClasses = classAveraged.filter(c => c.count > 0).sort((a, b) => a.avg - b.avg).slice(0, 5);
-
-  const classRows = classAveraged.map(({ name, avg, count }) => {
-    const pass = classStats[name].filter(p => p >= passMark).length;
-    const barClass = avg >= 70 ? 'green' : avg >= 50 ? 'amber' : 'red';
-    return `<tr><td class="col-name">${Utils.escapeHtml(name)}</td><td>${count}</td><td class="font-semibold">${avg}%</td>
-      <td>${count ? Math.max(...classStats[name]) : 0}%</td><td>${count ? Math.min(...classStats[name]) : 0}%</td>
-      <td>${count ? Math.round(pass / count * 100) : 0}%</td>
-      <td style="width:200px"><div class="progress-bar"><div class="progress-bar-fill ${barClass}" style="width:${avg}%"></div></div></td></tr>`;
-  }).join('');
-
-  const subRows = subjectAveraged.map(({ name, avg, count }) => {
-    const pass = subjectStats[name].filter(p => p >= passMark).length;
-    const barClass = avg >= 70 ? 'green' : avg >= 50 ? 'amber' : 'red';
-    return `<tr><td class="col-name">${Utils.escapeHtml(name)}</td><td>${count}</td><td class="font-semibold">${avg}%</td>
-      <td>${count ? Math.round(pass / count * 100) : 0}%</td>
-      <td style="width:200px"><div class="progress-bar"><div class="progress-bar-fill ${barClass}" style="width:${avg}%"></div></div></td></tr>`;
-  }).join('');
-
-  const miniTable = (label, items) => items.length ? `<div class="card mb-6">
-    <div class="card-header"><h3><i data-lucide="trending-up" style="width:18px;height:18px;vertical-align:middle;margin-right:8px;color:var(--green-600)"></i>${label}</h3></div>
-    <div class="table-container"><table class="data-table"><thead><tr><th>#</th><th>Name</th><th>Marks</th><th>Average</th><th>Pass Rate</th></tr></thead>
-    <tbody>${items.map((x, i) => `<tr><td>${i + 1}</td><td class="col-name">${Utils.escapeHtml(x.name)}</td><td>${x.count}</td><td class="font-semibold">${x.avg}%</td><td>${x.passRate}%</td></tr>`).join('')}</tbody></table></div></div>` : '';
-
-  setContent(`
-    <div class="grid-4 mb-6">
-      <div class="stat-card">
-        <div class="stat-icon" style="background:var(--blue-50);color:var(--blue-600)"><i data-lucide="users-round"></i></div>
-        <div class="stat-value">${learners.filter(l => l.status === 'active').length}</div>
-        <div class="stat-label">Active Learners</div>
-      </div>
-      <div class="stat-card">
-        <div class="stat-icon" style="background:var(--green-50);color:var(--green-600)"><i data-lucide="school"></i></div>
-        <div class="stat-value">${classes.length}</div>
-        <div class="stat-label">Classes</div>
-      </div>
-      <div class="stat-card">
-        <div class="stat-icon" style="background:var(--purple-50);color:var(--purple-600)"><i data-lucide="book-open"></i></div>
-        <div class="stat-value">${subjects.length}</div>
-        <div class="stat-label">Subjects</div>
-      </div>
-      <div class="stat-card">
-        <div class="stat-icon" style="background:var(--amber-50);color:var(--amber-600)"><i data-lucide="clipboard-check"></i></div>
-        <div class="stat-value">${assessments.filter(a => a.status === 'approved' || a.status === 'locked').length}</div>
-        <div class="stat-label">Approved Assessments</div>
-      </div>
-    </div>
-    <div class="grid-4 mb-6">
-      <div class="stat-card">
-        <div class="stat-icon" style="background:var(--blue-50);color:var(--blue-600)"><i data-lucide="calculator"></i></div>
-        <div class="stat-value">${marks.length}</div>
-        <div class="stat-label">Marks Entered</div>
-      </div>
-      <div class="stat-card">
-        <div class="stat-icon" style="background:var(--green-50);color:var(--green-600)"><i data-lucide="percent"></i></div>
-        <div class="stat-value">${overallAvg}%</div>
-        <div class="stat-label">School Average</div>
-      </div>
-      <div class="stat-card">
-        <div class="stat-icon" style="background:var(--green-50);color:var(--green-600)"><i data-lucide="badge-check"></i></div>
-        <div class="stat-value">${overallPassRate}%</div>
-        <div class="stat-label">Overall Pass Rate</div>
-      </div>
-      <div class="stat-card">
-        <div class="stat-icon" style="background:var(--red-50);color:var(--red-600)"><i data-lucide="alert-triangle"></i></div>
-        <div class="stat-value">${assessments.filter(a => a.status === 'rejected').length}</div>
-        <div class="stat-label">Rejected Assessments</div>
-      </div>
-    </div>
-    <div class="grid-2 mb-6">
-      ${miniTable('Top Performing Subjects', topSubjects)}
-      ${miniTable('Lowest Performing Subjects', bottomSubjects)}
-    </div>
-    <div class="grid-2 mb-6">
-      ${miniTable('Top Performing Classes', topClasses)}
-      ${miniTable('Classes Needing Support', bottomClasses)}
-    </div>
-    <div class="card mb-6">
-      <div class="card-header"><h3><i data-lucide="school" style="width:18px;height:18px;vertical-align:middle;margin-right:8px;color:var(--blue-600)"></i>Performance by Class</h3></div>
-      <div class="table-container"><table class="data-table"><thead><tr><th>Class</th><th>Marks</th><th>Average</th><th>Highest</th><th>Lowest</th><th>Pass Rate</th><th>Progress</th></tr></thead>
-      <tbody>${classRows || `<tr><td colspan="7">${Utils.empty('No data', 'bar-chart')}</td></tr>`}</tbody></table></div>
-    </div>
-    <div class="card">
-      <div class="card-header"><h3><i data-lucide="book-marked" style="width:18px;height:18px;vertical-align:middle;margin-right:8px;color:var(--green-600)"></i>Performance by Subject</h3></div>
-      <div class="table-container"><table class="data-table"><thead><tr><th>Subject</th><th>Marks</th><th>Average</th><th>Pass Rate</th><th>Progress</th></tr></thead>
-      <tbody>${subRows || `<tr><td colspan="5">${Utils.empty('No data', 'book-open')}</td></tr>`}</tbody></table></div>
-    </div>`);
-}
 
 /* ============================================================
    AUDIT LOGS
@@ -812,15 +752,10 @@ async function renderSettings() {
   }
 
   if (settingsTab === 'grading') {
-    tabContent = `
-      <div class="card">
-        <div class="card-header">
-          <h3><i data-lucide="graduation-cap" style="width:18px;height:18px;vertical-align:middle;margin-right:8px;color:var(--amber-600)"></i>Grading Scale</h3>
-          <button class="btn btn-sm btn-secondary" onclick="addGradeRow()"><i data-lucide="plus"></i> Add Grade</button>
-        </div>
-        <div class="table-container"><table class="data-table"><thead><tr><th>Min %</th><th>Max %</th><th>Grade</th><th>Remark</th><th>Action</th></tr></thead>
-        <tbody id="grade-tbody">${gradeRows}</tbody></table></div>
-      </div>`;
+    tabContent = renderGradingContent ? renderGradingContent() : '<div class="card"><div class="card-body text-center"><i data-lucide="loader" class="spin" style="width:24px;height:24px;color:var(--blue-600);margin:0 auto 12px"></i><p>Loading grading system...</p></div></div>';
+    if (typeof renderGradingTab === 'function') {
+      setTimeout(() => renderGradingTab(), 0);
+    }
   }
 
   setContent(`
@@ -891,11 +826,12 @@ function previewReportHeader() {
     const s = data[0] || {};
     Modal.show('Report Header Preview', `
       <div style="background:#fff;padding:24px;border:1px solid var(--gray-200);border-radius:var(--radius)">
-        ${schoolReportHeader('END-OF-UNIT ASSESSMENT MARKS REPORT', {
+        ${schoolReportHeader('ASSESSMENT MARKS REPORT', {
           settings: s,
           className: 'P4A',
           subject: 'Mathematics',
-          unit: 'Unit 4 â€” Fractions',
+          unit: 'Unit 4: Fractions',
+          assessmentType: 'End-of-Unit Assessment',
           academicYear: '2026/2027',
           term: 'Term 1',
           date: '06 September 2026'

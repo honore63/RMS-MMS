@@ -70,7 +70,14 @@ async function loadLoginBranding() {
   const schoolName = settings.school_name || 'Rukara Model School';
 
   const nameEl = document.getElementById('login-school-name');
-  if (nameEl) nameEl.textContent = schoolName;
+  let nameLine = document.getElementById('login-school-name-line');
+  if (!nameLine && nameEl) {
+    nameLine = document.createElement('p');
+    nameLine.id = 'login-school-name-line';
+    nameLine.className = 'login-brand-subtitle';
+    nameEl.insertAdjacentElement('afterend', nameLine);
+  }
+  if (nameLine) nameLine.textContent = (schoolName && schoolName !== 'RMS-MIS') ? schoolName : 'Rukara Model School Marks Information System';
 
   const mottoEl = document.getElementById('login-brand-motto');
   if (mottoEl) mottoEl.textContent = settings.school_motto || 'Education, Work & Success';
@@ -379,11 +386,12 @@ function registerRoutes() {
   Router.register('admin/learners', renderLearners);
   Router.register('admin/assignments', renderAssignments);
   Router.register('admin/assessments', renderAssessments);
+  Router.register('admin/assessment-types', renderAssessmentTypes);
   Router.register('admin/marks', renderAdminMarks);
-  Router.register('admin/import-marks', () => { setHeader('Import Marks', 'Bulk import learner marks from Excel, CSV, Word or PDF'); MarksImport.open(); });
   Router.register('admin/import-history', renderImportHistory);
   Router.register('admin/reports', renderAdminReports);
   Router.register('admin/analytics', renderAnalytics);
+  Router.register('admin/post-assessment-reports', renderPostAssessmentReports);
   Router.register('admin/audit-logs', renderAuditLogs);
   Router.register('admin/documents', renderDocuments);
   Router.register('admin/settings', renderSettings);
@@ -395,6 +403,8 @@ function registerRoutes() {
   Router.register('teacher/import-marks', () => { setHeader('Import Marks', 'Bulk import learner marks from Excel, CSV, Word or PDF'); MarksImport.open(); });
   Router.register('teacher/submitted-marks', renderSubmittedMarks);
   Router.register('teacher/reports', renderTeacherReports);
+  Router.register('teacher/analytics', renderTeacherAnalytics);
+  Router.register('teacher/post-assessment-reports', renderPostAssessmentReports);
   Router.register('teacher/notifications', renderNotifications);
   Router.register('teacher/account', renderTeacherAccount);
 }

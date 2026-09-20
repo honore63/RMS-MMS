@@ -1,6 +1,6 @@
-# RMS End-of-Unit Assessment Management System
+# RMS-MIS – Rukara Model School Marks Information System
 
-## Rukara Model School — End-of-Unit Assessment Marks Management System
+## Rukara Model School Marks Information System (RMS-MIS)
 
 A professional, secure, responsive web-based marks management system built with **HTML + CSS + JavaScript + Supabase**.
 
@@ -44,6 +44,7 @@ rms-eua/
 │   │       ├── admin-learners.js    # Learner management
 │   │       ├── admin-assignments.js # Teacher assignments
 │   │       ├── admin-assessments.js # Assessment CRUD + workflow
+│   │       ├── admin-assessment-types.js # Assessment type management (DOS)
 │   │       ├── admin-marks.js       # View all marks
 │   │       ├── admin-reports.js     # Reports, analytics, audit, settings
 │   │       ├── teacher-pages.js     # Teacher dashboard, classes, subjects, etc.
@@ -76,6 +77,9 @@ rms-eua/
    - `rms-full-setup.sql` (schema + RLS + defaults) — or `database.sql` + `migration-*.sql` individually
    - `migration-documents.sql` (Documents page — table + storage bucket)
    - `migration-academic-year-management.sql` (Academic Year Management)
+   - `migration-marks-import.sql` (Marks Excel import)
+   - `migration-rms-mis-assessment-flexibility.sql` (configurable assessment types + flexible assessments)
+   - `migration-rms-mis-rls.sql` (scoped Row Level Security for types/assessments/teacher assignments)
    - `seed-data.sql` (optional sample data)
 
 See `backend/README.md` for full details.
@@ -120,8 +124,9 @@ Open http://localhost:8000
 - Add/edit/deactivate teachers and learners (manual + Excel import)
 - Assign teachers to classes and subjects
 - Create, approve, reject, lock, reopen assessments
-- View all marks across the system
-- Generate reports with print support
+- Manage configurable assessment types (quiz, assignment, EOU, exam, ...) with weights and contribution settings
+- View all marks across the system (filter by assessment type)
+- Generate reports with print support (single, combined/weighted, missing-marks, class, student, school-wide)
 - Analytics by class and subject
 - Audit log tracking
 - Configurable grading scale and settings (incl. assessment roster policy)
@@ -141,6 +146,7 @@ Open http://localhost:8000
 - Teachers can only access their own assigned assessments
 - DOS has full system access
 - Audit trail for all modifications
+- Flexible assessments & report types are filtered per-role through scoped RLS policies
 
 ---
 

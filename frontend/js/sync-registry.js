@@ -17,10 +17,12 @@
   Realtime.route('admin/teachers', ['teachers', 'users', 'classes']);
   Realtime.route('admin/learners', ['learners', 'classes']);
   Realtime.route('admin/assignments', ['teacher_assignments', 'teachers', 'classes', 'subjects', 'academic_years', 'terms']);
-  Realtime.route('admin/assessments', ['assessments', 'teacher_assignments', 'marks', 'teachers', 'academic_years', 'terms']);
-  Realtime.route('admin/marks', ['assessments', 'marks', 'learners', 'teachers', 'classes']);
-  Realtime.route('admin/reports', ['assessments', 'marks', 'learners', 'classes', 'subjects', 'academic_years', 'terms', 'school_settings', 'grading_scales']);
+  Realtime.route('admin/assessments', ['assessments', 'assessment_types', 'teacher_assignments', 'marks', 'teachers', 'academic_years', 'terms']);
+  Realtime.route('admin/assessment-types', ['assessment_types', 'assessments']);
+  Realtime.route('admin/marks', ['assessments', 'assessment_types', 'marks', 'learners', 'teachers', 'classes']);
+  Realtime.route('admin/reports', ['assessments', 'assessment_types', 'marks', 'learners', 'classes', 'subjects', 'academic_years', 'terms', 'school_settings', 'grading_scales']);
   Realtime.route('admin/analytics', ['assessments', 'marks', 'learners', 'classes', 'subjects', 'grading_scales']);
+  Realtime.route('admin/post-assessment-reports', ['assessments', 'assessment_types', 'marks', 'learners', 'classes', 'subjects', 'academic_years', 'terms', 'school_settings', 'grading_scales']);
   Realtime.route('admin/audit-logs', ['audit_logs']);
   Realtime.route('admin/documents', ['documents']);
   Realtime.route('admin/settings', ['school_settings', 'grading_scales']);
@@ -37,6 +39,8 @@
   });
 
   Realtime.route('teacher/reports', ['assessments', 'marks', 'learners', 'school_settings', 'grading_scales']);
+  Realtime.route('teacher/analytics', ['assessments', 'assessment_types', 'marks', 'learners', 'classes', 'subjects', 'teacher_assignments', 'academic_years', 'terms', 'school_settings', 'grading_scales']);
+  Realtime.route('teacher/post-assessment-reports', ['assessments', 'assessment_types', 'marks', 'learners', 'classes', 'subjects', 'teacher_assignments', 'academic_years', 'terms', 'school_settings', 'grading_scales']);
   Realtime.route('teacher/notifications', ['notifications']);
 
   /* ---------- Targeted in-place updates ---------- */
@@ -45,6 +49,9 @@
      so reports always regenerate from fresh Supabase data. */
   Realtime.on('school_settings', () => { schoolSettingsCache = null; });
   Realtime.on('grading_scales', () => { gradingScaleCache = null; });
+
+  /* Assessment type changes invalidate the shared types cache. */
+  Realtime.on('assessment_types', () => { if (typeof assessmentTypesCache !== 'undefined') assessmentTypesCache = null; });
 
   /* While inside the marks entry screen, if the open assessment's
      status changes from another user/device (submitted -> approved,

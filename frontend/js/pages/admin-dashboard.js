@@ -35,7 +35,7 @@ async function renderAdminDashboard() {
     const actions = [
       { icon: 'user-plus', bg: 'var(--blue-50)', color: 'var(--blue-600)', title: 'Register Learner', desc: 'Add a new learner to RMS', route: 'admin/learners' },
       { icon: 'file-up', bg: 'var(--green-50)', color: 'var(--green-600)', title: 'Import Learners', desc: 'Bulk import from a spreadsheet', route: 'admin/learners' },
-      { icon: 'clipboard-plus', bg: 'var(--amber-50)', color: 'var(--amber-600)', title: 'Create Assessment', desc: 'Start a new unit assessment', route: 'admin/assessments' },
+      { icon: 'clipboard-plus', bg: 'var(--amber-50)', color: 'var(--amber-600)', title: 'Create Assessment', desc: 'Start a new assessment (quiz, EOU, etc.)', route: 'admin/assessments' },
       { icon: 'calculator', bg: 'var(--blue-50)', color: 'var(--blue-600)', title: 'Enter Marks', desc: 'Record marks for a class', route: 'admin/marks' },
       { icon: 'graduation-cap', bg: 'var(--green-50)', color: 'var(--green-600)', title: 'Manage Teachers', desc: 'Add and manage teaching staff', route: 'admin/teachers' },
       { icon: 'school', bg: 'var(--amber-50)', color: 'var(--amber-600)', title: 'Manage Classes', desc: 'Set up classes and subjects', route: 'admin/academic' },

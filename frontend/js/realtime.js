@@ -32,6 +32,7 @@ const Realtime = {
     'terms',
     'teacher_assignments',
     'assessments',
+    'assessment_types',
     'marks',
     'grading_scales',
     'school_settings',
