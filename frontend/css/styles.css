@@ -605,16 +605,18 @@ select {
   transition: margin-left 240ms ease;
 }
 .app-header {
-  height: var(--header-h);
-  padding: 0 32px;
-  background: #fff;
-  border-bottom: 1px solid var(--gray-200);
-  position: sticky;
-  top: 0;
-  z-index: 30;
-  display: flex;
-  align-items: center;
-}
+   height: var(--header-h);
+   padding: 0 32px;
+   background: #fff;
+   border-bottom: 1px solid var(--gray-200);
+   position: fixed;
+   top: 0;
+   left: var(--sidebar-w);
+   right: 0;
+   z-index: 30;
+   display: flex;
+   align-items: center;
+ }
 .app-header .header-left {
   display: flex;
   align-items: center;
@@ -643,9 +645,10 @@ select {
 .mobile-toggle:hover { background: var(--gray-100); }
 .mobile-toggle i { font-size: 20px; }
 .main-content {
-  padding: 32px;
-  flex: 1;
-}
+   padding: 32px;
+   padding-top: calc(var(--header-h) + 32px);
+   flex: 1;
+ }
 
 /* ============================================================
    SIDEBAR CONTROL
@@ -690,8 +693,9 @@ select {
     visibility: hidden;
     transition: transform 240ms ease, visibility 0s linear 240ms;
   }
-  .app-layout.sidebar-hidden .main-wrapper { margin-left: 0; }
-}
+.app-layout.sidebar-hidden .main-wrapper { margin-left: 0; }
+  .app-layout.sidebar-hidden .app-header { left: 0; }
+ }
 
 /* ============================================================
    CARD DESIGN SYSTEM
@@ -1476,7 +1480,7 @@ select {
 @media (max-width: 1024px) {
    .grid-3 { grid-template-columns: repeat(2, 1fr); }
    .form-row-3 { grid-template-columns: 1fr 1fr; }
-   .main-content { padding: 20px; }
+   .main-content { padding: 20px; padding-top: calc(var(--header-h) + 20px); }
    .stat-card .stat-value { font-size: 24px; }
  }
 @media (max-width: 768px) {
@@ -1489,9 +1493,9 @@ select {
   }
   .sidebar-toggle { display: flex; }
   .mobile-toggle { display: flex; }
-  .main-wrapper { margin-left: 0; }
-  .main-content { padding: 16px; }
-  .app-header { padding: 0 16px; }
+   .main-wrapper { margin-left: 0; }
+   .main-content { padding: 16px; padding-top: calc(var(--header-h) + 16px); }
+   .app-header { padding: 0 16px; left: 0; }
   .grid-4, .grid-3, .grid-2, .card-grid { grid-template-columns: 1fr; }
   .form-row, .form-row-3 { grid-template-columns: 1fr; }
   .filter-bar { flex-direction: column; }
