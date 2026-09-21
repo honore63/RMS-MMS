@@ -16,8 +16,7 @@ ALTER TABLE public.grading_scales
   ADD COLUMN IF NOT EXISTS display_order INTEGER NOT NULL DEFAULT 0,
   ADD COLUMN IF NOT EXISTS is_active BOOLEAN NOT NULL DEFAULT TRUE;
 
--- Add constraints to prevent invalid/overlapping ranges
--- We need a way to validate ranges - create a function for this
+-- Add CHECK constraint for valid ranges
 DO $$
 BEGIN
   IF NOT EXISTS (
@@ -28,7 +27,22 @@ BEGIN
       ADD CONSTRAINT grading_scales_valid_range
       CHECK (minimum_percentage >= 0 AND maximum_percentage <= 100 AND minimum_percentage <= maximum_percentage);
   END IF;
+END $$;
 
+-- Create index for active scales ordered by display_order
+CREATE INDEX IF NOT EXISTS idx_grading_scales_active_order
+  ON public.grading_scales (is_active, display_order);
+
+-- ------------------------------------------------------------
+-- 2) CLEAR EXISTING DATA (must run before unique constraint)
+-- ------------------------------------------------------------
+DELETE FROM public.grading_scales;
+
+-- ------------------------------------------------------------
+-- 3) ADD UNIQUE CONSTRAINT ON GRADE (after data cleared)
+-- ------------------------------------------------------------
+DO $$
+BEGIN
   IF NOT EXISTS (
     SELECT 1 FROM pg_constraint
     WHERE conname = 'grading_scales_unique_grade'
@@ -39,16 +53,9 @@ BEGIN
   END IF;
 END $$;
 
--- Create index for active scales ordered by display_order
-CREATE INDEX IF NOT EXISTS idx_grading_scales_active_order
-  ON public.grading_scales (is_active, display_order);
-
 -- ------------------------------------------------------------
--- 2) SEED OFFICIAL RMS-MIS GRADING CONFIGURATION
+-- 4) SEED OFFICIAL RMS-MIS GRADING CONFIGURATION
 -- ------------------------------------------------------------
--- Clear existing and insert the official configuration
-DELETE FROM public.grading_scales;
-
 INSERT INTO public.grading_scales
   (minimum_percentage, maximum_percentage, grade, descriptor, remark, comment, is_pass, display_order, is_active)
 VALUES
@@ -75,7 +82,7 @@ VALUES
    FALSE, 7, TRUE);
 
 -- ------------------------------------------------------------
--- 3) VERIFICATION QUERIES
+-- 5) VERIFICATION QUERIES
 -- ------------------------------------------------------------
 -- Verify table structure
 SELECT column_name, data_type, is_nullable, column_default
@@ -107,6 +114,6 @@ WHERE gs1.is_active = TRUE AND gs2.is_active = TRUE
   AND gs1.maximum_percentage >= gs2.minimum_percentage;
 
 -- ------------------------------------------------------------
--- 4) NOTIFY POSTGREST TO RELOAD SCHEMA
+-- 6) NOTIFY POSTGREST TO RELOAD SCHEMA
 -- ------------------------------------------------------------
 NOTIFY pgrst, 'reload schema';
