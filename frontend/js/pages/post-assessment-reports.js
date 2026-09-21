@@ -1,9 +1,10 @@
 /* ============================================================
    POST-ASSESSMENT TEACHER REPORTS
+   0. Overview Report
    1. Subject Performance Report
    2. Performance Range Report
-   3. Students Requiring Academic Support
-   4. Grade Distribution Report
+   3. Grade Distribution Report
+   4. Students Requiring Additional Support
    5. Assessment Analysis & Comparison Report
 
    All figures are computed live from the RMS-MIS database using
@@ -17,9 +18,14 @@
 function renderPostAssessmentReports() { psrRefresh(); }
 
 let psrState = {
-  yearId: '', termId: 'all', classId: 'all', subjectId: 'all', typeId: 'all',
-  assessmentId: 'all', report: '1', cmp: {}
+  yearId: '', termId: 'all', levelId: 'all', classId: 'all', stream: 'all',
+  subjectId: 'all', teacherId: 'all', typeId: 'all', assessmentId: 'all',
+  studentId: 'all', studentIds: [], report: '0', cmp: {},
+  reportScope: 'subject', schoolMode: 'all', schoolClassIds: [], schoolLevel: 'all', schoolStream: 'all',
+  rangeView: 'count', rangeFocus: ''
 };
+let psrPages = {};
+let psrPrintAll = false;
 let psrRaw = null;
 let psrData = null;
 let psrCtx = null;
@@ -33,6 +39,7 @@ function psrIsTeacher() {
 
 const PStr = {
   esc(v) { return Utils.escapeHtml(v == null ? '' : String(v)); },
+  escAttr(v) { return String(v == null ? '' : v).replace(/"/g, '&quot;'); },
   num(x) { return (x == null || isNaN(x)) ? 0 : Number(x); },
   round(x, d) { const p = Math.pow(10, d == null ? 1 : d); return Math.round(PStr.num(x) * p) / p; },
   fmt(x) { return x == null || isNaN(x) ? 'N/A' : PStr.round(x) + '%'; }
@@ -45,6 +52,272 @@ function psrTeacherName(ctx) {
     if (prof && prof.full_name) return prof.full_name;
   }
   return (Auth.currentUser && Auth.currentUser.full_name) || 'RMS-MIS';
+}
+
+/* ============================================================
+   Three report scopes: Subject / Class / School
+   Tab ids: 0 Overview, 1 Performance Range, 2 Subject Performance,
+   3 Class Performance, 4 School Performance, 5 Student Details
+   ============================================================ */
+
+const psrTabMeta = {
+  '0': { icon: 'layout-dashboard', label: 'Overview' },
+  '1': { icon: 'bar-chart-3', label: 'Performance Range' },
+  '2': { icon: 'book-open', label: 'Subject Performance' },
+  '3': { icon: 'school', label: 'Class Performance' },
+  '4': { icon: 'building-2', label: 'School Performance' },
+  '5': { icon: 'users-round', label: 'Student Details' }
+};
+const psrTabSets = {
+  subject: ['0', '1', '2', '5'],
+  class: ['0', '1', '2', '3', '5'],
+  school: ['0', '1', '2', '3', '4', '5']
+};
+
+function psrTabsFor() {
+  return psrTabSets[psrState.reportScope] || psrTabSets.school;
+}
+
+/* Classes allowed by the current report scope + filters */
+function psrFilteredClasses() {
+  const ctx = psrCtx;
+  if (!ctx) return [];
+  const s = psrState;
+  const isT = psrIsTeacher();
+  let rows = isT ? (ctx.assignments || []) : ctx.classes;
+  if (s.yearId && s.yearId !== 'all') rows = rows.filter(c => c.academic_year_id === s.yearId);
+  if (s.levelId && s.levelId !== 'all') rows = rows.filter(c => String(psrLevelGroupOf(c.level)) === String(s.levelId));
+  if (s.classId && s.classId !== 'all') rows = rows.filter(c => c.id === s.classId);
+  if (s.stream && s.stream !== 'all') rows = rows.filter(c => String(c.stream || '') === String(s.stream));
+  if (s.reportScope === 'school') {
+    const cm = s.schoolMode || 'all';
+    if (cm === 'classes') {
+      const sel = new Set((s.schoolClassIds || []).filter(Boolean));
+      if (sel.size) rows = rows.filter(c => sel.has(c.id));
+    } else if (cm === 'level') {
+      if (s.schoolLevel && s.schoolLevel !== 'all') rows = rows.filter(c => String(psrLevelGroupOf(c.level)) === String(s.schoolLevel));
+    } else if (cm === 'streams') {
+      if (s.schoolStream && s.schoolStream !== 'all') rows = rows.filter(c => String(c.stream || '') === String(s.schoolStream));
+    }
+  }
+  const out = [];
+  const seen = new Set();
+  [...rows, ...(isT ? (ctx.assignments || []).map(a => ctx.classByName(a.class_id)).filter(Boolean) : [])]
+    .forEach(c => { if (c && c.id && !seen.has(c.id)) { seen.add(c.id); out.push(c); } });
+  return out.sort((a, b) => String(a.name).localeCompare(String(b.name)));
+}
+
+function psrScopeClassIds() {
+  return psrFilteredClasses().map(c => c.id);
+}
+
+/* Roster-based participation: the students actually registered in the scope class(es) */
+function psrExpectedRoster() {
+  const ctx = psrCtx;
+  if (!ctx) return [];
+  const ids = new Set(psrScopeClassIds());
+  return (ctx.learners || []).filter(l => ids.has(l.class_id) && (!l.status || l.status === 'active'));
+}
+
+function psrAssessedLearners() {
+  return (psrData && psrData.learners) ? psrData.learners.filter(l => l.pct != null) : [];
+}
+
+function psrParticipation() {
+  const assessed = psrAssessedLearners();
+  const roster = psrExpectedRoster();
+  const sat = assessed.length;
+  const expected = roster.length;
+  const absent = Math.max(expected - sat, 0);
+  const rate = expected > 0 ? Math.round((sat / expected) * 1000) / 10 : (sat > 0 ? 100 : 0);
+  const warnings = [];
+  if (expected > 0 && sat > expected) {
+    warnings.push('More learners assessed (' + sat + ') than the expected roster (' + expected + '). The roster reflects currently active learners registered in the classes in scope.');
+  }
+  if (expected === 0) warnings.push('No active learners are registered in the classes currently in scope.');
+  return { expected, sat, absent, rate, warnings };
+}
+
+function psrGenderOf(l) {
+  const g = String((l && (l.gender || l.sex)) || '').trim().toUpperCase();
+  return g ? g.charAt(0) : '-';
+}
+
+function psrGradeOf(pct) {
+  if (pct == null || isNaN(pct)) return null;
+  const ctx = psrCtx;
+  const scale = (ctx && ctx.scale) || [];
+  if (typeof GradingEngine !== 'undefined' && scale.length) {
+    const r = GradingEngine.calculateGradeSync(Number(pct), scale);
+    if (r && r.grade) return r.grade;
+  }
+  return Utils.grade(pct, scale);
+}
+
+/* Independent 10-percentage-point performance ranges (90-100 down to 0-9) */
+const psrRangeColors = ['#166534', '#15803d', '#65a30d', '#84cc16', '#fbbf24', '#f59e0b', '#f97316', '#ea580c', '#dc2626', '#991b1b'];
+
+function psrBucketOf(pct) {
+  const p = PStr.num(pct);
+  const g = Math.max(0, Math.min(9, Math.floor(p / 10)));
+  const lo = g * 10;
+  const hi = g === 9 ? 100 : lo + 9;
+  return { g, label: lo + '-' + hi + '%', lo, hi, color: psrRangeColors[9 - g] };
+}
+
+function psrBuckets() {
+  const out = [];
+  for (let g = 9; g >= 0; g--) {
+    const lo = g * 10;
+    const hi = g === 9 ? 100 : lo + 9;
+    out.push({ g, label: lo + '-' + hi + '%', lo, hi, color: psrRangeColors[9 - g] });
+  }
+  return out;
+}
+
+/* Scope switcher + school include-mode helpers */
+function psrSetScope(scope) {
+  if (!psrTabSets[scope] || scope === psrState.reportScope) return;
+  psrState.reportScope = scope;
+  if (scope === 'subject') {
+    if (!psrState.subjectId) psrState.subjectId = 'all';
+  } else if (scope === 'class') {
+    psrState.subjectId = 'all';
+  } else {
+    psrState.subjectId = 'all'; psrState.classId = 'all'; psrState.stream = 'all'; psrState.levelId = 'all';
+  }
+  psrState.schoolMode = 'all'; psrState.schoolClassIds = []; psrState.schoolLevel = 'all'; psrState.schoolStream = 'all';
+  psrState.report = '0'; psrState.cmp = {}; psrState.rangeFocus = '';
+  psrRefresh();
+}
+
+function psrSchoolClassChips() {
+  const classes = psrFilteredClasses();
+  const sel = new Set((psrState.schoolClassIds || []).filter(Boolean));
+  if (!classes.length) return '<span class="text-muted af-empty">No classes in scope</span>';
+  const all = !sel.size || sel.size === classes.length;
+  return `<div class="psr-chip-row">
+    <label class="cmp-chip ${all ? 'on' : ''}"><input type="checkbox" ${all ? 'checked' : ''} onchange="psrToggleSchoolClass('')">All Classes</label>
+    ${classes.map(c => `<label class="cmp-chip ${sel.has(c.id) ? 'on' : ''}"><input type="checkbox" ${sel.has(c.id) ? 'checked' : ''} onchange="psrToggleSchoolClass(${PStr.escAttr(c.id)}, this.checked)">${PStr.esc(c.name)}</label>`).join('')}
+  </div>`;
+}
+
+function psrToggleSchoolClass(id, checked) {
+  if (!id) { psrState.schoolClassIds = []; }
+  else {
+    let arr = [...(psrState.schoolClassIds || [])];
+    if (checked) { if (arr.indexOf(id) === -1) arr.push(id); }
+    else arr = arr.filter(x => x !== id);
+    psrState.schoolClassIds = arr;
+  }
+  psrRefresh();
+}
+
+function psrRangeToggle(view) {
+  psrState.rangeView = view === 'pct' ? 'pct' : 'count';
+  psrState.rangeFocus = '';
+  psrDrawSection();
+}
+
+function psrRangeFocusOf(label) {
+  psrState.rangeFocus = psrState.rangeFocus === label ? '' : label;
+  psrDrawSection();
+}
+
+/* PSR-specific select: dispatches to psrSetFilter (not the Analytics page state) */
+function psrSelect(prop, opts, current) {
+  return `<select class="select-field" id="pf-${prop}" onchange="psrSetFilter('${prop}', this.value)">
+    ${opts.map(o => `<option value="${PStr.esc(o.value)}" ${String(o.value) === String(current) ? 'selected' : ''}>${PStr.esc(o.label)}</option>`).join('')}
+  </select>`;
+}
+
+function psrField(label, html) {
+  return `<label class="af-field"><span>${PStr.esc(label)}</span>${html}</label>`;
+}
+
+/* Education level grouping - derived from class level values (never hard-coded lists) */
+function psrLevelGroupOf(level) {
+  const l = String(level || '').trim().toUpperCase();
+  if (/^P[1-6]([\s]\S+)?$/.test(l)) return 'Primary';
+  if (/^S[1-3]([\s]\S+)?$/.test(l)) return 'Lower Secondary';
+  if (/^S[4-6]([\s]\S+)?$/.test(l)) return 'Upper Secondary';
+  return l ? 'Other' : '';
+}
+
+/* Learners in the current assessment scope, for the Student filter */
+function psrStudentOpts() {
+  const ctx = psrCtx;
+  if (!ctx || !psrRaw) return [];
+  const idSet = new Set();
+  psrRaw.marks.forEach(m => { if (m.learner_id) idSet.add(m.learner_id); });
+  (psrData?.learners || []).forEach(l => { if (l.id) idSet.add(l.id); });
+  const out = [];
+  idSet.forEach(id => {
+    const l = ctx.learnerById(id);
+    if (l) out.push({ id, name: (l.full_name || 'Student') + (l.learner_code ? ' (' + l.learner_code + ')' : '') });
+  });
+  return out.sort((a, b) => String(a.name).localeCompare(String(b.name)));
+}
+
+/* Student multi-select chip UI: toggles psrState.studentIds (engine supports an array) */
+function psrStudentChips() {
+  const opts = psrStudentOpts();
+  const sel = new Set(psrState.studentIds || []);
+  if (!opts.length) return '<span class="text-muted af-empty">No students in scope</span>';
+  const all = !sel.size || sel.size === opts.length;
+  return `<div class="psr-chip-row">
+    <label class="cmp-chip ${all ? 'on' : ''}"><input type="checkbox" ${all ? 'checked' : ''} onchange="psrToggleStudentAll()">All Students</label>
+    ${opts.map(o => `<label class="cmp-chip ${sel.has(o.id) ? 'on' : ''}"><input type="checkbox" ${sel.has(o.id) ? 'checked' : ''} onchange="psrToggleStudent('${o.id}', this.checked)">${PStr.esc(o.name)}</label>`).join('')}
+  </div>`;
+}
+
+function psrToggleStudent(id, checked) {
+  let arr = [...(psrState.studentIds || [])];
+  if (checked) { if (arr.indexOf(id) === -1) arr.push(id); }
+  else arr = arr.filter(x => x !== id);
+  psrState.studentIds = arr;
+  psrState.studentId = arr.length === 1 ? arr[0] : 'all';
+  psrRefresh();
+}
+
+function psrToggleStudentAll() {
+  const opts = psrStudentOpts();
+  psrState.studentIds = opts.map(o => o.id);
+  psrState.studentId = 'all';
+  psrRefresh();
+}
+
+/* Per-student comment override: stored client-side per learner + grade, never
+   changes the global grading scale defaults. Used in student tables. */
+function psrCommentKey(learnerId, grade) {
+  return 'rms_psr_comment_' + (learnerId || 'x') + '_' + (grade || 'x');
+}
+
+function psrCommentDefault(grade) {
+  const ctx = psrCtx;
+  const r = (ctx && ctx.scale || []).find(x => x.grade === grade);
+  return (r && (r.comment || r.descriptor)) || '';
+}
+
+function psrCommentGet(learnerId, grade) {
+  try { return localStorage.getItem(psrCommentKey(learnerId, grade)); } catch (e) { return null; }
+}
+
+function psrCommentSet(learnerId, grade, val) {
+  const input = document.getElementById('psr-cmt-' + learnerId);
+  const value = (val != null ? String(val) : (input ? input.value : '')).trim();
+  try {
+    if (!value) localStorage.removeItem(psrCommentKey(learnerId, grade));
+    else localStorage.setItem(psrCommentKey(learnerId, grade), value);
+  } catch (e) {}
+  Utils.toast(value ? 'Comment override saved for this student' : 'Comment override cleared', 'success');
+}
+
+function psrCommentCell(learnerId, grade) {
+  const def = psrCommentDefault(grade);
+  const ov = psrCommentGet(learnerId, grade);
+  const val = ov != null ? ov : def;
+  return `<input class="input-field psr-comment-input" id="psr-cmt-${learnerId}" value="${PStr.escAttr(val)}" placeholder="${PStr.escAttr(def || 'No automated comment for this grade')}" onchange="psrCommentSet('${learnerId}', '${PStr.escAttr(grade || '')}', this.value)">`;
 }
 
 async function psrRefresh() {
@@ -70,11 +343,12 @@ async function psrRefresh() {
       }
     }
 
-    const ddFilter = { ...psrState, assessmentId: 'all' };
+    const scopeIds = psrScopeClassIds();
+    const ddFilter = { ...psrState, assessmentId: 'all', classIds: scopeIds };
     const dd = await AnalyticsEngine.load(ddFilter, ctx, isT);
     psrList = dd.assessments;
 
-    psrRaw = await AnalyticsEngine.load(psrState, ctx, isT);
+    psrRaw = await AnalyticsEngine.load({ ...psrState, classIds: scopeIds }, ctx, isT);
     psrData = AnalyticsEngine.compute(psrState, ctx, psrRaw, isT);
 
     psrRenderScreen();
@@ -96,6 +370,7 @@ function psrRenderScreen() {
   const s = psrState;
   const ctx = psrCtx;
   const isT = psrIsTeacher();
+  const scope = s.reportScope;
 
   let classRows = isT ? (ctx.assignments || []) : ctx.classes;
   if (s.yearId && s.yearId !== 'all') classRows = classRows.filter(c => c.academic_year_id === s.yearId);
@@ -104,7 +379,19 @@ function psrRenderScreen() {
   (ctx.assignments || []).forEach(a => { const c = ctx.classByName(a.class_id); if (c) classNames.set(c.id, c); });
   const classOpts = [...classNames.values()].sort((a, b) => String(a.name).localeCompare(String(b.name)));
 
-  const streamList = [...new Set(classOpts.map(c => c.stream).filter(Boolean))].sort();
+  let levelRows = [];
+  if (s.levelId && s.levelId !== 'all') {
+    levelRows = classOpts.filter(c => String(psrLevelGroupOf(c.level)) === String(s.levelId));
+  } else {
+    levelRows = classOpts;
+  }
+  const levelOpts = [...new Set(classOpts.map(c => psrLevelGroupOf(c.level)).filter(Boolean))].sort();
+  const levelNames = { 'Primary': 'Primary', 'Lower Secondary': 'Lower Secondary', 'Upper Secondary': 'Upper Secondary', 'Other': 'Other' };
+
+  const streamList = [...new Set(levelRows.map(c => c.stream).filter(Boolean))].sort();
+
+  let classFiltered = levelRows;
+  if (s.stream && s.stream !== 'all') classFiltered = classFiltered.filter(c => String(c.stream || '') === String(s.stream));
 
   let subjectOpts = [];
   if (isT) {
@@ -113,6 +400,8 @@ function psrRenderScreen() {
   } else {
     subjectOpts = ctx.subjects.filter(su => !su.status || su.status === 'active').sort((a, b) => String(a.name).localeCompare(String(b.name)));
   }
+
+  const teacherOpts = (ctx.teachers || []).filter(t => !t.status || t.status === 'active').sort((a, b) => String(a.full_name).localeCompare(String(b.full_name)));
 
   let termsOpts = ctx.terms;
   if (s.yearId && s.yearId !== 'all') termsOpts = termsOpts.filter(t => t.academic_year_id === s.yearId);
@@ -123,52 +412,107 @@ function psrRenderScreen() {
     label: (a._subject ? a._subject.name : '') + ' - ' + (a.name || a.unit) + (a._term ? ' (' + a._term.name + ')' : '')
   }));
 
-  const tabs = [
-    { id: '1', icon: 'clipboard-list', label: 'Subject Performance' },
-    { id: '2', icon: 'bar-chart-3', label: 'Performance Range' },
-    { id: '3', icon: 'life-buoy', label: 'Academic Support' },
-    { id: '4', icon: 'graduation-cap', label: 'Grade Distribution' },
-    { id: '5', icon: 'git-compare', label: 'Assessment Comparison' }
-  ].map(t => `<button class="psr-tab ${s.report === t.id ? 'active' : ''}" onclick="psrSetTab('${t.id}')" role="tab" aria-selected="${s.report === t.id}">
-      <i data-lucide="${t.icon}"></i>${t.label}</button>`).join('');
+  const tabs = psrTabsFor().map(id => {
+    const t = psrTabMeta[id] || { icon: 'file-text', label: id };
+    return `<button class="psr-tab ${s.report === id ? 'active' : ''}" onclick="psrSetTab('${id}')" role="tab" aria-selected="${s.report === id}">
+      <i data-lucide="${t.icon}"></i>${t.label}</button>`;
+  }).join('');
 
   const fields = [];
-  fields.push(analyticsField('Academic Year', analyticsSelect('yearId', [{ value: 'all', label: 'All Years' }].concat(ctx.years.map(y => ({ value: y.id, label: y.name + (y.is_current ? ' (Current)' : '') }))), s.yearId)));
-  fields.push(analyticsField('Term', analyticsSelect('termId', [{ value: 'all', label: 'All Terms' }].concat(termsOpts.map(t => ({ value: t.id, label: t.name }))), s.termId)));
-  fields.push(analyticsField('Class', analyticsSelect('classId', [{ value: 'all', label: 'All Classes' }].concat(classOpts.map(c => ({ value: c.id, label: c.name }))), s.classId)));
-  fields.push(analyticsField('Subject', analyticsSelect('subjectId', [{ value: 'all', label: 'All Subjects' }].concat(subjectOpts.map(x => ({ value: x.id, label: x.name }))), s.subjectId)));
-  fields.push(analyticsField('Assessment Type', analyticsSelect('typeId', [{ value: 'all', label: 'All Types' }].concat(ctx.types.map(x => ({ value: x.id, label: x.name }))), s.typeId)));
-  fields.push(analyticsField('Assessment', analyticsSelect('assessmentId', [{ value: 'all', label: 'All Assessments' }].concat(assessOpts.length ? assessOpts : [{ value: 'none', label: 'No assessments in scope' }]), s.assessmentId)));
+  fields.push(psrField('Academic Year', psrSelect('yearId', [{ value: 'all', label: 'All Years' }].concat(ctx.years.map(y => ({ value: y.id, label: y.name + (y.is_current ? ' (Current)' : '') }))), s.yearId)));
+  fields.push(psrField('Term', psrSelect('termId', [{ value: 'all', label: 'All Terms' }].concat(termsOpts.map(t => ({ value: t.id, label: t.name }))), s.termId)));
+  if (scope === 'subject' || scope === 'class') {
+    fields.push(psrField('Education Level', psrSelect('levelId', [{ value: 'all', label: 'All Levels' }].concat(levelOpts.map(l => ({ value: l, label: levelNames[l] || l }))), s.levelId)));
+    fields.push(psrField('Class', psrSelect('classId', [{ value: 'all', label: 'All Classes' }].concat(classFiltered.map(c => ({ value: c.id, label: c.name }))), s.classId)));
+    fields.push(psrField('Stream', streamList.length ? psrSelect('stream', [{ value: 'all', label: 'All Streams' }].concat(streamList.map(st => ({ value: st, label: st }))), s.stream) : `<span class="text-muted af-empty">Only for streamed classes</span>`));
+  }
+  if (scope === 'subject') {
+    fields.push(psrField('Subject', psrSelect('subjectId', [{ value: 'all', label: 'All Subjects' }].concat(subjectOpts.map(x => ({ value: x.id, label: x.name }))), s.subjectId)));
+  }
+  if (!isT) fields.push(psrField('Teacher', psrSelect('teacherId', [{ value: 'all', label: 'All Teachers' }].concat(teacherOpts.map(x => ({ value: x.id, label: x.full_name }))), s.teacherId)));
+  fields.push(psrField('Assessment Type', psrSelect('typeId', [{ value: 'all', label: 'All Types' }].concat(ctx.types.map(x => ({ value: x.id, label: x.name }))), s.typeId)));
+  fields.push(psrField('Assessment', psrSelect('assessmentId', [{ value: 'all', label: 'All Assessments' }].concat(assessOpts.length ? assessOpts : [{ value: 'none', label: 'No assessments in scope' }]), s.assessmentId)));
+  fields.push(psrField('Student', `<div class="psr-student-chips">${psrStudentChips()}</div>`));
+
+  const schoolStreamOpts = [...new Set(classOpts.map(c => c.stream).filter(Boolean))].sort();
+  let includeBlock = '';
+  if (scope === 'school') {
+    const cm = s.schoolMode || 'all';
+    const modeBtn = (val, label) => `<button class="psr-toggle-btn ${cm === val ? 'active' : ''}" onclick="psrSetFilter('schoolMode', '${val}')">${label}</button>`;
+    includeBlock = `<div class="psr-include-block">
+      <div class="psr-include-head"><span class="af-label">Classes to Include</span>
+        <div class="psr-toggle-group">${modeBtn('all', 'All Classes')}${modeBtn('classes', 'Selected Classes')}${modeBtn('level', 'Selected Level')}${modeBtn('streams', 'Selected Streams')}</div>
+      </div>
+      ${cm === 'classes' ? `<div class="psr-include-body">${psrSchoolClassChips()}</div>` : ''}
+      ${cm === 'level' ? `<div class="psr-include-body">${psrSelect('schoolLevel', [{ value: 'all', label: 'All Levels' }].concat(levelOpts.map(l => ({ value: l, label: levelNames[l] || l }))), s.schoolLevel)}</div>` : ''}
+      ${cm === 'streams' ? `<div class="psr-include-body">${psrSelect('schoolStream', [{ value: 'all', label: 'All Streams' }].concat(schoolStreamOpts.map(st => ({ value: st, label: st }))), s.schoolStream)}</div>` : ''}
+    </div>`;
+  }
+
+  const scopeSwitch = `<div class="psr-scope-switch" role="group" aria-label="Report scope">
+    ${[['subject', 'book-open', 'Subject Scope'], ['class', 'school', 'Class Scope'], ['school', 'building-2', 'School Scope']].map(x => {
+      const sc = x[0], icon = x[1], label = x[2];
+      return `<button class="psr-scope-btn ${scope === sc ? 'active' : ''}" onclick="psrSetScope('${sc}')"><i data-lucide="${icon}"></i>${label}</button>`;
+    }).join('')}
+  </div>`;
 
   const scopeParts = [];
+  scopeParts.push(scope === 'subject' ? 'Subject scope' : scope === 'class' ? 'Class scope' : 'School scope');
   if (ctx.yearById(s.yearId)) scopeParts.push(ctx.yearById(s.yearId).name);
   if (ctx.termById(s.termId)) scopeParts.push(ctx.termById(s.termId).name);
+  if (s.levelId !== 'all') scopeParts.push(s.levelId);
   if (ctx.classByName(s.classId)) scopeParts.push(ctx.classByName(s.classId).name);
+  if (s.stream && s.stream !== 'all') scopeParts.push('Stream ' + s.stream);
   if (ctx.subjectById(s.subjectId)) scopeParts.push(ctx.subjectById(s.subjectId).name);
+  if (s.teacherId !== 'all') { const t = ctx.teachers.find(x => x.id === s.teacherId); if (t) scopeParts.push(t.full_name); }
   if (s.typeId !== 'all') { const t = ctx.types.find(x => x.id === s.typeId); if (t) scopeParts.push(t.name); }
   if (s.assessmentId !== 'all') { const a = psrList.find(x => x.id === s.assessmentId); if (a) scopeParts.push(a.name || a.unit); }
+  if (s.studentId !== 'all') { const l = ctx.learnerById(s.studentId); if (l) scopeParts.push(l.full_name); }
+  if (scope === 'school') {
+    const cm = s.schoolMode || 'all';
+    if (cm === 'classes') {
+      const nn = (s.schoolClassIds || []).filter(Boolean).length;
+      if (nn) scopeParts.push(nn + ' selected class(es)');
+      else scopeParts.push('All classes');
+    }
+    if (cm === 'level' && s.schoolLevel && s.schoolLevel !== 'all') scopeParts.push('Level: ' + s.schoolLevel);
+    if (cm === 'streams' && s.schoolStream && s.schoolStream !== 'all') scopeParts.push('Stream: ' + s.schoolStream);
+  }
 
-  const teacherScopeNote = isT
+  const participation = psrParticipation();
+  const scopeNote = isT
     ? `Scoped to your assigned classes and subjects${ctx.assignments && ctx.assignments.length ? ' (' + ctx.assignments.length + ' assignment records)' : ''}. RLS restricts all data at the database level.`
     : 'Full DOS/Admin access.';
 
   const exportBar = `<div class="analysis-bar psr-export-bar">
-    <span class="text-sm text-muted" style="margin-right:auto">${teacherScopeNote}</span>
+    <span class="text-sm text-muted" style="margin-right:auto">${scopeNote}</span>
+    <button class="btn btn-secondary" onclick="psrRefresh()"><i data-lucide="refresh-cw"></i> Refresh Report</button>
     <button class="btn btn-secondary" onclick="psrExportExcel()"><i data-lucide="file-spreadsheet"></i> Export Excel</button>
     <button class="btn btn-secondary" onclick="psrPrint()"><i data-lucide="printer"></i> Print / PDF</button>
   </div>`;
 
+  const schoolName = (ctx.settings && ctx.settings.school_name) || 'Rukara Model School';
+
   setContent(`<div class="psr-page">
+    <div class="psr-screen-header school-report-header" style="border-bottom:3px solid var(--blue-700);padding-bottom:10px;margin-bottom:6px">
+      <img src="${PStr.esc((ctx.settings && ctx.settings.logo_url) || 'public/logo.webp')}" alt="School Logo" class="school-logo-img">
+      <h2 style="margin:0">${PStr.esc(schoolName)}</h2>
+      <p class="contact-line">RMS-MIS &middot; Rukara Model School Marks Information System</p>
+      <div class="report-main-title" style="font-size:20px">POST-ASSESSMENT REPORT</div>
+    </div>
+    ${scopeSwitch}
     <div class="card mb-6 psr-filters-card">
       <div class="card-header psr-card-header">
         <h3><i data-lucide="sliders-horizontal"></i> Report Filters</h3>
         <div class="analytics-header-actions">
+          <button class="btn btn-sm btn-secondary" onclick="psrRefresh()"><i data-lucide="refresh-cw"></i> Refresh Report</button>
           <button class="btn btn-sm btn-secondary" onclick="psrResetFilters()"><i data-lucide="rotate-ccw"></i> Reset Filters</button>
         </div>
       </div>
       <div class="psr-tabs report-tabs">${tabs}</div>
       <div class="filters-grid">${fields.join('')}</div>
-      <div class="analytics-scope">Scope: <strong>${scopeParts.length ? PStr.esc(scopeParts.join(' &bull; ')) : 'Whole school'}</strong> &middot; Assessments in scope: <strong>${psrRaw.assessments.length}</strong> &middot; Default status: Approved + Locked</div>
+      ${includeBlock}
+      <div class="analytics-scope">Scope: <strong>${scopeParts.length ? PStr.esc(scopeParts.join(' &bull; ')) : 'Whole school'}</strong> &middot; Classes in scope: <strong>${psrFilteredClasses().length}</strong> &middot; Expected roster: <strong>${participation.expected}</strong> &middot; Assessments in scope: <strong>${psrRaw.assessments.length}</strong> &middot; Default status: Approved + Locked</div>
     </div>
     ${exportBar}
     <div id="psr-sections" class="psr-sections"></div>
@@ -178,6 +522,7 @@ function psrRenderScreen() {
 
 function psrSetTab(id) {
   psrState.report = id;
+  psrState.rangeFocus = '';
   document.querySelectorAll('.psr-tab').forEach(b => {
     const on = b.getAttribute('onclick').indexOf("'" + id + "'") !== -1;
     b.classList.toggle('active', on);
@@ -189,14 +534,22 @@ function psrSetTab(id) {
 
 function psrSetFilter(prop, value) {
   psrState[prop] = value;
-  if (prop === 'yearId') { psrState.termId = 'all'; psrState.classId = 'all'; }
-  if (['termId', 'classId', 'subjectId', 'typeId', 'yearId'].indexOf(prop) !== -1) { psrState.assessmentId = 'all'; }
+  if (prop === 'yearId') {
+    psrState.termId = 'all'; psrState.levelId = 'all'; psrState.classId = 'all'; psrState.stream = 'all';
+    psrState.subjectId = 'all'; psrState.teacherId = 'all'; psrState.schoolLevel = 'all'; psrState.schoolStream = 'all';
+  }
+  if (prop === 'termId') { psrState.levelId = 'all'; psrState.classId = 'all'; psrState.stream = 'all'; psrState.subjectId = 'all'; psrState.teacherId = 'all'; }
+  if (prop === 'levelId') { psrState.classId = 'all'; psrState.stream = 'all'; psrState.subjectId = 'all'; psrState.teacherId = 'all'; }
+  if (['classId', 'stream', 'teacherId', 'subjectId', 'typeId'].indexOf(prop) !== -1) { psrState.assessmentId = 'all'; psrState.studentId = 'all'; }
+  if (['schoolMode', 'schoolLevel', 'schoolStream'].indexOf(prop) !== -1) { psrState.assessmentId = 'all'; psrState.studentId = 'all'; }
+  if (prop === 'assessmentId') { psrState.studentId = 'all'; }
+  if (['yearId', 'termId', 'levelId', 'classId', 'stream', 'subjectId', 'teacherId', 'typeId', 'assessmentId', 'schoolMode', 'schoolLevel', 'schoolStream'].indexOf(prop) !== -1) psrState.studentIds = [];
   psrState.cmp = {};
   psrRefresh();
 }
 
 function psrResetFilters() {
-  psrState = { yearId: '', termId: 'all', classId: 'all', subjectId: 'all', typeId: 'all', assessmentId: 'all', report: psrState.report, cmp: {} };
+  psrState = { yearId: '', termId: 'all', levelId: 'all', classId: 'all', stream: 'all', subjectId: 'all', teacherId: 'all', typeId: 'all', assessmentId: 'all', studentId: 'all', studentIds: [], report: psrState.report, cmp: {}, reportScope: psrState.reportScope, schoolMode: 'all', schoolClassIds: [], schoolLevel: 'all', schoolStream: 'all', rangeView: 'count', rangeFocus: '' };
   psrRefresh();
 }
 
@@ -215,15 +568,118 @@ function psrChartCard(c) {
 }
 
 function psrTableCard(t) {
-  const ths = t.cols.map(h => `<th class="text-center">${PStr.esc(h)}</th>`).join('');
-  const trs = t.rows.map(r => `<tr>${r.map((cell, i) => {
+  t.pageSize = Number(t.pageSize) || 0;
+  const ths = t.cols.map((h, i) => `<th class="text-center ${t.sortable ? 'psr-sortable' : ''}" ${t.sortable ? `onclick="psrSortTable('${t.id}', ${i})"` : ''}>${PStr.esc(h)}${t.sortable ? '<i data-lucide="arrow-up-down" style="width:12px;height:12px;vertical-align:middle;margin-left:4px"></i>' : ''}</th>`).join('');
+  const cellOf = r => r.map((cell, i) => {
     let cls = '';
     if (t.centerCols && t.centerCols.indexOf(i) !== -1) cls = 'text-center';
     return `<td class="${cls}">${cell}</td>`;
-  }).join('')}</tr>`).join('');
+  }).join('');
+  const trs = t.rows.map((r, idx) => `<tr${t.pageSize ? ` data-page="${Math.floor(idx / t.pageSize) + 1}"` : ''}>${cellOf(r)}</tr>`).join('') ||
+    `<tr><td colspan="${t.cols.length}" style="text-align:center;color:var(--gray-400)">No records.</td></tr>`;
+  const tools = t.searchable
+    ? `<div class="psr-table-tools"><input class="input-field" type="search" placeholder="Type to filter rows..." oninput="psrFilterTable('${t.id}', this.value)">
+       <span class="text-xs text-muted psr-count" id="${t.id}-count">${t.rows.length} rows</span></div>`
+    : '';
+  const pager = t.pageSize
+    ? `<div class="psr-table-pager">
+        <span class="text-xs text-muted psr-pageinfo" id="${t.id}-pageinfo"></span>
+        <div class="psr-pager-btns">
+          <button type="button" class="btn btn-sm btn-secondary" onclick="psrTablePage('${t.id}', -1)"><i data-lucide="chevron-left"></i> Prev</button>
+          <button type="button" class="btn btn-sm btn-secondary" onclick="psrTablePage('${t.id}', 1)">Next <i data-lucide="chevron-right"></i></button>
+        </div>
+      </div>`
+    : '';
   return `<div class="card mb-6"><div class="card-header"><h3>${AStrs.icon(t.icon || 'table')}${PStr.esc(t.title)}</h3>${t.note ? `<span class="text-sm text-muted">${PStr.esc(t.note)}</span>` : ''}</div>
-    <div class="table-box"><div class="table-container table-scroll"><table class="data-table"><thead><tr>${ths}</tr></thead>
-    <tbody>${trs || `<tr><td colspan="${t.cols.length}" style="text-align:center;color:var(--gray-400)">No records.</td></tr>`}</tbody></table></div></div></div>`;
+    ${tools}
+    <div class="table-box"><div class="table-container table-scroll"><table class="data-table" id="${t.id || ''}"${t.pageSize ? ` data-page-size="${t.pageSize}"` : ''}><thead><tr>${ths}</tr></thead>
+    <tbody>${trs}</tbody></table></div>${pager}</div></div>`;
+}
+
+function psrApplyPage(tid) {
+  const t = document.getElementById(tid);
+  if (!t) return;
+  const size = Number(t.getAttribute('data-page-size')) || 0;
+  const state = psrPages[tid] || (psrPages[tid] = { page: 1 });
+  const rows = Array.prototype.slice.call(t.querySelectorAll('tbody tr'));
+  if (!size) {
+    rows.forEach(r => { if (r.getAttribute('data-psr-q') !== '1') r.style.display = ''; });
+    return;
+  }
+  const visible = rows.filter(r => r.getAttribute('data-psr-q') !== '1');
+  const total = Math.max(1, Math.ceil(visible.length / size));
+  state.page = Math.max(1, Math.min(state.page, total));
+  const all = !!psrPrintAll;
+  rows.forEach(r => {
+    const qHidden = r.getAttribute('data-psr-q') === '1';
+    const onPage = all || Number(r.getAttribute('data-page')) === state.page;
+    r.style.display = (!qHidden && onPage) ? '' : 'none';
+  });
+  const info = document.getElementById(tid + '-pageinfo');
+  if (info) info.textContent = (all ? 'All ' + visible.length + ' rows' : 'Page ' + state.page + ' of ' + total + ' - ' + visible.length + ' rows');
+  const count = document.getElementById(tid + '-count');
+  if (count) count.textContent = visible.length + ' rows';
+}
+
+function psrTablePage(tid, delta) {
+  const state = psrPages[tid] || (psrPages[tid] = { page: 1 });
+  state.page += Number(delta) || 0;
+  psrApplyPage(tid);
+}
+
+function psrFilterTable(tid, q) {
+  const t = document.getElementById(tid);
+  if (!t) return;
+  const count = document.getElementById(tid + '-count');
+  const ql = String(q || '').trim().toLowerCase();
+  let shown = 0;
+  t.querySelectorAll('tbody tr').forEach(tr => {
+    const on = !ql || (tr.textContent || '').toLowerCase().indexOf(ql) !== -1;
+    tr.setAttribute('data-psr-q', on ? '0' : '1');
+    if (on) shown++;
+  });
+  if (count) count.textContent = shown + ' rows';
+  if (t.getAttribute('data-page-size')) { psrPages[tid] = psrPages[tid] || { page: 1 }; psrPages[tid].page = 1; }
+  psrApplyPage(tid);
+}
+
+function psrSortTable(tid, col) {
+  const t = document.getElementById(tid);
+  if (!t) return;
+  const body = t.querySelector('tbody');
+  if (!body) return;
+  const rows = Array.prototype.slice.call(body.querySelectorAll('tr')).filter(r => r.style.display !== 'none');
+  const prev = (t._psrSort && t._psrSort.col === col) ? { col, dir: -t._psrSort.dir } : { col, dir: 1 };
+  t._psrSort = prev;
+  const numeric = v => (v == null || String(v).trim() === '' || isNaN(Number(v))) ? null : Number(v);
+  rows.sort((a, b) => {
+    const av = a.cells[col] ? (a.cells[col].textContent || '').trim() : '';
+    const bv = b.cells[col] ? (b.cells[col].textContent || '').trim() : '';
+    const an = numeric(av), bn = numeric(bv);
+    let cmp;
+    if (an != null && bn != null) cmp = an - bn;
+    else if (an == null && bn == null) cmp = av.localeCompare(bv);
+    else cmp = an != null ? -1 : 1;
+    return cmp * prev.dir;
+  });
+  rows.forEach(r => body.appendChild(r));
+  const size = Number(t.getAttribute('data-page-size')) || 0;
+  if (size) {
+    let vi = 0;
+    body.querySelectorAll('tr').forEach(r => {
+      if (r.getAttribute('data-psr-q') !== '1') {
+        r.setAttribute('data-page', Math.floor(vi / size) + 1);
+        vi++;
+      }
+    });
+    psrApplyPage(t.id);
+  }
+  t.querySelectorAll('thead th').forEach(th => {
+    th.classList.toggle('psr-sort-active', Number(th.dataset.col) === col);
+    const ic = th.querySelector('i[data-lucide]');
+    if (ic) ic.dataset.lucide = Number(th.dataset.col) === col ? (prev.dir > 0 ? 'arrow-up' : 'arrow-down') : 'arrow-up-down';
+  });
+  if (typeof lucide !== 'undefined') lucide.createIcons();
 }
 
 function psrPromptCard(title, msg) {
@@ -257,12 +713,14 @@ function psrDrawSection() {
       html += psrChartCard(c);
     }
   }
-  if (m.chips) html += `<div class="card mb-6"><div class="card-header"><h3>${AStrs.icon('checkbox')}Select Assessments to Compare</h3></div><div class="cmp-chips">${m.chips}</div></div>`;
+  if (m.chips) html += `<div class="card mb-6"><div class="card-header"><h3>${AStrs.icon(m.chipsIcon || 'checkbox')}${PStr.esc(m.chipsTitle || 'Select Assessments to Compare')}</h3></div><div class="cmp-chips">${m.chips}</div></div>`;
   m.tables.forEach(t => { html += psrTableCard(t); });
   if (m.printSignature) html += m.printSignature;
 
   el.innerHTML = html;
   if (typeof lucide !== 'undefined') lucide.createIcons();
+
+  m.tables.forEach(t => { if (t.id && Number(t.pageSize) > 0) psrApplyPage(t.id); });
 
   m.charts.forEach(c => {
     const cEl = document.getElementById(c.id);
@@ -275,29 +733,64 @@ function psrDrawSection() {
    ============================================================ */
 
 function psrSectionModel() {
+  const empty = psrEmptyPrompt();
+  if (empty) return { prompt: empty };
   switch (psrState.report) {
-    case '2': return psrRangeModel();
-    case '3': return psrSupportModel();
-    case '4': return psrGradesModel();
-    case '5': return psrComparisonModel();
-    default: return psrSubjectModel();
+    case '1': return psrRangeModel();
+    case '2': return psrSubjectModel();
+    case '3': return psrClassModel();
+    case '4': return psrSchoolModel();
+    case '5': return psrStudentsModel();
+    default: return psrOverviewModel();
   }
+}
+
+function psrEmptyPrompt() {
+  if (!psrRaw || !psrRaw.assessments.length) {
+    return { title: 'No assessments in scope', msg: 'No approved or locked assessments match the current scope. Adjust the filters above - missing marks are never treated as zero.' };
+  }
+  if (!psrExpectedRoster().length) {
+    return { title: 'No learners in scope', msg: 'No active learners are registered in the classes currently in scope, so there is nothing to report on.' };
+  }
+  if (!psrData || !psrData.learners.length) {
+    return { title: 'No learners assessed', msg: 'No marks were found for this scope. Missing marks are never treated as zero.' };
+  }
+  return null;
 }
 
 function psrScopeMeta() {
   const ctx = psrCtx;
   const isT = psrIsTeacher();
   const assessments = psrRaw.assessments;
+  const classes = psrFilteredClasses();
   const official = assessments.length > 0 && assessments.every(a => a.status === 'approved' || a.status === 'locked');
+  let className = 'All classes';
+  if (psrState.classId && psrState.classId !== 'all') {
+    className = (ctx.classByName(psrState.classId) || {}).name || className;
+  } else if (classes.length === 1) {
+    className = classes[0].name;
+  } else if (classes.length > 1) {
+    className = classes.length + ' classes';
+  } else {
+    className = isT ? 'Assigned classes' : 'Selected classes';
+  }
+  let subjectName = 'Every subject';
+  if (psrState.subjectId && psrState.subjectId !== 'all') {
+    subjectName = (ctx.subjectById(psrState.subjectId) || {}).name || subjectName;
+  }
   return {
-    className: (psrState.classId && ctx.classByName(psrState.classId)) ? ctx.classByName(psrState.classId).name : (isT ? 'Assigned classes' : 'Selected class'),
-    subjectName: (psrState.subjectId && ctx.subjectById(psrState.subjectId)) ? ctx.subjectById(psrState.subjectId).name : 'Subject',
+    className,
+    subjectName,
     yearName: ctx.yearById(psrState.yearId) ? ctx.yearById(psrState.yearId).name : '',
     termName: ctx.termById(psrState.termId) ? ctx.termById(psrState.termId).name : '',
     teacherName: psrTeacherName(ctx),
     settings: ctx.settings,
     isOfficial: official,
-    totalMax: assessments.reduce((a, x) => a + (Number(x.maximum_mark) || 0), 0)
+    totalMax: assessments.reduce((a, x) => a + (Number(x.maximum_mark) || 0), 0),
+    classCount: classes.length,
+    rosterCount: psrExpectedRoster().length,
+    assessedCount: psrAssessedLearners().length,
+    scopeLabel: psrState.reportScope === 'subject' ? 'Subject scope' : psrState.reportScope === 'class' ? 'Class scope' : 'School scope'
   };
 }
 
@@ -333,30 +826,161 @@ function psrGradeBadge(g) {
   return g ? `<span class="badge badge-purple">${PStr.esc(g)}</span>` : '-';
 }
 
-/* ---------- Report 1: Subject Performance ---------- */
+/* ---------- Report 0: Overview ---------- */
 
-function psrSubjectModel() {
+function psrGradesTable(learners) {
+  const ctx = psrCtx;
+  let gradeDist = [];
+  if (typeof GradingEngine !== 'undefined' && ctx && ctx.scale) {
+    gradeDist = GradingEngine.getGradeDistribution(learners.map(l => l.grade).filter(Boolean), ctx.scale);
+  }
+  const rows = gradeDist.map(g => [psrGradeBadge(g.grade), PStr.esc(g.descriptor), PStr.esc(g.range), g.count, PStr.fmt(g.percentage), g.isPass ? '<span class="badge badge-success">Pass</span>' : '<span class="badge badge-danger">Fail</span>']);
+  rows.push(['<span class="font-semibold">Total</span>', '', '', learners.length, PStr.fmt(100), '']);
+  return { cols: ['Grade', 'Descriptor', 'Percentage Range', 'Students', '% of Assessed', 'Pass/Fail'], rows, dist: gradeDist };
+}
+
+function psrOverviewModel() {
   const d = psrData;
   const ctx = psrCtx;
   const k = d.kpis;
   const passMark = k.passMark;
-
-  if (!psrState.subjectId || psrState.subjectId === 'all' || !psrState.classId || psrState.classId === 'all') {
-    return { prompt: { title: 'Select a class and subject', msg: 'The Subject Performance Report shows one class and subject at a time. Choose a class and a subject from the filters above (teachers only see their assigned ones).' } };
-  }
-  if (!d.learners.length) {
-    return { prompt: { title: 'No learners assessed', msg: 'No assessed students were found for the selected class, subject and assessment scope. Missing marks are never treated as zero.' } };
-  }
-
+  const participation = psrParticipation();
+  const roster = psrExpectedRoster();
+  const assessed = psrAssessedLearners();
   const meta = psrScopeMeta();
   const assessments = psrRaw.assessments;
-  const assessed = k.assessed;
+  const selected = psrState.assessmentId !== 'all'
+    ? assessments.filter(a => a.id === psrState.assessmentId)
+    : assessments;
+
+  const infoRows = [
+    ['Report Scope', meta.scopeLabel],
+    ['Academic Year', meta.yearName || '-'],
+    ['Term', meta.termName || '-'],
+    ['Education Level', psrState.levelId !== 'all' ? psrState.levelId : (psrState.schoolLevel && psrState.schoolLevel !== 'all' ? psrState.schoolLevel : '-')],
+    ['Classes', meta.className + (meta.classCount > 1 ? ' (' + meta.classCount + ')' : '')],
+    ['Stream', (psrState.stream && psrState.stream !== 'all') ? psrState.stream : (psrState.schoolStream && psrState.schoolStream !== 'all' ? psrState.schoolStream : '-')],
+    ['Subject', meta.subjectName],
+    ['Teacher', psrState.teacherId !== 'all' ? (ctx.teachers.find(t => t.id === psrState.teacherId)?.full_name || '-') : '-'],
+    ['Assessment Type', psrState.typeId !== 'all' ? (ctx.types.find(x => x.id === psrState.typeId)?.name || '-') : (selected.length ? selected[0]._typeName || '-' : '-')],
+    ['Assessment(s)', selected.map(a => a.name || a.unit).filter(Boolean).join(', ') || '-'],
+    ['Assessments Combined', assessments.length],
+    ['Expected Roster', participation.expected],
+    ['Students Assessed', participation.sat + (participation.absent ? ' (' + participation.absent + ' absent)' : '')],
+    ['Participation Rate', PStr.fmt(participation.rate)],
+    ['Status', assessments.length && assessments.every(a => a.status === 'approved' || a.status === 'locked') ? 'OFFICIAL / APPROVED' : 'MIXED / DRAFT']
+  ];
+
+  const infoTable = { title: 'Assessment Information', icon: 'info',
+    cols: ['Field', 'Value'], centerCols: [],
+    rows: infoRows.map(r => [`<span class="col-name">${PStr.esc(r[0])}</span>`, PStr.esc(r[1])]) };
 
   const kpis = [
-    { label: 'Students Assessed', value: assessed, icon: 'users-round', tone: 'blue' },
-    { label: 'Class Average', value: PStr.fmt(k.overall), icon: 'calculator', tone: 'blue' },
-    { label: 'Highest Average', value: PStr.fmt(k.highest), icon: 'trending-up', tone: 'green' },
-    { label: 'Lowest Average', value: PStr.fmt(k.lowest), icon: 'trending-down', tone: 'red' },
+    { label: 'Expected Roster', value: participation.expected, icon: 'users-round', tone: 'blue' },
+    { label: 'Students Assessed', value: participation.sat, icon: 'clipboard-check', tone: 'blue' },
+    { label: 'Participation Rate', value: PStr.fmt(participation.rate), icon: 'percent', tone: participation.rate >= 90 ? 'green' : (participation.rate >= 50 ? 'amber' : 'red'), sub: participation.absent ? participation.absent + ' absent' : 'Full participation' },
+    { label: 'Overall Average', value: PStr.fmt(k.overall), icon: 'calculator', tone: 'blue' },
+    { label: 'Highest', value: PStr.fmt(k.highest), icon: 'trending-up', tone: 'green' },
+    { label: 'Lowest', value: PStr.fmt(k.lowest), icon: 'trending-down', tone: 'red' },
+    { label: 'Pass Rate', value: PStr.fmt(k.passRate), icon: 'badge-check', tone: 'green', sub: 'Pass mark ' + PStr.round(passMark) + '%' },
+    { label: 'Fail Rate', value: PStr.fmt(k.failRate), icon: 'alert-triangle', tone: 'red' }
+  ];
+
+  const gradeTable = psrGradesTable(assessed);
+
+  const bucketSummary = psrBuckets().map(b => {
+    const inRange = assessed.filter(l => psrBucketOf(l.pct).g === b.g);
+    return [PStr.esc(b.label), inRange.length, assessed.length ? PStr.fmt(inRange.length / assessed.length * 100) : '0%'];
+  });
+  bucketSummary.push(['<span class="font-semibold">Total</span>', assessed.length, PStr.fmt(100)]);
+
+  const byL = {};
+  d.learners.forEach(l => byL[l.id] = l);
+  const partLearners = roster.slice().sort((a, b) => {
+    const ap = byL[a.id] && byL[a.id].pct, bp = byL[b.id] && byL[b.id].pct;
+    return (bp == null ? -1 : bp) - (ap == null ? -1 : ap) || String(a.full_name || '').localeCompare(String(b.full_name || ''));
+  });
+  const partRows = partLearners.map(l => {
+    const ll = byL[l.id];
+    const pct = ll && ll.pct != null ? ll.pct : null;
+    return [
+      PStr.esc(l.learner_code || '-'),
+      `<span class="col-name">${PStr.esc(l.full_name || 'Student')}</span>`,
+      PStr.esc(psrGenderOf(l)),
+      pct != null ? `<span class="font-semibold">${PStr.fmt(pct)}</span>` : '<span class="text-muted">-</span>',
+      pct != null ? psrGradeBadge(ll.grade || psrGradeOf(pct)) : '-',
+      pct != null ? psrBadgePct(pct, passMark) : '<span class="badge badge-neutral">Not assessed</span>'
+    ];
+  });
+
+  const byGender = {};
+  roster.forEach(l => {
+    const g = psrGenderOf(l);
+    if (!byGender[g]) byGender[g] = { expected: 0, assessed: 0, pcts: [] };
+    byGender[g].expected++;
+  });
+  assessed.forEach(l => {
+    const g = psrGenderOf(l);
+    if (!byGender[g]) byGender[g] = { expected: 0, assessed: 0, pcts: [] };
+    byGender[g].assessed++;
+    byGender[g].pcts.push(l.pct);
+  });
+  const genderRows = Object.keys(byGender).sort().map(g => {
+    const b = byGender[g];
+    const avg = b.pcts.length ? PStr.round(b.pcts.reduce((x, y) => x + y, 0) / b.pcts.length) : null;
+    const pr = b.pcts.length ? Math.round(b.pcts.filter(p => p >= passMark).length / b.pcts.length * 1000) / 10 : null;
+    return [`<span class="font-semibold">${PStr.esc(g)}</span>`, b.expected, b.assessed, avg != null ? PStr.fmt(avg) : '-', pr != null ? PStr.fmt(pr) : '-'];
+  });
+  genderRows.push(['<span class="font-semibold">Total</span>', participation.expected, participation.sat, PStr.fmt(k.overall), PStr.fmt(k.passRate)]);
+
+  return {
+    printHeader: psrReportHeader('POST-ASSESSMENT REPORT - ' + meta.scopeLabel.toUpperCase(), 'Overview of the selected assessment scope: roster participation, performance summary, grade distribution and 10-percentage-point performance ranges.'),
+    printSignature: psrReportSignature(),
+    kpis,
+    tables: [infoTable,
+      { title: 'Class Participation', icon: 'users-round', note: participation.warnings.length ? participation.warnings.join(' ') : 'Students registered in the classes in scope and whether they were assessed. Missing marks are never treated as zero.',
+        cols: ['Student ID', 'Student Name', 'Gender', 'Overall %', 'Grade', 'Result'], centerCols: [2, 3, 4, 5], id: 'psr-overview-participants', searchable: true, sortable: true, pageSize: 50, rows: partRows },
+      { title: 'Grade Summary', icon: 'graduation-cap', note: 'Counts and percentages from the school grading scale (database-driven)',
+        cols: ['Grade', 'Descriptor', 'Percentage Range', 'Students', '% of Assessed', 'Pass/Fail'], centerCols: [2, 3, 4], rows: gradeTable.rows },
+      { title: 'Performance Range Summary', icon: 'bar-chart-3', note: 'Students per independent 10-percentage-point range of overall percentage',
+        cols: ['Range', 'Students', '% of Assessed'], centerCols: [1, 2], rows: bucketSummary },
+      { title: 'Participation by Gender', icon: 'users', note: 'Expected vs assessed learners with average and pass rate per gender',
+        cols: ['Gender', 'Expected', 'Assessed', 'Average %', 'Pass Rate %'], centerCols: [1, 2, 3, 4], rows: genderRows }
+    ],
+    charts: [
+      { id: 'psr-overview-pf', title: 'Pass / Fail', sub: 'Pass mark ' + PStr.round(passMark) + '%', icon: 'circle-dot', type: 'donut', half: true,
+        opts: { items: [{ label: 'Pass', value: k.passed, color: '#16a34a' }, { label: 'Fail', value: k.failed, color: '#dc2626' }], centerLabel: PStr.fmt(k.passRate), centerSub: 'pass rate', title: 'Pass/Fail' } },
+      { id: 'psr-overview-grade', title: 'Grade Distribution', sub: 'Students per grade of the grading scale', icon: 'bar-chart-3', type: 'bar', half: true,
+        opts: { items: gradeTable.dist.map(g => ({ label: 'Grade ' + g.grade, value: g.count, sub: g.descriptor || g.range })), title: 'Grades' } }
+    ]
+  };
+}
+
+/* ---------- Report 2: Subject Performance (detail or per-subject summary) ---------- */
+
+function psrSubjectModel() {
+  const d = psrData;
+  const k = d.kpis;
+  const passMark = k.passMark;
+  const participation = psrParticipation();
+
+  if (psrState.reportScope === 'subject' && (psrState.subjectId === 'all' || psrState.classId === 'all')) {
+    return { prompt: { title: 'Select a class and subject', msg: 'In Subject scope this report shows one class and subject at a time. Choose a class and a subject from the filters above (teachers only see their assigned ones).' } };
+  }
+
+  if (psrState.subjectId === 'all') {
+    return psrSubjectSummaryModel();
+  }
+
+  const assessments = psrRaw.assessments;
+
+  const kpis = [
+    { label: 'Expected Roster', value: participation.expected, icon: 'users-round', tone: 'blue' },
+    { label: 'Students Assessed', value: participation.sat, icon: 'clipboard-check', tone: 'blue' },
+    { label: 'Participation Rate', value: PStr.fmt(participation.rate), icon: 'percent', tone: participation.rate >= 90 ? 'green' : (participation.rate >= 50 ? 'amber' : 'red'), sub: participation.absent ? participation.absent + ' absent' : 'Full participation' },
+    { label: 'Subject Average', value: PStr.fmt(k.overall), icon: 'calculator', tone: 'blue' },
+    { label: 'Highest', value: PStr.fmt(k.highest), icon: 'trending-up', tone: 'green' },
+    { label: 'Lowest', value: PStr.fmt(k.lowest), icon: 'trending-down', tone: 'red' },
     { label: 'Pass Rate', value: PStr.fmt(k.passRate), icon: 'badge-check', tone: 'green', sub: 'Pass mark ' + PStr.round(passMark) + '%' },
     { label: 'Fail Rate', value: PStr.fmt(k.failRate), icon: 'alert-triangle', tone: 'red' }
   ];
@@ -377,21 +1001,23 @@ function psrSubjectModel() {
     };
   });
 
-  const studentCols = ['#', 'Student ID', 'Student Name', 'Gender'].concat(assessments.map(a => (a.name || a.unit).length > 16 ? (a.name || a.unit).slice(0, 14) + '…' : (a.name || a.unit))).concat(['Overall %', 'Grade', 'Result', 'Position']);
-  const centerCols = [];
-  for (let i = 0; i < studentCols.length; i++) centerCols.push(i);
-  const studentRows = d.learners.map((l, idx) => {
-    const row = [idx + 1, PStr.esc(l.code), `<span class="col-name">${PStr.esc(l.name)}</span>`, PStr.esc(l.gender)];
+  const rankTotal = psrAssessedLearners().length;
+  const sortedLearners = d.learners.slice().sort((a, b) => (b.pct == null ? -1 : b.pct) - (a.pct == null ? -1 : a.pct));
+  const studentCols = ['#', 'Student ID', 'Student Name', 'Class', 'Gender'].concat(assessments.map(a => (a.name || a.unit).length > 14 ? (a.name || a.unit).slice(0, 12) + '...' : (a.name || a.unit))).concat(['Overall %', 'Grade', 'Result', 'Rank', 'Comment']);
+  const centerCols = [0, 3, 4];
+  for (let i = 5; i < studentCols.length - 1; i++) centerCols.push(i);
+  const studentRows = sortedLearners.map((l, idx) => {
+    const row = [idx + 1, PStr.esc(l.code), `<span class="col-name">${PStr.esc(l.name)}</span>`, PStr.esc(l.className || '-'), PStr.esc(psrGenderOf(l))];
     assessments.forEach(a => {
       const v = l.assessmentPct ? l.assessmentPct[a.id] : null;
       row.push(v != null ? `<span class="font-semibold">${PStr.round(v)}%</span>` : '<span class="text-muted">-</span>');
     });
-    row.push(`<span class="font-semibold">${PStr.fmt(l.pct)}</span>`, psrGradeBadge(l.grade), psrBadgePct(l.pct, passMark), l.position != null ? '#' + l.position : '-');
+    row.push(`<span class="font-semibold">${PStr.fmt(l.pct)}</span>`, psrGradeBadge(l.grade), psrBadgePct(l.pct, passMark), l.position != null ? '#' + l.position + ' / ' + rankTotal : '-', psrCommentCell(l.id, l.grade));
     return row;
   });
 
   return {
-    printHeader: psrReportHeader('SUBJECT PERFORMANCE REPORT', 'Number of students assessed, class average, highest / lowest average, pass / fail rate, student-by-student results and grade distribution.'),
+    printHeader: psrReportHeader('SUBJECT PERFORMANCE REPORT', 'Students assessed, participation, subject average, highest / lowest average, pass / fail rate, per-assessment results and grade distribution.'),
     printSignature: psrReportSignature(),
     kpis,
     charts: [
@@ -408,76 +1034,125 @@ function psrSubjectModel() {
         centerCols: [2, 3, 4, 5, 6, 7, 8],
         rows: assessStats.map(a => [PStr.esc(a.name), PStr.esc((psrRaw.assessments.find(x => x.id === a.id) || {})._typeName || '-'), a.max, a.weight != null ? PStr.round(a.weight) : '-', PStr.fmt(a.avg), PStr.fmt(a.high), PStr.fmt(a.low), PStr.fmt(a.passRate), a.count]) },
       { title: 'Student-by-Student Results', icon: 'users', note: 'Per-assessment percentage and weighted overall (existing RMS-MIS engine)',
-        cols: studentCols, centerCols, rows: studentRows }
+        cols: studentCols, centerCols, rows: studentRows, id: 'psr-sub-students', searchable: true, sortable: true, pageSize: 50 }
     ]
   };
 }
 
-/* ---------- Report 2: Performance Range ---------- */
+/* Per-subject summary (class / school scope when no single subject is selected) */
+function psrSubjectSummaryModel() {
+  const passMark = psrData.kpis.passMark;
+  const ctx = psrCtx;
+  const byS = {};
+  psrRaw.marks.forEach(m => {
+    const a = psrRaw.assessments.find(x => x.id === m.assessment_id);
+    if (!a || a.subject_id == null) return;
+    const p = AnalyticsEngine.pctFor(m.mark, a);
+    if (p == null) return;
+    const key = a.subject_id;
+    if (!byS[key]) byS[key] = { pcts: [], learners: new Set(), assessments: new Set() };
+    byS[key].pcts.push(p);
+    byS[key].learners.add(m.learner_id);
+    byS[key].assessments.add(a.id);
+  });
+  const stats = Object.keys(byS).map(sid => {
+    const g = byS[sid];
+    const total = g.pcts.reduce((x, y) => x + y, 0);
+    const justPass = g.pcts.filter(p => p >= passMark).length;
+    return {
+      name: (ctx.subjectById(sid) || {}).name || 'Unknown subject',
+      assessments: g.assessments.size,
+      assessed: g.learners.size,
+      avg: PStr.round(total / g.pcts.length),
+      high: PStr.round(Math.max(...g.pcts)),
+      low: PStr.round(Math.min(...g.pcts)),
+      passRate: PStr.round(justPass / g.pcts.length * 100)
+    };
+  }).sort((a, b) => b.avg - a.avg);
+
+  const totalAssessed = new Set();
+  psrRaw.marks.forEach(m => { if (m.learner_id) totalAssessed.add(m.learner_id); });
+
+  const kpis = [
+    { label: 'Subjects in Scope', value: stats.length, icon: 'book-open', tone: 'blue' },
+    { label: 'Learners Assessed', value: totalAssessed.size, icon: 'users-round', tone: 'blue' },
+    { label: 'Best Average', value: stats.length ? PStr.esc(stats[0].name) : '-', icon: 'medal', tone: 'green', sub: stats.length ? PStr.fmt(stats[0].avg) + ' average' : '' },
+    { label: 'Lowest Average', value: stats.length ? PStr.esc(stats[stats.length - 1].name) : '-', icon: 'alert-triangle', tone: 'red', sub: stats.length ? PStr.fmt(stats[stats.length - 1].avg) + ' average' : '' }
+  ];
+
+  return {
+    printHeader: psrReportHeader('SUBJECT PERFORMANCE REPORT', 'Subject-by-subject summary for the classes in scope: assessments, assessed learners, average, highest / lowest and pass rate.'),
+    printSignature: psrReportSignature(),
+    kpis,
+    charts: [
+      { id: 'psr-subsum-bar', title: 'Subject Averages', sub: 'Across all assessments in scope per subject', icon: 'bar-chart-3', type: 'bar', half: false,
+        opts: { items: stats.map(s => ({ label: s.name, value: s.avg, sub: s.assessed + ' learners' })), title: 'Subject averages' } }
+    ],
+    tables: [
+      { title: 'Subject Performance Summary', icon: 'book-open', note: 'Per subject across the classes in scope',
+        cols: ['Subject', 'Assessments', 'Assessed Learners', 'Average %', 'Highest %', 'Lowest %', 'Pass Rate %'],
+        centerCols: [1, 2, 3, 4, 5, 6],
+        rows: stats.map(s => [PStr.esc(s.name), s.assessments, s.assessed, PStr.fmt(s.avg), PStr.fmt(s.high), PStr.fmt(s.low), PStr.fmt(s.passRate)]) }
+    ]
+  };
+}
+
+/* ---------- Report 1: Performance Range (10-point buckets) ---------- */
 
 function psrRangeModel() {
   const d = psrData;
   const k = d.kpis;
   const passMark = k.passMark;
-  if (!d.learners.length) {
-    return { prompt: { title: 'No learners assessed', msg: 'No assessed students were found for the selected filters.' } };
-  }
+  const assessed = psrAssessedLearners();
 
-  // Use the centralized GradingEngine performance ranges from database
-  const perfRanges = typeof GradingEngine !== 'undefined' && psrCtx?.scale
-    ? GradingEngine.getPerformanceRangesSync(psrCtx.scale)
-    : psrRangeFallback();
-
-  const assessed = d.learners.filter(l => l.pct != null);
-  const buckets = perfRanges.map(r => {
-    const inRange = assessed.filter(l => l.pct >= r.min && l.pct <= r.max);
-    return {
-      label: r.label,
-      shortLabel: r.shortLabel,
-      grade: r.grade,
-      descriptor: r.descriptor,
-      isPass: r.isPass,
-      color: r.color,
-      count: inRange.length,
-      pct: assessed.length ? PStr.round(inRange.length / assessed.length * 100) : 0,
-      students: inRange.map(l => ({ name: l.name, code: l.code, className: l.className, pct: l.pct, grade: l.grade, pf: l.pf }))
-    };
+  const buckets = psrBuckets().map(b => {
+    const students = assessed.filter(l => psrBucketOf(l.pct).g === b.g).sort((x, y) => y.pct - x.pct);
+    let boys = 0, girls = 0;
+    students.forEach(s => { if (psrGenderOf(s) === 'M') boys++; else if (psrGenderOf(s) === 'F') girls++; });
+    return { label: b.label, color: b.color, count: students.length, pct: assessed.length ? Math.round(students.length / assessed.length * 1000) / 10 : 0, students, boys, girls };
   });
-  const largest = buckets.reduce((a, b) => b.count > a.count ? b : a, buckets[0]);
-  const bottomRange = buckets[buckets.length - 1];
+  const populated = buckets.filter(b => b.count > 0);
+  const largest = populated.length ? populated.reduce((a, b2) => b2.count > a.count ? b2 : a) : null;
+  const bottom = buckets[buckets.length - 1];
+  const view = psrState.rangeView === 'pct' ? 'pct' : 'count';
 
   const kpis = [
     { label: 'Students Assessed', value: assessed.length, icon: 'users-round', tone: 'blue' },
-    { label: 'Class Average', value: PStr.fmt(k.overall), icon: 'calculator', tone: 'blue' },
-    { label: 'Most Populated Range', value: PStr.esc(largest.label), icon: 'trending-up', tone: 'green', sub: largest.count + ' students' },
-    { label: 'Students in Lowest Range', value: bottomRange.count, icon: 'alert-triangle', tone: 'red', sub: PStr.fmt(bottomRange.pct) + ' of assessed' }
+    { label: 'Overall Average', value: PStr.fmt(k.overall), icon: 'calculator', tone: 'blue' },
+    { label: 'Most Populated Range', value: largest ? PStr.esc(largest.label) : '-', icon: 'trending-up', tone: 'green', sub: largest ? largest.count + ' students' : '' },
+    { label: 'Students in 0-9%', value: bottom.count, icon: 'alert-triangle', tone: 'red', sub: PStr.fmt(bottom.pct) + ' of assessed' }
   ];
 
-  const rangeRows = buckets.map(b => [PStr.esc(b.label), b.count, PStr.fmt(b.pct)]);
-  const chipsHtml = buckets.map(b =>
-    `<div class="rms-donut-legend-item"><span class="rms-legend-swatch" style="background:${b.color}"></span><span>${PStr.esc(b.label)}</span><span class="font-semibold">${b.count}</span><span class="text-muted">(${PStr.fmt(b.pct)})</span></div>`).join('');
+  const rangeRows = buckets.map(b => [PStr.esc(b.label), b.boys, b.girls, b.count, PStr.fmt(b.pct)]);
+  const boysT = rangeRows.reduce((a, r) => a + r[1], 0);
+  const girlsT = rangeRows.reduce((a, r) => a + r[2], 0);
+  rangeRows.push(['<span class="font-semibold">Total</span>', boysT, girlsT, assessed.length, PStr.fmt(100)]);
 
-  const studentCols = ['Range', 'Student', 'Student ID', 'Class', 'Overall %', 'Grade', 'Result'];
-  const studentRows = [];
-  buckets.forEach(b => {
-    b.students.slice().sort((x, y) => y.pct - x.pct).forEach(s => {
-      studentRows.push([`<span class="badge" style="background:${b.color};color:#fff">${PStr.esc(b.label)}</span>`, `<span class="col-name">${PStr.esc(s.name)}</span>`, PStr.esc(s.code), PStr.esc(s.className), PStr.fmt(s.pct), psrGradeBadge(s.grade), psrBadgePct(s.pct, passMark)]);
-    });
-  });
+  const toggleHtml = `<div class="psr-toggle-group psr-range-toggle">
+    <button class="psr-toggle-btn ${view === 'count' ? 'active' : ''}" onclick="psrRangeToggle('count')">Students</button>
+    <button class="psr-toggle-btn ${view === 'pct' ? 'active' : ''}" onclick="psrRangeToggle('pct')">% of Assessed</button>
+  </div>`;
+
+  const focusLabel = psrState.rangeFocus && buckets.find(b => b.label === psrState.rangeFocus);
+  const drillTables = [];
+  if (focusLabel && focusLabel.students.length) {
+    drillTables.push({ title: 'Students in ' + focusLabel.label + ' Range', icon: 'users', note: 'Drill-down from the 10-point performance range distribution (independent of the grading scale).',
+      cols: ['#', 'Student ID', 'Student Name', 'Class', 'Gender', 'Overall %', 'Grade', 'Result'], centerCols: [0, 4, 5, 7], id: 'psr-range-students', searchable: true, sortable: true, pageSize: 50,
+      rows: focusLabel.students.map((s, i) => [i + 1, PStr.esc(s.code), `<span class="col-name">${PStr.esc(s.name)}</span>`, PStr.esc(s.className || '-'), PStr.esc(psrGenderOf(s)), `<span class="font-semibold">${PStr.fmt(s.pct)}</span>`, psrGradeBadge(s.grade || psrGradeOf(s.pct)), psrBadgePct(s.pct, passMark)]) });
+  }
 
   return {
-    printHeader: psrReportHeader('PERFORMANCE RANGE REPORT', 'Student distribution across percentage ranges with counts, share of the class and a bar chart.'),
+    printHeader: psrReportHeader('PERFORMANCE RANGE REPORT', 'Distribution of assessed students across ten independent 10-percentage-point ranges (90-100% down to 0-9%), with a clickable chart to drill into each range.'),
     printSignature: psrReportSignature(),
     kpis,
+    chips: toggleHtml,
     charts: [
-      { id: 'psr-range-bar', title: 'Students per Performance Range', sub: 'Overall percentage from the existing calculation engine', icon: 'bar-chart-3', type: 'bar', half: false,
-        opts: { items: buckets.map(b => ({ label: b.label, value: b.count, color: b.color, sub: PStr.fmt(b.pct) + ' of assessed' })), title: 'Performance ranges' } }
+      { id: 'psr-range-bar', title: 'Students per 10-Point Performance Range', icon: 'bar-chart-3', type: 'bar', half: false,
+        opts: { items: buckets.map(b => ({ label: b.label, value: view === 'pct' ? b.pct : b.count, color: b.color, sub: (view === 'pct' ? b.count + ' students' : PStr.fmt(b.pct) + ' of assessed'), _bucket: b.label })), title: 'Performance ranges', onClick: (i, it) => psrRangeFocusOf(it._bucket) } }
     ],
     tables: [
-      { title: 'Range Summary', icon: 'list-checks', cols: ['Performance Range', 'Students', '% of Assessed'], centerCols: [1, 2],
-        rows: rangeRows.concat([[PStr.esc('Total'), assessed.length, PStr.fmt(100)]]) },
-      { title: 'Students in each Performance Range', icon: 'users', cols: studentCols, centerCols: [4, 6], rows: studentRows }
-    ]
+      { title: 'Range Summary', icon: 'list-checks', note: 'Boys and Girls split by the gender recorded for each assessed learner', cols: ['Performance Range', 'Boys', 'Girls', 'Total Students', '% of Assessed'], centerCols: [1, 2, 3, 4], rows: rangeRows }
+    ].concat(drillTables)
   };
 }
 
@@ -493,202 +1168,194 @@ function psrRangeFallback() {
   ];
 }
 
-/* ---------- Report 3: Students Requiring Academic Support ---------- */
+/* ---------- Report 3: Class Performance ---------- */
 
-function psrSupportModel() {
+function psrClassModel() {
+  const d = psrData;
+  const passMark = d.kpis.passMark;
+  const classes = psrFilteredClasses();
+  const roster = psrExpectedRoster();
+  const assessed = psrAssessedLearners();
+
+  const byClass = {};
+  roster.forEach(l => { if (!byClass[l.class_id]) byClass[l.class_id] = []; byClass[l.class_id].push(l); });
+  assessed.forEach(l => { if (!byClass[l.class_id]) byClass[l.class_id] = []; byClass[l.class_id].push(l); });
+
+  const rows = classes.map(c => {
+    const ls = byClass[c.id] || [];
+    const withPct = ls.filter(x => x.pct != null);
+    const expected = roster.filter(x => x.class_id === c.id).length || ls.length;
+    const total = withPct.reduce((a, x) => a + x.pct, 0);
+    const passed = withPct.filter(x => x.pct >= passMark).length;
+    return {
+      name: c.name,
+      expected: expected,
+      assessed: withPct.length,
+      rate: expected > 0 ? PStr.round(withPct.length / expected * 100) : (withPct.length > 0 ? 100 : 0),
+      avg: withPct.length > 0 ? PStr.round(total / withPct.length) : null,
+      high: withPct.length > 0 ? PStr.round(Math.max(...withPct.map(x => x.pct))) : null,
+      low: withPct.length > 0 ? PStr.round(Math.min(...withPct.map(x => x.pct))) : null,
+      passRate: withPct.length > 0 ? PStr.round(passed / withPct.length * 100) : null,
+      failRate: withPct.length > 0 ? PStr.round((withPct.length - passed) / withPct.length * 100) : null
+    };
+  }).sort((a, b) => (b.avg == null ? -1 : b.avg) - (a.avg == null ? -1 : a.avg));
+      const ranked = rows.filter(r => r.avg != null);
+  const best = ranked[0];
+  const weakest = ranked[ranked.length - 1];
+
+  const kpis = [
+    { label: 'Classes in Scope', value: classes.length, icon: 'school', tone: 'blue' },
+    { label: 'Learners Assessed', value: assessed.length, icon: 'users-round', tone: 'blue' },
+    { label: 'Best Class Average', value: best ? PStr.esc(best.name) : '-', icon: 'medal', tone: 'green', sub: best ? PStr.fmt(best.avg) + ' average' : '' },
+    { label: 'Lowest Class Average', value: weakest ? PStr.esc(weakest.name) : '-', icon: 'alert-triangle', tone: 'red', sub: weakest ? PStr.fmt(weakest.avg) + ' average' : '' }
+  ];
+
+  return {
+    printHeader: psrReportHeader('CLASS PERFORMANCE REPORT', 'Per-class comparison for the classes in scope: expected roster, assessed learners, participation, average, highest / lowest and pass rate.'),
+    printSignature: psrReportSignature(),
+    kpis,
+    charts: [
+      { id: 'psr-class-avg', title: 'Class Averages', sub: 'Weighted overall average per class via the existing RMS-MIS engine', icon: 'bar-chart-3', type: 'bar', half: false,
+        opts: { items: rows.map(r => ({ label: r.name.length > 18 ? r.name.slice(0, 16) + '...' : r.name, value: r.avg == null ? 0 : r.avg, sub: r.assessed + ' assessed', color: undefined })), title: 'Class averages' } }
+    ],
+    tables: [
+      { title: 'Class Performance Summary', icon: 'school', note: 'Participation compares assessed learners against the active roster of each class',
+        cols: ['Class', 'Expected Roster', 'Assessed', 'Participation %', 'Average %', 'Highest %', 'Lowest %', 'Pass Rate %', 'Fail Rate %'],
+        centerCols: [1, 2, 3, 4, 5, 6, 7, 8], id: 'psr-class-table', searchable: true, sortable: true,
+        rows: rows.map(r => [PStr.esc(r.name), r.expected, r.assessed, PStr.fmt(r.rate), PStr.fmt(r.avg), PStr.fmt(r.high), PStr.fmt(r.low), PStr.fmt(r.passRate), PStr.fmt(r.failRate)]) }
+    ]
+  };
+}
+
+/* ---------- Report 4: School Performance ---------- */
+
+function psrSchoolModel() {
+  if (psrState.reportScope !== 'school') {
+    return { prompt: { title: 'Switch scope to School', msg: 'The School Performance Report compares whole levels, subjects and teaching teams. Use the scope switcher at the top to choose School.' } };
+  }
   const d = psrData;
   const ctx = psrCtx;
   const passMark = d.kpis.passMark;
-  if (!d.learners.length) {
-    return { prompt: { title: 'No learners assessed', msg: 'No assessed students were found for the selected filters.' } };
-  }
+  const classes = psrFilteredClasses();
+  const roster = psrExpectedRoster();
+  const assessed = psrAssessedLearners();
 
-  // Use GradingEngine to determine pass/fail instead of just passMark
-  const scale = ctx.scale || [];
+  const byLevel = {};
+  const levelOfClassId = {};
+  classes.forEach(c => { const lv = psrLevelGroupOf(c.level) || 'Other'; levelOfClassId[c.id] = lv; if (!byLevel[lv]) byLevel[lv] = { key: lv, classes: [], students: [] }; byLevel[lv].classes.push(c); });
+  assessed.forEach(l => { const lv = levelOfClassId[l.class_id]; if (byLevel[lv]) byLevel[lv].students.push(l); });
 
-  const posByAssessment = {};
-  psrRaw.assessments.forEach(a => {
-    const ms = psrRaw.marks.filter(m => m.assessment_id === a.id && m.mark != null && m.mark !== '')
-      .map(m => ({ id: m.learner_id, pct: AnalyticsEngine.pctFor(m.mark, a) }))
-      .filter(x => x.pct != null)
-      .sort((x, y) => y.pct - x.pct);
-    const map = {};
-    let p = 1;
-    ms.forEach((s, i) => { if (i > 0 && s.pct < ms[i - 1].pct) p = i + 1; map[s.id] = p; });
-    posByAssessment[a.id] = map;
+  const levelRows = Object.keys(byLevel).map(k => {
+    const g = byLevel[k];
+    const total = g.students.reduce((a, x) => a + x.pct, 0);
+    const passed = g.students.filter(x => x.pct >= passMark).length;
+    return { name: k, classes: g.classes.length, assessed: g.students.length, avg: g.students.length ? PStr.round(total / g.students.length) : null, passRate: g.students.length ? PStr.round(passed / g.students.length * 100) : null };
+  }).sort((a, b) => String(a.name).localeCompare(String(b.name)));
+
+  const bySubject = {};
+  psrRaw.marks.forEach(m => {
+    const a = psrRaw.assessments.find(x => x.id === m.assessment_id);
+    if (!a || a.subject_id == null) return;
+    const p = AnalyticsEngine.pctFor(m.mark, a);
+    if (p == null) return;
+    if (!bySubject[a.subject_id]) bySubject[a.subject_id] = { pcts: [], learners: new Set() };
+    bySubject[a.subject_id].pcts.push(p);
+    bySubject[a.subject_id].learners.add(m.learner_id);
   });
+  const subjectRows = Object.keys(bySubject).map(sid => {
+    const g = bySubject[sid];
+    const total = g.pcts.reduce((a, x) => a + x, 0);
+    const passed = g.pcts.filter(x => x >= passMark).length;
+    return { name: (ctx.subjectById(sid) || {}).name || 'Unknown subject', assessed: g.learners.size, avg: PStr.round(total / g.pcts.length), passRate: PStr.round(passed / g.pcts.length * 100) };
+  }).sort((a, b) => b.avg - a.avg);
 
-  const entries = [];
+  const byTeacher = {};
   psrRaw.assessments.forEach(a => {
-    psrRaw.marks.filter(m => m.assessment_id === a.id && m.mark != null && m.mark !== '').forEach(m => {
-      const pct = AnalyticsEngine.pctFor(m.mark, a);
-      if (pct == null) return;
-      
-      // Use GradingEngine to determine if this is a fail
-      const gradeInfo = typeof GradingEngine !== 'undefined' && scale.length
-        ? GradingEngine.calculateGradeSync(pct, scale)
-        : { isPass: pct >= passMark, grade: Utils.grade(pct, scale) };
-      
-      if (gradeInfo.isPass) return;
-      
-      const l = ctx.learnerById(m.learner_id);
-      if (!l) return;
-      entries.push({
-        name: l.full_name,
-        code: l.learner_code || '-',
-        className: l.class_id ? (ctx.classByName(l.class_id)?.name || '-') : '-',
-        mark: m.mark,
-        max: a.maximum_mark,
-        pct,
-        grade: gradeInfo.grade || m.grade || Utils.grade(pct, scale),
-        pos: posByAssessment[a.id][m.learner_id],
-        assessment: a.name || a.unit,
-        subject: a._subject ? a._subject.name : '-',
-        type: a._typeName,
-        date: a.assessment_date
-      });
+    if (a.teacher_id == null) return;
+    if (!byTeacher[a.teacher_id]) byTeacher[a.teacher_id] = { name: ((ctx.teachers || []).find(t => t.id === a.teacher_id) || {}).full_name || 'Teacher', pcts: [] };
+    psrRaw.marks.forEach(m => {
+      if (m.assessment_id !== a.id) return;
+      const p = AnalyticsEngine.pctFor(m.mark, a);
+      if (p != null) byTeacher[a.teacher_id].pcts.push(p);
     });
   });
-  entries.sort((a, b) => a.pct - b.pct);
-
-  const distinct = new Set(entries.map(e => e.name)).size;
-  const shareOfAssessed = d.kpis.assessed ? PStr.round(distinct / d.kpis.assessed * 100) : 0;
-  const avgEntry = entries.length ? PStr.round(entries.reduce((a, x) => a + x.pct, 0) / entries.length) : null;
+  const teacherRows = Object.keys(byTeacher).map(tid => {
+    const g = byTeacher[tid];
+    const passed = g.pcts.filter(x => x >= passMark).length;
+    return { name: g.name, assessed: g.pcts.length, avg: g.pcts.length ? PStr.round(g.pcts.reduce((a, x) => a + x, 0) / g.pcts.length) : null, passRate: g.pcts.length ? PStr.round(passed / g.pcts.length * 100) : null };
+  }).sort((a, b) => b.avg - a.avg);
 
   const kpis = [
-    { label: 'Students Requiring Academic Support', value: distinct, icon: 'life-buoy', tone: 'amber', sub: 'Below the pass threshold (Grade F)' },
-    { label: 'Support Entries', value: entries.length, icon: 'clipboard-list', tone: 'amber', sub: 'One entry per below-pass assessment mark' },
-    { label: 'Share of Assessed', value: PStr.fmt(shareOfAssessed), icon: 'percent', tone: 'red' },
-    { label: 'Support Entry Average', value: PStr.fmt(avgEntry), icon: 'calculator', tone: 'red' }
+    { label: 'Classes in Scope', value: classes.length, icon: 'school', tone: 'blue' },
+    { label: 'Learners Assessed', value: assessed.length, icon: 'users-round', tone: 'blue' },
+    { label: 'Overall Average', value: PStr.fmt(d.kpis.overall), icon: 'calculator', tone: 'blue' },
+    { label: 'Pass Rate', value: PStr.fmt(d.kpis.passRate), icon: 'badge-check', tone: 'green', sub: 'Pass mark ' + PStr.round(passMark) + '%' }
   ];
 
-  const rows = entries.map(e => [
-    `<span class="col-name">${PStr.esc(e.name)}</span>`, PStr.esc(e.code), PStr.esc(e.assessment), PStr.esc(e.subject), PStr.esc(e.type),
-    `<span class="font-semibold">${e.mark}</span>`, e.max, `<span class="font-semibold">${PStr.round(e.pct)}%</span>`,
-    psrGradeBadge(e.grade), e.pos ? '#' + e.pos : '-', PStr.esc(e.className), PStr.esc(e.date || '-')
+  return {
+    printHeader: psrReportHeader('SCHOOL PERFORMANCE REPORT', 'Whole-school comparison across levels, subjects and teaching teams for the classes in scope: averages, pass rates, participation and subject performance.'),
+    printSignature: psrReportSignature(),
+    kpis,
+    charts: [
+      { id: 'psr-sch-level', title: 'Average per Level', sub: 'Education level grouping derived from class level values', icon: 'building-2', type: 'bar', half: true,
+        opts: { items: levelRows.map(r => ({ label: r.name, value: r.avg == null ? 0 : r.avg, sub: r.assessed + ' learners', color: undefined })), title: 'Level averages' } },
+      { id: 'psr-sch-subject', title: 'Subject Averages', sub: 'Across all assessments in scope per subject', icon: 'book-open', type: 'bar', half: true,
+        opts: { items: subjectRows.map(s => ({ label: s.name.length > 18 ? s.name.slice(0, 16) + '...' : s.name, value: s.avg == null ? 0 : s.avg, sub: s.assessed + ' learners', color: undefined })), title: 'Subject averages' } }
+    ],
+    tables: [
+      { title: 'Level Summary', icon: 'building-2', note: 'Average and pass rate across the classes of each level',
+        cols: ['Level', 'Classes', 'Assessed Learners', 'Average %', 'Pass Rate %'], centerCols: [1, 2, 3, 4],
+        rows: levelRows.map(r => [PStr.esc(r.name), r.classes, r.assessed, PStr.fmt(r.avg), PStr.fmt(r.passRate)]) },
+      { title: 'Subject Performance', icon: 'book-open', note: 'Per subject across the classes in scope',
+        cols: ['Subject', 'Assessed Learners', 'Average %', 'Pass Rate %'], centerCols: [1, 2, 3],
+        rows: subjectRows.map(r => [PStr.esc(r.name), r.assessed, PStr.fmt(r.avg), PStr.fmt(r.passRate)]) },
+      { title: 'Teacher Performance', icon: 'users', note: 'Average of the marks on assessments owned by each teacher',
+        cols: ['Teacher', 'Assessed Marks', 'Average %', 'Pass Rate %'], centerCols: [1, 2, 3],
+        rows: teacherRows.map(r => [PStr.esc(r.name), r.assessed, PStr.fmt(r.avg), PStr.fmt(r.passRate)]) }
+    ]
+  };
+}
+
+/* ---------- Report 5: Student Details ---------- */
+
+function psrStudentsModel() {
+  const d = psrData;
+  const passMark = d.kpis.passMark;
+  const assessed = psrAssessedLearners().slice().sort((a, b) => b.pct - a.pct);
+  const rankTotal = assessed.length;
+  const top = assessed.slice(0, 5);
+  const support = assessed.filter(l => l.pct < passMark).length;
+
+  const kpis = [
+    { label: 'Students Assessed', value: rankTotal, icon: 'users-round', tone: 'blue' },
+    { label: 'Passed', value: d.kpis.passed, icon: 'badge-check', tone: 'green', sub: PStr.fmt(d.kpis.passRate) + ' pass rate' },
+    { label: 'Requiring Support', value: support, icon: 'life-buoy', tone: 'amber', sub: 'Below pass mark ' + PStr.round(passMark) + '%' },
+    { label: 'Average Mark', value: PStr.fmt(d.kpis.overall), icon: 'calculator', tone: 'blue' }
+  ];
+
+  const studentCols = ['Rank', 'Student ID', 'Student Name', 'Class', 'Gender', 'Overall %', 'Grade', 'Result'];
+  const studentRows = assessed.map((l, idx) => [
+    idx === 0 ? '<span class="badge" style="background:#166534;color:#fff">1</span>' : '<span class="font-semibold">' + (idx + 1) + '</span>',
+    PStr.esc(l.code), `<span class="col-name">${PStr.esc(l.name)}</span>`,
+    PStr.esc(l.className || '-'), PStr.esc(psrGenderOf(l)),
+    `<span class="font-semibold">${PStr.fmt(l.pct)}</span>`, psrGradeBadge(l.grade), psrBadgePct(l.pct, passMark)
   ]);
 
-  const charts = entries.length && distinct
-    ? [{ id: 'psr-support-pf', title: 'Students Needing Support vs Assessed', sub: 'Based on grading scale fail range', icon: 'circle-dot', type: 'donut', half: true,
-        opts: { items: [{ label: 'Requiring support (Fail range)', value: distinct, color: '#f59e0b' }, { label: 'At or above pass threshold', value: Math.max(d.kpis.assessed - distinct, 0), color: '#16a34a' }], centerLabel: distinct + '', centerSub: 'students', title: 'Academic support' } }]
-    : [];
+  const topRows = top.map((l, idx) => [idx + 1, PStr.esc(l.code), `<span class="col-name">${PStr.esc(l.name)}</span>`, PStr.esc(l.className || '-'), PStr.esc(psrGenderOf(l)), PStr.fmt(l.pct), psrGradeBadge(l.grade)]);
 
   return {
-    printHeader: psrReportHeader('STUDENTS REQUIRING ACADEMIC SUPPORT', 'Students in the fail range (Grade F) of the school grading scale, with mark, percentage, grade, position where available, assessment and subject.'),
-    printSignature: psrReportSignature(),
-    kpis,
-    charts,
-    tables: [
-      { title: 'Academic Support List', icon: 'life-buoy', note: 'Fail range determined by school grading scale configuration',
-        cols: ['Student', 'Student ID', 'Assessment', 'Subject', 'Type', 'Mark', 'Max', 'Percentage', 'Grade', 'Position', 'Class', 'Date'],
-        centerCols: [5, 6, 7, 9, 11], rows }
-    ]
-  };
-}
-
-/* ---------- Report 4: Grade Distribution ---------- */
-
-function psrGradesModel() {
-  const d = psrData;
-  const ctx = psrCtx;
-  const passMark = d.kpis.passMark;
-  if (!d.learners.length) {
-    return { prompt: { title: 'No learners assessed', msg: 'No assessed students were found for the selected filters.' } };
-  }
-
-  // Use centralized GradingEngine for grade distribution
-  const gradeDist = typeof GradingEngine !== 'undefined' && ctx.scale
-    ? GradingEngine.getGradeDistribution(d.learners.map(l => l.grade).filter(Boolean), ctx.scale)
-    : [];
-
-  const assessed = d.learners.filter(l => l.pct != null);
-  const used = gradeDist.filter(g => g.count > 0).length;
-  const modal = gradeDist.reduce((a, b) => b.count > a.count ? b : a, gradeDist[0]);
-
-  const kpis = [
-    { label: 'Students Assessed', value: assessed.length, icon: 'users-round', tone: 'blue' },
-    { label: 'Grade Bands Used', value: used, icon: 'graduation-cap', tone: 'purple', sub: 'of ' + gradeDist.length + ' configured' },
-    { label: 'Modal Grade', value: modal ? PStr.esc(modal.grade) : '-', icon: 'medal', tone: 'green', sub: modal ? modal.count + ' students' : '' },
-    { label: 'Pass Mark', value: PStr.round(passMark) + '%', icon: 'badge-check', tone: 'amber' }
-  ];
-
-  return {
-    printHeader: psrReportHeader('GRADE DISTRIBUTION REPORT', 'Number and percentage of students in every grade of the school grading scale (loaded from the RMS-MIS database, never hard-coded).'),
+    printHeader: psrReportHeader('STUDENT DETAILS REPORT', 'Ranked results of every assessed student in scope with grade and pass / fail result, top performers and students requiring support.'),
     printSignature: psrReportSignature(),
     kpis,
     charts: [
-      { id: 'psr-grade-bar', title: 'Grade Distribution', sub: 'From grading_scales configuration', icon: 'bar-chart-3', type: 'bar', half: false,
-        opts: { items: gradeDist.map(g => ({ label: 'Grade ' + g.grade, value: g.count, sub: g.descriptor || g.range, color: GradingEngine._rangeColor(g.grade) })), title: 'Grades' } }
+      { id: 'psr-stud-pf', title: 'Pass / Fail', sub: 'Pass mark ' + PStr.round(passMark) + '%', icon: 'circle-dot', type: 'donut', half: true,
+        opts: { items: [{ label: 'Pass', value: d.kpis.passed, color: '#16a34a' }, { label: 'Fail', value: d.kpis.failed, color: '#dc2626' }], centerLabel: PStr.fmt(d.kpis.passRate), centerSub: 'pass rate', title: 'Pass/Fail' } }
     ],
     tables: [
-      { title: 'Grade Distribution', icon: 'graduation-cap', note: 'Percentages are of students with a computed overall average',
-        cols: ['Grade', 'Descriptor', 'Percentage Range', 'Students', '% of Assessed', 'Pass/Fail'], centerCols: [2, 3, 4],
-        rows: gradeDist.map(g => [psrGradeBadge(g.grade), PStr.esc(g.descriptor), PStr.esc(g.range), g.count, PStr.fmt(g.percentage), g.isPass ? '<span class="badge badge-success">Pass</span>' : '<span class="badge badge-danger">Fail</span>']).concat([['<span class="font-semibold">Total</span>', '', '', assessed.length, PStr.fmt(100), '']]) }
-    ]
-  };
-}
-
-/* ---------- Report 5: Assessment Analysis & Comparison ---------- */
-
-function psrComparisonModel() {
-  const ctx = psrCtx;
-  const passMark = psrData.kpis.passMark;
-  const all = psrRaw.assessments;
-  const selected = all.filter(a => psrState.cmp[a.id] !== false);
-  if (!selected.length) {
-    return { prompt: { title: 'No assessments selected', msg: 'Select at least one assessment using the checkboxes above (they compare automatically).' } };
-  }
-
-  const stats = selected.map(a => {
-    const ms = psrRaw.marks.filter(m => m.assessment_id === a.id);
-    const valid = ms.map(m => AnalyticsEngine.pctFor(m.mark, a)).filter(p => p != null);
-    return {
-      id: a.id,
-      name: a.name || a.unit,
-      type: a._typeName,
-      weight: a._effWeight,
-      max: Number(a.maximum_mark) || 0,
-      date: a.assessment_date,
-      avg: PStr.round(valid.length ? valid.reduce((x, y) => x + y, 0) / valid.length : 0),
-      high: valid.length ? PStr.round(Math.max(...valid)) : null,
-      low: valid.length ? PStr.round(Math.min(...valid)) : null,
-      passRate: PStr.round(valid.length ? valid.filter(p => p >= passMark).length / valid.length * 100 : 0),
-      count: valid.length
-    };
-  });
-  stats.sort((a, b) => String(a.date).localeCompare(String(b.date)) || String(a.name).localeCompare(String(b.name)));
-
-  const involved = new Set();
-  selected.forEach(a => psrRaw.marks.filter(m => m.assessment_id === a.id && m.mark != null).forEach(m => involved.add(m.learner_id)));
-  const overallAvg = stats.length ? PStr.round(stats.reduce((a, s) => a + s.avg, 0) / stats.length) : 0;
-  const best = stats.reduce((a, b) => b.avg > a.avg ? b : a, stats[0]);
-
-  const chips = all.map(a => {
-    const on = psrState.cmp[a.id] !== false;
-    return `<label class="cmp-chip ${on ? 'on' : ''}"><input type="checkbox" ${on ? 'checked' : ''} onchange="psrToggleCmp('${a.id}', this.checked)">${PStr.esc(a.name || a.unit)}<span class="text-muted">${PStr.esc(a._typeName)}</span></label>`;
-  }).join('');
-
-  const kpis = [
-    { label: 'Assessments Compared', value: selected.length, icon: 'git-compare', tone: 'blue' },
-    { label: 'Learners Involved', value: involved.size, icon: 'users-round', tone: 'purple' },
-    { label: 'Average Across Assessments', value: PStr.fmt(overallAvg), icon: 'calculator', tone: 'blue' },
-    { label: 'Best Performing', value: PStr.esc(best.name), icon: 'medal', tone: 'green', sub: PStr.fmt(best.avg) + ' average' }
-  ];
-
-  return {
-    printHeader: psrReportHeader('ASSESSMENT ANALYSIS & COMPARISON REPORT', 'Comparison of multiple assessments for the selected class and subject on average, highest / lowest mark, pass rate and number assessed.'),
-    printSignature: psrReportSignature(),
-    kpis,
-    chips,
-    charts: [
-      { id: 'psr-cmp-line', title: 'Performance Trend Across Assessments', sub: 'Chronological order by assessment date', icon: 'line-chart', type: 'line', half: false,
-        opts: { labels: stats.map(s => s.name), series: [{ name: 'Average %', values: stats.map(s => s.avg) }, { name: 'Pass Rate %', values: stats.map(s => s.passRate) }], title: 'Assessment comparison' } }
-    ],
-    tables: [
-      { title: 'Assessment Comparison', icon: 'git-compare', note: 'All statistics computed from the actual marks in the database',
-        cols: ['Assessment', 'Type', 'Weight', 'Max Mark', 'Date', 'Average %', 'Highest %', 'Lowest %', 'Pass Rate %', 'Assessed'],
-        centerCols: [2, 3, 5, 6, 7, 8, 9],
-        rows: stats.map(s => [PStr.esc(s.name), PStr.esc(s.type), s.weight != null ? PStr.round(s.weight) : '-', s.max, PStr.esc(s.date || '-'), PStr.fmt(s.avg), PStr.fmt(s.high), PStr.fmt(s.low), PStr.fmt(s.passRate), s.count]) }
+      { title: 'Top Performers', icon: 'medal', note: 'Highest overall averages in the current scope',
+        cols: ['#', 'Student ID', 'Student Name', 'Class', 'Gender', 'Overall %', 'Grade'], centerCols: [0, 4, 5, 6], rows: topRows },
+      { title: 'All Assessed Students', icon: 'users', note: 'Ranked by overall average (existing RMS-MIS engine). Rows can be searched, sorted and exported.',
+        cols: studentCols, centerCols: [0, 4, 5, 7], rows: studentRows, id: 'psr-students-table', searchable: true, sortable: true, pageSize: 50 }
     ]
   };
 }
@@ -698,10 +1365,14 @@ function psrComparisonModel() {
    ============================================================ */
 
 function psrPrint() {
+  psrPrintAll = true;
+  try { psrDrawSection(); } catch (e) { /* ignore */ }
   document.body.classList.add('printing-report', 'psr-printing');
   setTimeout(() => { window.print(); }, 80);
 }
 document.addEventListener('afterprint', function onAfterPrint() {
+  psrPrintAll = false;
+  try { psrDrawSection(); } catch (e) { /* ignore */ }
   document.body.classList.remove('printing-report', 'psr-printing');
 });
 
@@ -711,6 +1382,9 @@ function psrExcelSheets() {
   const passMark = d.kpis.passMark;
   const sheets = [];
   const meta = psrScopeMeta();
+  const assessed = psrAssessedLearners();
+  const roster = psrExpectedRoster();
+  const participation = psrParticipation();
 
   const subjectStats = psrRaw.assessments.map(a => {
     const ms = psrRaw.marks.filter(m => m.assessment_id === a.id);
@@ -722,82 +1396,92 @@ function psrExcelSheets() {
       count: valid.length };
   });
 
-  if (psrState.report === '1' || psrState.report === '2' || psrState.report === '3' || psrState.report === '4') {
-    const kpis = [
-      ['Students Assessed', d.kpis.assessed], ['Overall Average %', d.kpis.overall], ['Highest Average %', d.kpis.highest],
-      ['Lowest Average %', d.kpis.lowest], ['Pass Rate %', d.kpis.passRate], ['Fail Rate %', d.kpis.failRate],
-      ['Pass Mark %', d.kpis.passMark]
-    ];
-    sheets.push({ name: 'Summary', head: ['Metric', 'Value'], rows: kpis });
-  }
+  sheets.push({ name: 'Summary', head: ['Metric', 'Value'], rows: [
+    ['Report Scope', meta.scopeLabel],
+    ['Classes', meta.classCount],
+    ['Expected Roster', participation.expected],
+    ['Students Assessed', participation.sat],
+    ['Participation Rate %', participation.rate],
+    ['Overall Average %', d.kpis.overall],
+    ['Highest Average %', d.kpis.highest],
+    ['Lowest Average %', d.kpis.lowest],
+    ['Pass Rate %', d.kpis.passRate],
+    ['Fail Rate %', d.kpis.failRate],
+    ['Pass Mark %', d.kpis.passMark]
+  ] });
 
-  if (psrState.report === '1') {
-    sheets.push({
-      name: 'Students', head: ['#', 'Student ID', 'Student Name', 'Gender'].concat(psrRaw.assessments.map(a => (a.name || a.unit) + ' (%)')).concat(['Overall %', 'Grade', 'Result', 'Position']),
-      rows: d.learners.map((l, i) => {
-        const row = [i + 1, l.code, l.name, l.gender];
-        psrRaw.assessments.forEach(a => { const v = l.assessmentPct ? l.assessmentPct[a.id] : null; row.push(v != null ? PStr.round(v) : 'N/R'); });
-        row.push(l.pct != null ? PStr.round(l.pct) : 'N/R', l.grade, l.pf, l.position || '-');
-        return row;
-      })
-    });
-    sheets.push({ name: 'Assessment Stats', head: ['Assessment', 'Type', 'Max', 'Weight', 'Average %', 'Highest %', 'Lowest %', 'Pass Rate %', 'Assessed'],
-      rows: subjectStats.map(s => [s.name, s.type, s.max, s.weight != null ? s.weight : '-', s.avg, s.high, s.low, s.passRate, s.count]) });
-    sheets.push({ name: 'Grade Distribution', head: ['Grade', 'Students', '% of Assessed'],
-      rows: d.gradeRows.map(g => [g.label, g.value, d.kpis.assessed ? PStr.round(g.value / d.kpis.assessed * 100) : 0]) });
-  }
-
-  if (psrState.report === '2') {
-    const ranges = [
-      { label: '90-100%', min: 90, max: 100 }, { label: '80-89%', min: 80, max: 89 },
-      { label: '70-79%', min: 70, max: 79 }, { label: '60-69%', min: 60, max: 69 },
-      { label: '50-59%', min: 50, max: 59 }, { label: '0-49%', min: 0, max: 49 }
-    ];
-    const assessed = d.learners.filter(l => l.pct != null);
-    const bucketRows = ranges.map(r => {
-      const inRange = assessed.filter(l => l.pct >= r.min && l.pct <= r.max);
-      return { label: r.label, list: inRange.map(l => [l.name, l.code, l.className, PStr.round(l.pct), l.grade, l.pf]) };
-    });
-    sheets.push({ name: 'Range Summary', head: ['Range', 'Students', '% of Assessed'],
-      rows: bucketRows.map(b => [b.label, b.list.length, assessed.length ? PStr.round(b.list.length / assessed.length * 100) : 0]) });
-  }
-
-  if (psrState.report === '3') {
-    const rows = [];
-    psrRaw.assessments.forEach(a => {
-      psrRaw.marks.filter(m => m.assessment_id === a.id && m.mark != null && m.mark !== '').forEach(m => {
-        const pct = AnalyticsEngine.pctFor(m.mark, a);
-        if (pct == null || pct >= passMark) return;
-        const l = ctx.learnerById(m.learner_id);
-        if (!l) return;
-        rows.push([l.full_name, l.learner_code || '-', a.name || a.unit, a._subject ? a._subject.name : '-', m.mark, a.maximum_mark, PStr.round(pct), m.grade || Utils.grade(pct, ctx.scale), a.assessment_date || '']);
-      });
-    });
-    rows.sort((a, b) => a[6] - b[6]);
-    sheets.push({ name: 'Academic Support', head: ['Student', 'Student ID', 'Assessment', 'Subject', 'Mark', 'Max', '%', 'Grade', 'Date'], rows });
-  }
-
-  if (psrState.report === '4') {
-    const scale = [...ctx.scale].sort((a, b) => Number(b.minimum_percentage) - Number(a.minimum_percentage));
-    const assessed = d.learners.filter(l => l.pct != null);
-    sheets.push({ name: 'Grade Distribution', head: ['Grade', 'Range %', 'Students', '% of Assessed', 'Remark'],
-      rows: scale.map(g => {
-        const c = assessed.filter(l => (l.grade || '') === g.grade).length;
-        return [g.grade, g.minimum_percentage + '-' + g.maximum_percentage, c, assessed.length ? PStr.round(c / assessed.length * 100) : 0, g.remark || ''];
+  if (psrState.report === '0') {
+    const bc = {};
+    assessed.forEach(l => { const k = psrBucketOf(l.pct).label; if (!bc[k]) bc[k] = { boys: 0, girls: 0, count: 0 }; bc[k].count += 1; if (psrGenderOf(l) === 'B') bc[k].boys += 1; else if (psrGenderOf(l) === 'G') bc[k].girls += 1; });
+    sheets.push({ name: 'Performance Ranges', head: ['Range', 'Boys', 'Girls', 'Students', '% of Assessed'],
+      rows: psrBuckets().map(x => { const g = bc[x.label] || { boys: 0, girls: 0, count: 0 }; return [x.label, g.boys, g.girls, g.count, assessed.length ? PStr.round(g.count / assessed.length * 100) : 0]; }) });
+    sheets.push({ name: 'Grade Summary', head: ['Grade', 'Descriptor', 'Percentage Range', 'Students', '% of Assessed', 'Pass/Fail'],
+      rows: typeof GradingEngine !== 'undefined' && ctx.scale ? GradingEngine.getGradeDistribution(d.learners.map(l => l.grade).filter(Boolean), ctx.scale).map(g => [g.grade, g.descriptor, g.range, g.count, g.percentage, g.isPass ? 'Pass' : 'Fail']) : [] });
+    sheets.push({ name: 'Class Participation', head: ['Class', 'Expected Roster', 'Assessed', 'Participation %', 'Average %', 'Highest %', 'Lowest %', 'Pass Rate %', 'Fail Rate %'],
+      rows: psrFilteredClasses().map(c => {
+        const clsAssessed = assessed.filter(l => l.class_id === c.id);
+        const expected = roster.filter(l => l.class_id === c.id).length || clsAssessed.length;
+        const total = clsAssessed.reduce((a, x) => a + x.pct, 0);
+        const passed = clsAssessed.filter(x => x.pct >= passMark).length;
+        return [c.name, expected, clsAssessed.length, expected ? PStr.round(clsAssessed.length / expected * 100) : (clsAssessed.length ? 100 : 0), clsAssessed.length ? PStr.round(total / clsAssessed.length) : '-', clsAssessed.length ? PStr.round(Math.max(...clsAssessed.map(x => x.pct))) : '-', clsAssessed.length ? PStr.round(Math.min(...clsAssessed.map(x => x.pct))) : '-', clsAssessed.length ? PStr.round(passed / clsAssessed.length * 100) : '-', clsAssessed.length ? PStr.round((clsAssessed.length - passed) / clsAssessed.length * 100) : '-'];
+      }) });
+    sheets.push({ name: 'Gender Breakdown', head: ['Gender', 'Assessed', 'Average %', 'Pass Rate %'],
+      rows: ['B', 'G'].map(gen => {
+        const ls = assessed.filter(l => psrGenderOf(l) === gen);
+        const total = ls.reduce((a, x) => a + x.pct, 0);
+        const passed = ls.filter(x => x.pct >= passMark).length;
+        return [gen === 'B' ? 'Boys' : 'Girls', ls.length, ls.length ? PStr.round(total / ls.length) : '-', ls.length ? PStr.round(passed / ls.length * 100) : '-'];
       }) });
   }
 
-  if (psrState.report === '5') {
-    const selected = psrRaw.assessments.filter(a => psrState.cmp[a.id] !== false);
-    const rows = selected.map(a => {
-      const ms = psrRaw.marks.filter(m => m.assessment_id === a.id);
-      const valid = ms.map(m => AnalyticsEngine.pctFor(m.mark, a)).filter(p => p != null);
-      return [a.name || a.unit, a._typeName, a._effWeight != null ? a._effWeight : '-', a.maximum_mark, a.assessment_date || '-',
-        valid.length ? PStr.round(valid.reduce((x, y) => x + y, 0) / valid.length) : 'N/R',
-        valid.length ? PStr.round(Math.max(...valid)) : 'N/R', valid.length ? PStr.round(Math.min(...valid)) : 'N/R',
-        valid.length ? PStr.round(valid.filter(p => p >= passMark).length / valid.length * 100) : 'N/R', valid.length];
+  if (psrState.report === '1') {
+    const bc = {};
+    assessed.forEach(l => { const k = psrBucketOf(l.pct).label; if (!bc[k]) bc[k] = { boys: 0, girls: 0, list: [] }; if (psrGenderOf(l) === 'B') bc[k].boys += 1; else if (psrGenderOf(l) === 'G') bc[k].girls += 1; bc[k].list.push(l); });
+    sheets.push({ name: 'Range Summary', head: ['Range', 'Boys', 'Girls', 'Students', '% of Assessed'],
+      rows: psrBuckets().map(x => { const g = bc[x.label] || { boys: 0, girls: 0, list: [] }; return [x.label, g.boys, g.girls, g.list.length, assessed.length ? PStr.round(g.list.length / assessed.length * 100) : 0]; }) });
+    if (psrState.rangeFocus && bc[psrState.rangeFocus]) {
+      sheets.push({ name: 'Range Students', head: ['#', 'Student ID', 'Student Name', 'Class', 'Gender', 'Overall %', 'Grade', 'Result'],
+        rows: bc[psrState.rangeFocus].list.map((l, i) => [i + 1, l.code, l.name, l.className || '-', psrGenderOf(l), PStr.round(l.pct), l.grade, l.pct >= passMark ? 'PASS' : 'FAIL']) });
+    }
+  }
+
+  if (psrState.report === '2') {
+    if (psrState.subjectId === 'all') {
+      const m = psrSubjectSummaryModel();
+      const t = m.tables[0];
+      sheets.push({ name: 'Subject Performance', head: t.cols, rows: t.rows.map(r => r.map(c => String(c).replace(/<[^>]*>/g, ''))) });
+    } else {
+      sheets.push({
+        name: 'Students', head: ['#', 'Student ID', 'Student Name', 'Class', 'Gender'].concat(psrRaw.assessments.map(a => (a.name || a.unit) + ' (%)')).concat(['Overall %', 'Grade', 'Result', 'Rank']),
+        rows: d.learners.slice().sort((a, b) => b.pct - a.pct).map((l, i) => {
+          const row = [i + 1, l.code, l.name, l.className || '-', psrGenderOf(l)];
+          psrRaw.assessments.forEach(a => { const v = l.assessmentPct ? l.assessmentPct[a.id] : null; row.push(v != null ? PStr.round(v) : 'N/R'); });
+          row.push(l.pct != null ? PStr.round(l.pct) : 'N/R', l.grade, l.pct >= passMark ? 'PASS' : 'FAIL', l.position != null ? l.position : '-');
+          return row;
+        })
+      });
+      sheets.push({ name: 'Assessment Stats', head: ['Assessment', 'Type', 'Max', 'Weight', 'Average %', 'Highest %', 'Lowest %', 'Pass Rate %', 'Assessed'],
+        rows: subjectStats.map(s => [s.name, s.type, s.max, s.weight != null ? s.weight : '-', s.avg, s.high, s.low, s.passRate, s.count]) });
+    }
+  }
+
+  if (psrState.report === '3') {
+    const m = psrClassModel();
+    const t = m.tables[0];
+    sheets.push({ name: 'Class Performance', head: t.cols, rows: t.rows.map(r => r.map(c => String(c).replace(/<[^>]*>/g, ''))) });
+  }
+
+  if (psrState.report === '4') {
+    const m = psrSchoolModel();
+    const names = ['Level Summary', 'Subject Performance', 'Teacher Performance'];
+    m.tables.forEach((t, i) => {
+      sheets.push({ name: names[i] || 'Table ' + i, head: t.cols, rows: t.rows.map(r => r.map(c => String(c).replace(/<[^>]*>/g, ''))) });
     });
-    sheets.push({ name: 'Comparison', head: ['Assessment', 'Type', 'Weight', 'Max', 'Date', 'Average %', 'Highest %', 'Lowest %', 'Pass Rate %', 'Assessed'], rows });
+  }
+
+  if (psrState.report === '5') {
+    sheets.push({ name: 'Ranked Students', head: ['Rank', 'Student ID', 'Student Name', 'Class', 'Gender', 'Overall %', 'Grade', 'Result'],
+      rows: assessed.slice().sort((a, b) => b.pct - a.pct).map((l, i) => [i + 1, l.code, l.name, l.className || '-', psrGenderOf(l), PStr.round(l.pct), l.grade, l.pct >= passMark ? 'PASS' : 'FAIL']) });
   }
 
   sheets.forEach(s => { s.row0 = ['RMS-MIS Post-Assessment Report', s.name]; });

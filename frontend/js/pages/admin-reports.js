@@ -1,4 +1,5 @@
 let reportAssess = '';
+let dosEduLevel = 'all';
 let gradingScaleCache = null;
 let settingsTab = 'school';
 let schoolSettingsCache = null;
@@ -196,10 +197,34 @@ async function renderAdminReports() {
       ${termsFiltered.map(t => `<option value="${t.id}" ${dosTermId === t.id ? 'selected' : ''}>${Utils.escapeHtml(t.name)}</option>`).join('')}
     </select></div>`;
 
+  // Group classes by education level for optgroup display
+  const classesGrouped = {};
+  const eduLevelOrder = ['Primary', 'Lower Secondary', 'Upper Secondary'];
+  classes.forEach(c => {
+    const cat = EducationLevels.getCategory(c);
+    if (!classesGrouped[cat]) classesGrouped[cat] = [];
+    classesGrouped[cat].push(c);
+  });
+  const classOptGroups = eduLevelOrder.filter(lv => classesGrouped[lv]?.length).map(lv => {
+    const opts = classesGrouped[lv]
+      .filter(c => dosEduLevel === 'all' || EducationLevels.getCategory(c) === dosEduLevel)
+      .map(c => `<option value="${c.id}" ${dosClassId === c.id ? 'selected' : ''}>${Utils.escapeHtml(c.name)}</option>`);
+    if (!opts.length) return '';
+    return `<optgroup label="${lv}">${opts.join('')}</optgroup>`;
+  }).join('');
+
+  const selEduLevel = `<div class="form-group"><label>Education Level</label>
+    <select id="dos-edulevel" class="select-field" onchange="dosPickEduLevel(this.value)">
+      <option value="all" ${dosEduLevel==='all'?'selected':''}>🎓 All Levels</option>
+      <option value="Primary" ${dosEduLevel==='Primary'?'selected':''}>📗 Primary</option>
+      <option value="Lower Secondary" ${dosEduLevel==='Lower Secondary'?'selected':''}>📘 Lower Secondary</option>
+      <option value="Upper Secondary" ${dosEduLevel==='Upper Secondary'?'selected':''}>📙 Upper Secondary</option>
+    </select></div>`;
+
   const selClass = `<div class="form-group"><label>Class <span class="required">*</span></label>
     <select id="dos-class" class="select-field" onchange="dosPickClass(this.value)">
       <option value="">Select Class</option>
-      ${classes.map(c => `<option value="${c.id}" ${dosClassId === c.id ? 'selected' : ''}>${Utils.escapeHtml(c.name)}</option>`).join('')}
+      ${classOptGroups}
     </select></div>`;
 
   const selSubject = `<div class="form-group"><label>Subject <span class="required">*</span></label>
@@ -263,10 +288,10 @@ async function renderAdminReports() {
       <div class="card mb-6">
         <div class="card-header">
           <div><h3><i data-lucide="school" style="width:18px;height:18px;vertical-align:middle;margin-right:8px;color:var(--amber-600)"></i>School Performance Report</h3>
-          <p class="text-sm text-muted mt-1">School-wide averages and pass rates by subject and by class for the selected term.</p></div>
+          <p class="text-sm text-muted mt-1">School-wide averages and pass rates by subject and by class, grouped by Education Level.</p></div>
         </div>
         <div class="flex gap-4 items-end" style="flex-wrap:wrap">
-          ${selYear}${selTerm}
+          ${selYear}${selTerm}${selEduLevel}
           <button class="btn btn-primary" onclick="dosGenerateSchool()"><i data-lucide="bar-chart-3"></i> Generate Report</button>
         </div>
       </div>`,

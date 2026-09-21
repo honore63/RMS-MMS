@@ -191,3 +191,62 @@ const Utils = {
   }
 };
 
+const EducationLevels = {
+  CATEGORIES: {
+    PRIMARY: 'Primary',
+    LOWER_SECONDARY: 'Lower Secondary',
+    UPPER_SECONDARY: 'Upper Secondary'
+  },
+
+  getCategory(cls) {
+    if (!cls) return 'Lower Secondary';
+    const levelStr = typeof cls === 'string' ? cls : (cls.education_level || cls.level || cls.name || '');
+    const clean = levelStr.trim().toUpperCase();
+
+    if (clean.includes('PRIMARY') || /^P[1-6]/.test(clean)) return 'Primary';
+    if (clean.includes('UPPER SECONDARY') || clean.includes('UPPER') || /^(S[4-6])/.test(clean)) return 'Upper Secondary';
+    if (clean.includes('LOWER SECONDARY') || clean.includes('LOWER') || /^(S[1-3])/.test(clean)) return 'Lower Secondary';
+    if (clean.includes('NURSERY')) return 'Nursery';
+    if (clean.includes('TVET')) return 'TVET';
+    return 'Lower Secondary';
+  },
+
+  getAllowedGrades(category) {
+    const cat = (category || '').trim().toUpperCase();
+    if (cat.includes('PRIMARY')) return ['P1', 'P2', 'P3', 'P4', 'P5', 'P6'];
+    if (cat.includes('UPPER')) return ['S4', 'S5', 'S6'];
+    if (cat.includes('LOWER')) return ['S1', 'S2', 'S3'];
+    return ['P1','P2','P3','P4','P5','P6','S1','S2','S3','S4','S5','S6'];
+  },
+
+  getAllowedStreams(grade) {
+    const g = (grade || '').trim().toUpperCase();
+    if (g === 'S4' || g === 'S5') return ['Stream 1', 'Stream 2'];
+    if (g === 'S6') return ['MEG', 'PCM', 'MCE'];
+    if (g.startsWith('P') || g.startsWith('S')) return ['Stream 1', 'Stream 2', 'A', 'B'];
+    return [];
+  },
+
+  isValidCombination(category, grade, stream) {
+    const cat = this.getCategory(category || grade);
+    const validGrades = this.getAllowedGrades(cat);
+    const g = (grade || '').trim().toUpperCase();
+    const st = (stream || '').trim().toUpperCase();
+
+    if (g && !validGrades.includes(g)) {
+      return { valid: false, message: `Class grade ${grade} is not valid for ${cat}` };
+    }
+    if (g === 'S6' && st && !['MEG', 'PCM', 'MCE', 'STREAM 1', 'STREAM 2'].includes(st)) {
+      return { valid: false, message: `S6 stream must be MEG, PCM, or MCE (got ${stream})` };
+    }
+    if ((g === 'S1' || g === 'S2' || g === 'S3') && ['MEG', 'PCM', 'MCE'].includes(st)) {
+      return { valid: false, message: `Lower Secondary (${g}) cannot have Upper Secondary stream ${stream}` };
+    }
+    if (cat === 'Primary' && (st === 'PCM' || st === 'MEG' || st === 'MCE' || g.startsWith('S'))) {
+      return { valid: false, message: `Primary classes cannot be assigned Secondary grades/streams` };
+    }
+    return { valid: true };
+  }
+};
+
+

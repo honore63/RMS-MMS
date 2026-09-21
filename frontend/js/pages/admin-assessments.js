@@ -1,4 +1,6 @@
 let assessFilter = 'all';
+let assessEduLevel = 'all';
+
 async function renderAssessments() {
   setHeader('Assessment Approval', 'Review, approve, or reject teacher-submitted assessments');
   setContent(Utils.loading());
@@ -7,12 +9,21 @@ async function renderAssessments() {
     DB.get('teachers'), DB.get('classes'), DB.get('subjects'), DB.get('academic_years'), DB.get('terms'),
     getAssessmentTypes()
   ]);
-  const filtered = assessFilter === 'all' ? assessments : assessments.filter(a => a.status === assessFilter);
+  
+  const filtered = assessments.filter(a => {
+    if (assessFilter !== 'all' && a.status !== assessFilter) return false;
+    if (assessEduLevel !== 'all') {
+      const cls = classes.find(c => c.id === a.class_id);
+      if (EducationLevels.getCategory(cls) !== assessEduLevel) return false;
+    }
+    return true;
+  });
 
   const rows = await Promise.all(filtered.map(async a => {
     const t = teachers.find(t => t.id === a.teacher_id);
     const c = classes.find(c => c.id === a.class_id);
     const s = subjects.find(s => s.id === a.subject_id);
+    const cat = EducationLevels.getCategory(c);
     let marksInfo = '—';
     let canApprove = false;
     if (a.status === 'submitted') {
@@ -24,7 +35,8 @@ async function renderAssessments() {
     return `<tr>
       <td class="col-name">${Utils.escapeHtml(a.name)}</td>
       <td>${Utils.escapeHtml(assessmentTypeName(types, a.assessment_type_id, 'End-of-Unit Assessment'))}</td>
-      <td>${Utils.escapeHtml(c?.name || '-')}</td><td>${Utils.escapeHtml(s?.name || '-')}</td>
+      <td><span style="font-size:10px;font-weight:700;color:var(--gray-500);text-transform:uppercase;display:block;margin-bottom:2px">${cat}</span>${Utils.escapeHtml(c?.name || '-')}</td>
+      <td>${Utils.escapeHtml(s?.name || '-')}</td>
       <td>${Utils.escapeHtml(a.unit || '-')}</td><td>${Utils.escapeHtml(t?.full_name || '-')}</td>
       <td class="text-center font-semibold">${marksInfo}</td>
       <td>${a.maximum_mark}</td>
@@ -49,10 +61,18 @@ async function renderAssessments() {
         <button class="tab-btn ${assessFilter === 'rejected' ? 'active' : ''}" onclick="assessFilter='rejected';renderAssessments()">Rejected</button>
         <button class="tab-btn ${assessFilter === 'locked' ? 'active' : ''}" onclick="assessFilter='locked';renderAssessments()">Locked</button>
       </div>
+      <div>
+        <select class="select-field" style="margin:0;min-width:200px" onchange="assessEduLevel=this.value;renderAssessments()">
+          <option value="all">🎓 All Education Levels</option>
+          <option value="Primary" ${assessEduLevel==='Primary'?'selected':''}>📗 Primary Only</option>
+          <option value="Lower Secondary" ${assessEduLevel==='Lower Secondary'?'selected':''}>📘 Lower Secondary</option>
+          <option value="Upper Secondary" ${assessEduLevel==='Upper Secondary'?'selected':''}>📙 Upper Secondary</option>
+        </select>
+      </div>
     </div>
     <div class="card"><div class="table-container"><table class="data-table">
       <thead><tr><th>Name</th><th>Type</th><th>Class</th><th>Subject</th><th>Unit</th><th>Teacher</th><th>Marks</th><th>Max</th><th>Status</th><th>Actions</th></tr></thead>
-      <tbody>${rowsHtml || `<tr><td colspan="10">${Utils.empty('No assessments', 'file-text')}</td></tr>`}</tbody></table></div></div>`);
+      <tbody>${rowsHtml || `<tr><td colspan="10">${Utils.empty('No assessments matching filters', 'file-text')}</td></tr>`}</tbody></table></div></div>`);
 }
 
 async function assessView(id) {

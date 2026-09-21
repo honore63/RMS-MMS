@@ -1,3 +1,5 @@
+let teacherDashEduLevel = 'all';
+
 async function renderTeacherDashboard() {
   setHeader('Dashboard', `Welcome, ${Auth.currentUser?.full_name}`);
   setContent(`<div class="grid-4"><div class="card card-in"><div class="spinner" style="margin:0 auto;width:28px;height:28px"></div></div><div class="card card-in"></div><div class="card card-in"></div><div class="card card-in"></div></div>`);
@@ -5,12 +7,16 @@ async function renderTeacherDashboard() {
   if (!teacherId) { setContent(Utils.errorCard('No Teacher Profile', 'Your account is not linked to a teacher record.')); return; }
 
   try {
-    const [assignments, assessments, classes, subjects] = await Promise.all([
+    const [assignments, allAssessments, allClasses, subjects] = await Promise.all([
       DB.query('teacher_assignments', '*', { teacher_id: teacherId }),
       DB.query('assessments', '*', { teacher_id: teacherId }),
       DB.get('classes'),
       DB.get('subjects')
     ]);
+
+    const filteredClassesIds = new Set(allClasses.filter(c => teacherDashEduLevel === 'all' || EducationLevels.getCategory(c) === teacherDashEduLevel).map(c => c.id));
+    const filteredAssignments = assignments.filter(a => filteredClassesIds.has(a.class_id));
+    const assessments = allAssessments.filter(a => filteredClassesIds.has(a.class_id));
 
     const pending = assessments.filter(a => a.status === 'draft').length;
     const submitted = assessments.filter(a => a.status === 'submitted').length;
@@ -18,13 +24,14 @@ async function renderTeacherDashboard() {
     const rejected = assessments.filter(a => a.status === 'rejected').length;
 
     const assessRows = assessments.slice(0, 10).map(a => {
-      const cls = classes.find(c => c.id === a.class_id);
+      const cls = allClasses.find(c => c.id === a.class_id);
       const subj = subjects.find(s => s.id === a.subject_id);
+      const cat = Utils.escapeHtml(EducationLevels.getCategory(cls));
       return `<tr>
-        <td class="col-name">${Utils.escapeHtml(cls?.name || '-')}</td>
+        <td><span style="font-size:10px;font-weight:700;color:var(--gray-500);text-transform:uppercase;display:block;margin-bottom:2px">${cat}</span>${Utils.escapeHtml(cls?.name || '-')}</td>
         <td>${Utils.escapeHtml(subj?.name || '-')}</td>
         <td>${Utils.escapeHtml(a.name)}</td>
-        <td>${Utils.escapeHtml(a.unit)}</td>
+        <td>${Utils.escapeHtml(a.unit || '-')}</td>
         <td><span class="badge ${Utils.statusColor(a.status)}"><i data-lucide="${Utils.statusIcon(a.status)}"></i> ${a.status}</span></td>
         <td><button class="btn btn-sm btn-primary" onclick="Router.go('teacher/enter-marks?assessment=${a.id}')">${a.status === 'draft' || a.status === 'rejected' ? '<i data-lucide="pencil"></i> Enter' : '<i data-lucide="eye"></i> View'}</button></td></tr>`;
     }).join('');
@@ -44,12 +51,24 @@ async function renderTeacherDashboard() {
       </button>`).join('');
 
     setContent(`
+      <div class="card mb-6" style="padding:16px 20px; background:linear-gradient(135deg,rgba(59,130,246,0.1),rgba(37,99,235,0.05))">
+        <div style="display:flex;align-items:center;gap:16px">
+          <div style="font-weight:700;color:var(--blue-800)"><i data-lucide="filter" style="width:16px;height:16px;vertical-align:middle"></i> View Scope:</div>
+          <select class="select-field" style="width:250px;margin:0" onchange="teacherDashEduLevel=this.value;renderTeacherDashboard()">
+            <option value="all">🎓 All Assigned Levels</option>
+            <option value="Primary" ${teacherDashEduLevel==='Primary'?'selected':''}>📗 Primary Only</option>
+            <option value="Lower Secondary" ${teacherDashEduLevel==='Lower Secondary'?'selected':''}>📘 Lower Sec Only</option>
+            <option value="Upper Secondary" ${teacherDashEduLevel==='Upper Secondary'?'selected':''}>📙 Upper Sec Only</option>
+          </select>
+        </div>
+      </div>
+      
       <div class="grid-4 card-in-stagger mb-6">
         <div class="stat-card">
           <div class="stat-icon" style="background:var(--blue-50);color:var(--blue-600)"><i data-lucide="link"></i></div>
-          <div class="stat-value">${assignments.length}</div>
+          <div class="stat-value">${filteredAssignments.length}</div>
           <div class="stat-label">My Assignments</div>
-          <div class="stat-desc"><i data-lucide="link"></i> Classes assigned to you</div>
+          <div class="stat-desc"><i data-lucide="link"></i> Enrolled subjects via filter</div>
         </div>
         <div class="stat-card">
           <div class="stat-icon" style="background:var(--amber-50);color:var(--amber-600)"><i data-lucide="file-edit"></i></div>
@@ -79,7 +98,7 @@ async function renderTeacherDashboard() {
         <div class="card-header">
           <div>
             <h3><i data-lucide="clipboard-list" style="width:18px;height:18px;color:var(--blue-600)"></i> Recent Assessments</h3>
-            <p class="card-subtitle">Your latest assessment work</p>
+            <p class="card-subtitle">Your latest assessment work within this level</p>
           </div>
           <button class="btn btn-sm btn-outline" onclick="Router.go('teacher/enter-marks')"><i data-lucide="arrow-right" style="width:14px;height:14px"></i> View All</button>
         </div>
@@ -143,6 +162,7 @@ async function renderMyClasses() {
   }
 
   const cards = Object.values(uniqueClasses).map(c => {
+    c.education_level = EducationLevels.getCategory(c);
     const open = openClassStudents.has(c.id);
     const activeCount = c.students.filter(l => l.status === 'active').length;
     const subjectTags = c.subjects.map(s => `<span class="badge badge-gray">${Utils.escapeHtml(s.name)}</span>`).join(' ') || '<span class="text-sm text-muted">—</span>';
@@ -167,10 +187,11 @@ async function renderMyClasses() {
     const meta = `${c.level ? Utils.escapeHtml(c.level) + ' level' : ''}${c.stream ? ', ' + Utils.escapeHtml(c.stream) : ''} &bull; ${c.students.length} student(s)${activeCount !== c.students.length ? ' (' + activeCount + ' active)' : ''} &bull; ${c.subjects.length} subject(s)`;
 
     return `
-      <div class="card">
+      <div class="card" data-education-level="${c.education_level}">
         <div class="card-header" style="flex-wrap:wrap;gap:12px">
           <div>
-            <h3><i data-lucide="school" style="width:18px;height:18px;vertical-align:middle;margin-right:8px;color:var(--blue-600)"></i>${Utils.escapeHtml(c.name)}</h3>
+            <div style="font-size:11px;font-weight:700;color:var(--gray-500);text-transform:uppercase;letter-spacing:0.5px;margin-bottom:4px"><i data-lucide="layers" style="width:10px;height:10px"></i> ${c.education_level}</div>
+            <h3 style="margin:0"><i data-lucide="school" style="width:18px;height:18px;vertical-align:middle;margin-right:8px;color:var(--blue-600)"></i>${Utils.escapeHtml(c.name)}</h3>
             <p class="text-sm text-muted mt-1">${meta}</p>
           </div>
           <div class="flex gap-2" style="align-items:center;flex-wrap:wrap">
@@ -186,9 +207,14 @@ async function renderMyClasses() {
         </div>
         ${open ? studentsHtml : ''}
       </div>`;
-  }).join('');
+  });
 
-  setContent(`<div class="flex flex-col gap-4">${cards || Utils.empty('No classes have been assigned to you yet', 'school')}</div>`);
+  // Group cards visually
+  const cats = ['Primary', 'Lower Secondary', 'Upper Secondary'];
+  const sortedCards = cats.map(cat => cards.filter(c => c.includes(`data-education-level="${cat}"`)).join('')).filter(Boolean);
+  const otherCards = cards.filter(c => !cats.some(cat => c.includes(`data-education-level="${cat}"`))).join('');
+
+  setContent(`<div class="flex flex-col gap-4">${sortedCards.join('') + otherCards || Utils.empty('No classes have been assigned to you yet', 'school')}</div>`);
 }
 
 function toggleClassStudents(classId) {
@@ -221,13 +247,21 @@ async function renderMySubjects() {
   const rows = assignments.map(a => {
     const cls = classes.find(c => c.id === a.class_id);
     const sub = subjects.find(s => s.id === a.subject_id);
-    return `<tr><td class="col-name">${Utils.escapeHtml(sub?.name||'-')}</td><td class="col-code">${Utils.escapeHtml(sub?.code||'-')}</td><td>${Utils.escapeHtml(cls?.name||'-')}</td></tr>`;
-  }).join('');
+    const cat = EducationLevels.getCategory(cls);
+    return `<tr>
+      <td class="col-name">
+        <span style="font-size:10px;font-weight:700;color:var(--gray-500);text-transform:uppercase;display:block;margin-bottom:2px">${cat}</span>
+        ${Utils.escapeHtml(sub?.name||'-')}
+      </td>
+      <td class="col-code">${Utils.escapeHtml(sub?.code||'-')}</td>
+      <td>${Utils.escapeHtml(cls?.name||'-')}</td>
+    </tr>`;
+  }).sort((a,b) => a.localeCompare(b)).join('');
 
   setContent(`<div class="card">
     <div class="card-header"><h3><i data-lucide="book-marked" style="width:18px;height:18px;vertical-align:middle;margin-right:8px;color:var(--green-600)"></i>Subject Assignments</h3></div>
     <div class="table-container"><table class="data-table">
-      <thead><tr><th>Subject</th><th>Code</th><th>Class</th></tr></thead>
+      <thead><tr><th>Subject</th><th>Code</th><th>Class Context</th></tr></thead>
       <tbody>${rows||`<tr><td colspan="3">${Utils.empty('No subjects','book-open')}</td></tr>`}</tbody></table></div></div>`);
 }
 

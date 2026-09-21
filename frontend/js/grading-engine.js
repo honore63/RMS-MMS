@@ -49,8 +49,12 @@ const GradingEngine = {
       return this._fallbackGrade(pct);
     }
 
-    for (const range of s) {
-      if (pct >= range.minimum_percentage && pct <= range.maximum_percentage) {
+    // Match by descending minimum: the first range whose minimum is <= pct.
+    // This handles contiguous integer ranges correctly for both integer and
+    // fractional percentages (e.g. 79.99 -> B, 74.99 -> C, 64.99 -> E).
+    const byMin = [...s].sort((a, b) => b.minimum_percentage - a.minimum_percentage);
+    for (const range of byMin) {
+      if (pct >= range.minimum_percentage) {
         return {
           grade: range.grade,
           descriptor: range.descriptor || range.grade,
@@ -63,7 +67,7 @@ const GradingEngine = {
       }
     }
     // Fallback to lowest range if no match (shouldn't happen with proper config)
-    const lowest = s[s.length - 1];
+    const lowest = byMin[byMin.length - 1];
     return {
       grade: lowest.grade,
       descriptor: lowest.descriptor || lowest.grade,
@@ -90,8 +94,9 @@ const GradingEngine = {
    */
   calculateGradeSync(pct, scale) {
     if (!scale || !scale.length) return this._fallbackGrade(pct);
-    for (const range of scale) {
-      if (pct >= range.minimum_percentage && pct <= range.maximum_percentage) {
+    const byMin = [...scale].sort((a, b) => b.minimum_percentage - a.minimum_percentage);
+    for (const range of byMin) {
+      if (pct >= range.minimum_percentage) {
         return {
           grade: range.grade,
           descriptor: range.descriptor || range.grade,
@@ -103,7 +108,7 @@ const GradingEngine = {
         };
       }
     }
-    const lowest = scale[scale.length - 1];
+    const lowest = byMin[byMin.length - 1];
     return {
       grade: lowest.grade,
       descriptor: lowest.descriptor || lowest.grade,

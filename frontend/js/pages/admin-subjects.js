@@ -132,11 +132,13 @@ function subjectForm() {
         oninput="this.value=this.value.toUpperCase();this.dataset.userEdited='true'">
     </div>
     <div class="form-group">
-      <label>Level</label>
+      <label>Education Level Context</label>
       <select id="sf-level" class="select-field">
-        <option value="Both" selected>Both (Primary & Secondary)</option>
-        <option value="Primary">Primary Only</option>
-        <option value="Secondary">Secondary Only</option>
+        <option value="Both" selected>All Levels</option>
+        <option value="Primary">Primary (P1 - P6)</option>
+        <option value="Lower Secondary">Lower Secondary (S1 - S3)</option>
+        <option value="Upper Secondary">Upper Secondary (S4 - S6)</option>
+        <option value="Secondary">Secondary (S1 - S6)</option>
       </select>
     </div>
     <div class="form-group">
@@ -211,11 +213,13 @@ function subjectEdit(s) {
         oninput="this.value=this.value.toUpperCase()">
     </div>
     <div class="form-group">
-      <label>Level</label>
+      <label>Education Level Context</label>
       <select id="se-level" class="select-field">
-        <option value="Both" ${(s.level === 'Both' || !s.level) ? 'selected' : ''}>Both (Primary & Secondary)</option>
-        <option value="Primary" ${s.level === 'Primary' ? 'selected' : ''}>Primary Only</option>
-        <option value="Secondary" ${s.level === 'Secondary' ? 'selected' : ''}>Secondary Only</option>
+        <option value="Both" ${(s.level === 'Both' || !s.level) ? 'selected' : ''}>All Levels</option>
+        <option value="Primary" ${s.level === 'Primary' ? 'selected' : ''}>Primary (P1 - P6)</option>
+        <option value="Lower Secondary" ${s.level === 'Lower Secondary' ? 'selected' : ''}>Lower Secondary (S1 - S3)</option>
+        <option value="Upper Secondary" ${s.level === 'Upper Secondary' ? 'selected' : ''}>Upper Secondary (S4 - S6)</option>
+        <option value="Secondary" ${s.level === 'Secondary' ? 'selected' : ''}>Secondary (S1 - S6)</option>
       </select>
     </div>
     <div class="form-group">

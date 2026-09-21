@@ -64,6 +64,14 @@ const AnalyticsEngine = {
     return null;
   },
 
+  educLevelOf(level) {
+    const l = String(level || '').trim().toUpperCase();
+    if (/^P[1-6]([\s]\S+)?$/.test(l)) return 'Primary';
+    if (/^S[1-3]([\s]\S+)?$/.test(l)) return 'Lower Secondary';
+    if (/^S[4-6]([\s]\S+)?$/.test(l)) return 'Upper Secondary';
+    return l ? 'Other' : '';
+  },
+
   pctFor(mark, assessment) {
     if (mark == null || assessment == null || assessment.maximum_mark == null) return null;
     return Utils.pct(Number(mark), Number(assessment.maximum_mark));
@@ -101,7 +109,11 @@ const AnalyticsEngine = {
     const addEq = (k, v) => { if (v && v !== 'all') q = q.eq(k, v); };
     addEq('academic_year_id', filters.yearId);
     addEq('term_id', filters.termId);
-    addEq('class_id', filters.classId);
+    if (filters.classIds && Array.isArray(filters.classIds) && filters.classIds.length) {
+      q = q.in('class_id', filters.classIds.filter(Boolean));
+    } else {
+      addEq('class_id', filters.classId);
+    }
     addEq('subject_id', filters.subjectId);
     addEq('assessment_type_id', filters.typeId);
     if (!isTeacher && filters.teacherId && filters.teacherId !== 'all') addEq('teacher_id', filters.teacherId);
@@ -120,6 +132,13 @@ const AnalyticsEngine = {
       assessments = assessments.filter(a => {
         const c = ctx.classByName(a.class_id);
         return c && String(c.stream || '') === String(filters.stream);
+      });
+    }
+
+    if (filters.levelId && filters.levelId !== 'all') {
+      assessments = assessments.filter(a => {
+        const c = ctx.classByName(a.class_id);
+        return c && String(this.educLevelOf(c.level)) === String(filters.levelId);
       });
     }
 
@@ -154,6 +173,11 @@ const AnalyticsEngine = {
 
     if (filters.studentId && filters.studentId !== 'all') {
       marks = marks.filter(m => m.learner_id === filters.studentId);
+    }
+
+    if (filters.studentIds && Array.isArray(filters.studentIds) && filters.studentIds.length) {
+      const set = new Set(filters.studentIds);
+      marks = marks.filter(m => set.has(m.learner_id));
     }
 
     return { assessments, marks };

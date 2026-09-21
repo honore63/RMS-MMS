@@ -523,6 +523,28 @@ select {
   color: #fff;
   font-weight: 600;
 }
+.nav-parent {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+.nav-parent .nav-chevron {
+  margin-left: auto;
+  font-size: 14px;
+  width: 16px;
+  height: 16px;
+  transition: transform var(--transition);
+}
+.nav-parent .nav-chevron.rotated { transform: rotate(180deg); }
+.nav-sub {
+  display: none;
+  margin: 2px 0 4px 10px;
+  padding-left: 10px;
+  border-left: 2px solid rgba(255,255,255,.08);
+}
+.nav-sub.open { display: block; }
+.nav-sub-link { padding: 8px 12px; font-size: 12.5px; }
+.nav-sub-link i { font-size: 16px; width: 18px; }
 .sidebar-user {
   padding: 16px;
   border-top: 1px solid rgba(255,255,255,.08);
@@ -2611,6 +2633,37 @@ body.report-orientation-portrait .report-paper-container {
 .cmp-chip.on { border-color: var(--blue-600); background: var(--blue-600); color: #fff; }
 .cmp-chip.on .text-muted { color: #dbeafe; }
 
+.psr-student-chips { min-width: 220px; }
+.psr-chip-row { display: flex; flex-wrap: wrap; gap: 6px; max-height: 140px; overflow-y: auto; padding: 2px; }
+
+.psr-scope-switch { display: inline-flex; background: var(--gray-100); border-radius: 999px; padding: 4px; gap: 4px; }
+.psr-scope-btn { border: none; background: transparent; color: var(--gray-600); font-size: 12px; font-weight: 600; padding: 7px 16px; border-radius: 999px; cursor: pointer; transition: all 0.15s ease; }
+.psr-scope-btn:hover { color: var(--blue-700); }
+.psr-scope-btn.active { background: var(--blue-600); color: #fff; box-shadow: 0 2px 8px rgba(37, 99, 235, 0.25); }
+
+.psr-toggle-group { display: inline-flex; background: var(--gray-100); border-radius: 8px; padding: 3px; gap: 2px; }
+.psr-toggle-btn { border: none; background: transparent; color: var(--gray-600); padding: 6px 14px; font-size: 12px; font-weight: 600; border-radius: 6px; cursor: pointer; }
+.psr-toggle-btn.active { background: #fff; color: var(--blue-700); box-shadow: 0 1px 4px rgba(0, 0, 0, 0.08); }
+
+.psr-include-block { border: 1px solid var(--gray-200); border-radius: 10px; overflow: hidden; margin-top: 10px; }
+.psr-include-head { display: flex; align-items: center; gap: 10px; padding: 10px 14px; background: var(--gray-50); border-bottom: 1px solid var(--gray-200); font-size: 12px; font-weight: 600; color: var(--gray-600); }
+.psr-include-body { padding: 10px 14px; }
+
+.psr-table-pager { display: flex; align-items: center; gap: 8px; padding: 8px 16px; font-size: 12px; color: var(--gray-500); }
+.psr-pager-btns { display: flex; gap: 6px; margin-left: auto; }
+.psr-table-pager button { border: 1px solid var(--gray-200); background: #fff; color: var(--gray-700); border-radius: 6px; cursor: pointer; padding: 4px 10px; font-size: 12px; font-weight: 600; }
+.psr-table-pager button:hover { background: var(--blue-50); color: var(--blue-700); }
+
+.badge-neutral { background: var(--gray-100); color: var(--gray-600); }
+
+.psr-table-tools { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 10px 16px 0; }
+.psr-table-tools .input-field { max-width: 320px; }
+.psr-count { white-space: nowrap; }
+.psr-comment-input { width: 200px; padding: 5px 8px; font-size: 12px; }
+.psr-sortable { cursor: pointer; user-select: none; }
+.psr-sortable:hover { background: var(--blue-50); }
+.psr-sort-active { background: var(--blue-50) !important; color: var(--blue-700) !important; }
+
 .psr-print-header, .psr-print-subtitle, .psr-print-signature { display: none; }
 .psr-print-subtitle { font-size: 12px; }
 .psr-print-signature { margin-top: 24px; }
@@ -2623,6 +2676,16 @@ body.report-orientation-portrait .report-paper-container {
   body.psr-printing .psr-print-signature { display: block !important; }
   body.psr-printing .cmp-chips { display: none !important; }
   body.psr-printing .psr-tabs { display: none !important; }
+  body.psr-printing .psr-table-tools { display: none !important; }
+  body.psr-printing .psr-comment-input {
+    border: none !important;
+    background: transparent !important;
+    padding: 0 !important;
+    font-size: 12px !important;
+    width: auto !important;
+    color: #000 !important;
+  }
+  body.psr-printing .psr-chip-row { display: none !important; }
 }
 
 

@@ -402,44 +402,81 @@ function rcRenderCard(learner, d) {
   let maxTotEU=0, maxTotET=0, maxTotTOT=0;
   let termTotals = {}; termCols.forEach(t=>{ termTotals[t.id] = { eu:0,et:0,tot:0, hasData:false }; });
   
-  d.activeSubjects.forEach(s => {
-    const sm = subjMaxVals[s.id];
-    let row = `<tr><td class="rc-align-left rc-blue-text" style="font-weight:600">${Utils.escapeHtml(s.name)}</td>`;
-    row += `<td>${sm.eu||''}</td><td>${sm.et||''}</td><td>${sm.tot||''}</td>`;
-    maxTotEU += sm.eu; maxTotET += sm.et; maxTotTOT += sm.tot;
+  // Group Subjects by Level
+  const cat = EducationLevels.getCategory(d.cls);
+  let groupedSubjects = [];
+  
+  if (cat.includes('Primary')) {
+    groupedSubjects = [{ groupName: 'All Subjects', subjects: d.activeSubjects }];
+  } else if (cat.includes('Lower Secondary')) {
+    const core = d.activeSubjects.filter(s => ['Mathematics', 'English', 'Kinyarwanda', 'Physics', 'Biology', 'Chemistry'].some(n => s.name.includes(n)));
+    const elective = d.activeSubjects.filter(s => !core.includes(s));
+    groupedSubjects = [
+      { groupName: 'Core Subjects', subjects: core },
+      { groupName: 'Elective Subjects', subjects: elective }
+    ].filter(g => g.subjects.length > 0);
+  } else {
+    // Upper Secondary
+    const stream = (d.cls?.stream || '').toUpperCase();
+    let majorKeywords = [];
+    if (stream.includes('PCM')) majorKeywords = ['Physics', 'Chemistry', 'Mathematics'];
+    else if (stream.includes('MCB')) majorKeywords = ['Mathematics', 'Chemistry', 'Biology'];
+    else if (stream.includes('MEG')) majorKeywords = ['Mathematics', 'Economics', 'Geography'];
+    else if (stream.includes('HEG')) majorKeywords = ['History', 'Economics', 'Geography'];
 
-    let annObt=0, annMax=0, hasAnn=false;
+    const major = d.activeSubjects.filter(s => majorKeywords.some(k => s.name.toLowerCase().includes(k.toLowerCase())));
+    const minor = d.activeSubjects.filter(s => !major.includes(s));
     
-    termCols.forEach(t => {
-      const td = tData[t.id].find(x => x.subjectId === s.id);
-      if (td && td.hasMarks) {
-        row += `
-          <td>${td.euObt!=null?td.euObt:''}</td>
-          <td>${td.etObt!=null?td.etObt:''}</td>
-          <td style="font-weight:700">${td.totObt}</td>
-          <td>${td.pct!=null?td.pct.toFixed(1)+'%':''}</td>
-          <td style="font-weight:700">${td.gr}</td>`;
-        termTotals[t.id].eu += (td.euObt||0);
-        termTotals[t.id].et += (td.etObt||0);
-        termTotals[t.id].tot += td.totObt;
-        termTotals[t.id].hasData = true;
-        annObt += td.totObt; annMax += td.totMax; hasAnn = true;
-      } else {
-        row += `<td class="rc-empty-cell"></td><td class="rc-empty-cell"></td><td class="rc-empty-cell"></td><td class="rc-empty-cell"></td><td class="rc-empty-cell"></td>`;
-      }
-    });
+    groupedSubjects = [
+      { groupName: 'Major Subjects', subjects: major },
+      { groupName: 'Minor / Subsidiary Subjects', subjects: minor }
+    ].filter(g => g.subjects.length > 0);
+  }
 
-    if (showAnn) {
-      if (hasAnn && annMax>0) {
-        const apct = Math.round((annObt/annMax)*1000)/10;
-        const agr = rcGrade(apct, d.scale);
-        row += `<td>${annObt}</td><td>${annMax}</td><td>${apct.toFixed(1)}%</td><td style="font-weight:700">${agr}</td>`;
-      } else {
-        row += `<td class="rc-empty-cell"></td><td class="rc-empty-cell"></td><td class="rc-empty-cell"></td><td class="rc-empty-cell"></td>`;
+  const colspanAll = showAnn ? 4 + termCols.length * 5 + 4 : 4 + termCols.length * 5;
+
+  groupedSubjects.forEach(group => {
+    tbody += `<tr class="rc-all-subjects-row"><td colspan="${colspanAll}" style="text-align:left;padding-left:12px;background:var(--blue-50);color:var(--blue-900)">${group.groupName}</td></tr>`;
+    
+    group.subjects.forEach(s => {
+      const sm = subjMaxVals[s.id];
+      let row = `<tr><td class="rc-align-left rc-blue-text" style="font-weight:600">${Utils.escapeHtml(s.name)}</td>`;
+      row += `<td>${sm.eu||''}</td><td>${sm.et||''}</td><td>${sm.tot||''}</td>`;
+      maxTotEU += sm.eu; maxTotET += sm.et; maxTotTOT += sm.tot;
+
+      let annObt=0, annMax=0, hasAnn=false;
+      
+      termCols.forEach(t => {
+        const td = tData[t.id].find(x => x.subjectId === s.id);
+        if (td && td.hasMarks) {
+          row += `
+            <td>${td.euObt!=null?td.euObt:''}</td>
+            <td>${td.etObt!=null?td.etObt:''}</td>
+            <td style="font-weight:700">${td.totObt}</td>
+            <td>${td.pct!=null?td.pct.toFixed(1)+'%':''}</td>
+            <td style="font-weight:700">${td.gr}</td>`;
+          termTotals[t.id].eu += (td.euObt||0);
+          termTotals[t.id].et += (td.etObt||0);
+          termTotals[t.id].tot += td.totObt;
+          termTotals[t.id].hasData = true;
+          annObt += td.totObt; annMax += td.totMax; hasAnn = true;
+        } else {
+          row += `<td class="rc-empty-cell"></td><td class="rc-empty-cell"></td><td class="rc-empty-cell"></td><td class="rc-empty-cell"></td><td class="rc-empty-cell"></td>`;
+        }
+      });
+
+      if (showAnn) {
+        if (hasAnn && annMax>0) {
+          const apct = Math.round((annObt/annMax)*1000)/10;
+          const agr = rcGrade(apct, d.scale);
+          row += `<td>${annObt}</td><td>${annMax}</td><td>${apct.toFixed(1)}%</td><td style="font-weight:700">${agr}</td>`;
+        } else {
+          row += `<td class="rc-empty-cell"></td><td class="rc-empty-cell"></td><td class="rc-empty-cell"></td><td class="rc-empty-cell"></td>`;
+        }
       }
-    }
-    row += `</tr>`;
-    tbody += row;
+      row += `</tr>`;
+      tbody += row;
+    });
   });
 
   /* ───── TOTAL ROW ───── */

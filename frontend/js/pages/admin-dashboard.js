@@ -1,32 +1,51 @@
+let adminDashboardEduLevel = 'all';
+
 async function renderAdminDashboard() {
   setHeader('Dashboard', `Welcome back, ${Auth.currentUser?.full_name}`);
   setContent(`<div class="grid-4"><div class="card card-in"><div class="spinner" style="margin:0 auto;width:28px;height:28px"></div></div><div class="card card-in"></div><div class="card card-in"></div><div class="card card-in"></div></div>`);
 
   try {
-    const [learners, teachers, classes, assessments] = await Promise.all([
-      DB.count('learners'),
+    const [allLearners, teachers, allClasses, allAssessments] = await Promise.all([
+      DB.get('learners'),
       DB.count('teachers'),
-      DB.count('classes'),
+      DB.get('classes'),
       DB.get('assessments')
     ]);
 
-    const all = assessments || [];
-    const completed = all.filter(a => ['approved','locked'].includes(a.status)).length;
-    const pending = all.filter(a => a.status === 'draft').length;
-    const submitted = all.filter(a => a.status === 'submitted').length;
-    const approved = all.filter(a => a.status === 'approved' || a.status === 'locked').length;
+    // Apply Education Level Filter
+    let classes = allClasses;
+    if (adminDashboardEduLevel !== 'all') {
+      classes = allClasses.filter(c => EducationLevels.getCategory(c) === adminDashboardEduLevel);
+    }
+    const classIds = new Set(classes.map(c => c.id));
+    
+    // Filter learners and assessments based on filtered classes
+    const learners = adminDashboardEduLevel === 'all' 
+      ? allLearners 
+      : allLearners.filter(l => classIds.has(l.class_id));
 
-    const recent = all.slice(0, 8);
+    const assessments = (allAssessments || []).filter(a => {
+      if (adminDashboardEduLevel === 'all') return true;
+      return classIds.has(a.class_id);
+    });
+
+    const completed = assessments.filter(a => ['approved','locked'].includes(a.status)).length;
+    const pending = assessments.filter(a => a.status === 'draft').length;
+    const submitted = assessments.filter(a => a.status === 'submitted').length;
+    const approved = assessments.filter(a => a.status === 'approved' || a.status === 'locked').length;
+
+    const recent = assessments.slice(0, 8);
     let recentRows = '';
     for (const a of recent) {
-      const [cls, subj, teach] = await Promise.all([
-        a.class_id ? DB.getRelated('classes','name',{id:a.class_id}) : [],
+      const cls = allClasses.find(c => c.id === a.class_id);
+      const [subj, teach] = await Promise.all([
         a.subject_id ? DB.getRelated('subjects','name',{id:a.subject_id}) : [],
         a.teacher_id ? DB.getRelated('teachers','full_name',{id:a.teacher_id}) : []
       ]);
+      const cat = Utils.escapeHtml(EducationLevels.getCategory(cls));
       recentRows += `<tr>
         <td class="col-name">${Utils.escapeHtml(teach[0]?.full_name||'-')}</td>
-        <td>${Utils.escapeHtml(cls[0]?.name||'-')}</td>
+        <td><span style="font-size:10px;font-weight:700;color:var(--gray-500);text-transform:uppercase;display:block;margin-bottom:2px">${cat}</span>${Utils.escapeHtml(cls?.name||'-')}</td>
         <td>${Utils.escapeHtml(subj[0]?.name||'-')}</td>
         <td><span class="badge ${Utils.statusColor(a.status)}"><i data-lucide="${Utils.statusIcon(a.status)}"></i> ${a.status}</span></td>
       </tr>`;
@@ -50,15 +69,28 @@ async function renderAdminDashboard() {
         <span class="ac-open">Open <i data-lucide="arrow-right"></i></span>
       </button>`).join('');
 
-    const today = new Date().toLocaleDateString(undefined, { day: '2-digit', month: 'long', year: 'numeric' });
+    const filterHtml = `
+      <div class="card mb-6" style="padding:16px 20px; background:linear-gradient(135deg,rgba(59,130,246,0.1),rgba(37,99,235,0.05))">
+        <div style="display:flex;align-items:center;gap:16px">
+          <div style="font-weight:700;color:var(--blue-800)"><i data-lucide="filter" style="width:16px;height:16px;vertical-align:middle"></i> View Scope:</div>
+          <select class="select-field" style="width:250px;margin:0" onchange="adminDashboardEduLevel=this.value;renderAdminDashboard()">
+            <option value="all">🎓 All Education Levels (Global)</option>
+            <option value="Primary" ${adminDashboardEduLevel==='Primary'?'selected':''}>📗 Primary Only (P1-P6)</option>
+            <option value="Lower Secondary" ${adminDashboardEduLevel==='Lower Secondary'?'selected':''}>📘 Lower Secondary (S1-S3)</option>
+            <option value="Upper Secondary" ${adminDashboardEduLevel==='Upper Secondary'?'selected':''}>📙 Upper Secondary (S4-S6)</option>
+          </select>
+        </div>
+      </div>
+    `;
 
     setContent(`
+      ${filterHtml}
       <div class="grid-4 card-in-stagger mb-6">
         <div class="stat-card">
           <div class="stat-icon" style="background:var(--blue-50);color:var(--blue-600)"><i data-lucide="users"></i></div>
-          <div class="stat-value">${learners}</div>
+          <div class="stat-value">${learners.length}</div>
           <div class="stat-label">Total Learners</div>
-          <div class="stat-desc"><i data-lucide="users"></i> Enrolled across all classes</div>
+          <div class="stat-desc"><i data-lucide="users"></i> Enrolled across filtered classes</div>
         </div>
         <div class="stat-card">
           <div class="stat-icon" style="background:var(--green-50);color:var(--green-600)"><i data-lucide="user-check"></i></div>
@@ -68,15 +100,15 @@ async function renderAdminDashboard() {
         </div>
         <div class="stat-card">
           <div class="stat-icon" style="background:var(--amber-50);color:var(--amber-600)"><i data-lucide="school"></i></div>
-          <div class="stat-value">${classes}</div>
-          <div class="stat-label">Total Classes</div>
-          <div class="stat-desc"><i data-lucide="school"></i> Class groups configured</div>
+          <div class="stat-value">${classes.length}</div>
+          <div class="stat-label">Structured Classes</div>
+          <div class="stat-desc"><i data-lucide="school"></i> Selected level classes</div>
         </div>
         <div class="stat-card">
           <div class="stat-icon" style="background:#faf5ff;color:#9333ea"><i data-lucide="file-text"></i></div>
-          <div class="stat-value">${all.length}</div>
+          <div class="stat-value">${assessments.length}</div>
           <div class="stat-label">Total Assessments</div>
-          <div class="stat-desc"><i data-lucide="file-text"></i> All assessment records</div>
+          <div class="stat-desc"><i data-lucide="file-text"></i> For selected context</div>
         </div>
       </div>
       <div class="grid-4 card-in-stagger mb-6">
@@ -114,7 +146,7 @@ async function renderAdminDashboard() {
         <div class="card-header">
           <div>
             <h3><i data-lucide="clock" style="width:18px;height:18px;color:var(--blue-600)"></i> Recent Assessments</h3>
-            <p class="card-subtitle">Latest assessment activity across classes</p>
+            <p class="card-subtitle">Latest assessment activity across selected classes</p>
           </div>
         </div>
         <div class="table-container">
