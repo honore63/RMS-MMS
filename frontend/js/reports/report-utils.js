@@ -104,6 +104,30 @@ const ReportUtils = {
     return DB.query('subjects', '*', filter || {}, { column: 'name', asc: true });
   },
 
+  /** Parse the class grade (P1-P6 / S1-S6) from level or name. */
+  classGrade(cls) {
+    if (!cls) return null;
+    const m = String(cls.level || '') + ' ' + String(cls.name || '');
+    const f = m.toUpperCase().match(/([PS][1-6])/);
+    return f ? f[1] : null;
+  },
+
+  /** Subjects officially assigned to a class (empty array = not configured). */
+  async getClassSubjects(classId) {
+    if (!classId) return [];
+    try {
+      const { data, error } = await sbClient
+        .from('class_subjects')
+        .select('subject_id, subjects(*)')
+        .eq('class_id', classId);
+      if (error) throw error;
+      return (data || []).map(r => r.subjects).filter(Boolean)
+        .sort((a, b) => String(a.name).localeCompare(String(b.name)));
+    } catch (e) {
+      return [];
+    }
+  },
+
   async getAssessments(filter = {}) {
     return DB.query('assessments', '*', filter || {}, { column: 'assessment_date', asc: false });
   },

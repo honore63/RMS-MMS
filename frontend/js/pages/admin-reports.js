@@ -285,21 +285,66 @@ const ReportCenter = {
     this.state.cardStream = '';
     this.state.classId = '';
     this.state.studentId = '';
+    this.state.subjectId = '';
     this.applyClassFilter();
     this.loadStudents();
+    this.loadClassSubjects();
   },
 
   onStreamChange(value) {
     this.state.cardStream = value || '';
     this.state.classId = '';
     this.state.studentId = '';
+    this.state.subjectId = '';
     this.applyClassFilter();
     this.loadStudents();
+    this.loadClassSubjects();
   },
 
   async onClassChange(value) {
     this.state.classId = value;
+    this.state.subjectId = '';
     await this.loadStudents();
+    await this.loadClassSubjects();
+  },
+
+  /** Dynamic Subject dropdown: Section → Class → Subject. */
+  async loadClassSubjects() {
+    const sel = document.getElementById('rc-subject');
+    if (!sel) return;
+    const keep = this.state.subjectId || '';
+    let list = [];
+    try {
+      if (this.state.classId) {
+        const assigned = await ReportUtils.getClassSubjects(this.state.classId);
+        if (assigned.length) list = assigned;
+      }
+      if (!list.length) {
+        const cls = (this._allClasses || []).find(c => String(c.id) === String(this.state.classId));
+        const grade = ReportUtils.classGrade(cls);
+        const eduCat = cls ? EducationLevels.getCategory(cls)
+          : (this.state.cardLevel && this.state.cardLevel !== 'all' ? this.state.cardLevel : null);
+        list = (this._allSubjects || [])
+          .filter(s => s.status === 'active' || !s.status)
+          .filter(s => {
+            if (!eduCat) return true;
+            const sl = String(s.level || 'Both').trim().toUpperCase();
+            if (sl === 'BOTH' || sl === '') return true;
+            const cat = String(eduCat).toUpperCase();
+            if (sl === 'PRIMARY') return cat === 'PRIMARY';
+            if (sl === 'SECONDARY') return cat.includes('SECONDARY');
+            return true;
+          })
+          .filter(s => {
+            if (!grade || !s.grades) return true;
+            return String(s.grades).split(',').map(x => x.trim().toUpperCase()).includes(String(grade).toUpperCase());
+          })
+          .sort((a, b) => String(a.name).localeCompare(String(b.name)));
+      }
+    } catch (e) { list = []; }
+    sel.innerHTML = '<option value="">All Subjects</option>' + list.map(s =>
+      `<option value="${s.id}" ${String(s.id) === String(keep) ? 'selected' : ''}>${Utils.escapeHtml(s.name)}${s.level ? ' (' + Utils.escapeHtml(s.level) + ')' : ''}</option>`).join('');
+    if (keep && !list.some(s => String(s.id) === String(keep))) this.state.subjectId = '';
   },
 
   async loadStudents() {
@@ -349,6 +394,8 @@ const ReportCenter = {
       this.applyClassFilter();
       const mode = this.state.cardMode || 'individual';
       show('rc-student-group', !isCard || mode === 'individual');
+    }
+    if (visible.includes('rc-subject-group')) this.loadClassSubjects();
       const subjLbl = document.querySelector('#rc-subject-group label');
       if (subjLbl) subjLbl.textContent = 'Subject Filter (optional — default: all assigned subjects)';
     }

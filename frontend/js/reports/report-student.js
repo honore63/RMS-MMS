@@ -153,6 +153,19 @@ const ReportStudent = {
     let levelSubjects = (subjects || [])
       .filter(s => s.status === 'active' || !s.status)
       .filter(s => this.subjectMatchesLevel(s.level, eduCat));
+    // Prefer the official class → subject assignment; fall back to grade band.
+    const grade = ReportUtils.classGrade(cls);
+    let assigned = [];
+    try { assigned = await ReportUtils.getClassSubjects(cls.id); } catch (e) { assigned = []; }
+    if (assigned.length) {
+      const ids = new Set(assigned.map(s => String(s.id)));
+      levelSubjects = levelSubjects.filter(s => ids.has(String(s.id)));
+    } else if (grade) {
+      levelSubjects = levelSubjects.filter(s => {
+        if (!s.grades) return true;
+        return String(s.grades).split(',').map(x => x.trim().toUpperCase()).includes(String(grade).toUpperCase());
+      });
+    }
     if (subjectIds && subjectIds.length) {
       const set = new Set(subjectIds.map(String));
       levelSubjects = levelSubjects.filter(s => set.has(String(s.id)));
