@@ -35,15 +35,35 @@ const Auth = {
     this.teacherProfile = null;
   },
 
-  async fetchOrCreateProfile(authUser) {
-    let { data, error: selectError } = await sbClient.from('users').select('*').eq('id', authUser.id).single();
+  generateTeacherCode() {
+    // 11-digit numeric code (must match teachers_teacher_code_format: ^[0-9]{11}$)
+    return '541' + String(Math.floor(Math.random() * 100000000)).padStart(8, '0');
+  },
 
-    if (selectError && selectError.code !== 'PGRST116') {
+  async ensureTeacherRow(data, authUser) {
+    // Auto-create the teachers row for a logged-in teacher that has a users row
+    // but no teachers row yet (unique 11-digit code, retries on collision).
+    for (let attempt = 0; attempt < 5; attempt++) {
+      const code = this.generateTeacherCode();
+      const { error } = await sbClient.from('teachers').insert([{
+        user_id: authUser.id,
+        teacher_code: code,
+        full_name: data.full_name,
+        email: data.email || authUser.email,
+        status: 'active'
+      }]);
+      if (!error) return code;
+      if (!/duplicate|unique/i.test(error?.message || '')) break;
+    }
+    return null;
+  },
+
+  async fetchOrCreateProfile(authUser) {
+    let { data, error: selectError } = await sbClient.from('users').select('*').eq('id', authUser.id).maybeSingle();
+
+    if (selectError) {
       this.currentUser = null;
       return null;
-    }
-    if (selectError && selectError.code === 'PGRST116') {
-      data = null;
     }
 
     if (!data) {
@@ -52,26 +72,18 @@ const Auth = {
         const role = isAdmin ? 'dos' : 'teacher';
         const name = authUser.email.split('@')[0].replace(/[._]/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
 
-        await sbClient.from('users').insert([{
+        ({ data, error: selectError } = await sbClient.from('users').insert([{
           id: authUser.id,
           email: authUser.email,
           full_name: name,
           role: role,
           status: 'active'
-        }]);
+        }]).select().single());
 
-        if (role === 'teacher') {
-          const code = 'T' + String(Math.floor(Math.random() * 900) + 100);
-          await sbClient.from('teachers').insert([{
-            user_id: authUser.id,
-            teacher_code: code,
-            full_name: name,
-            email: authUser.email,
-            status: 'active'
-          }]);
+        if (selectError) {
+          console.error('PROFILE CREATE ERROR:', selectError.message);
+          data = null;
         }
-
-        ({ data } = await sbClient.from('users').select('*').eq('id', authUser.id).single());
       } catch (err) {
         console.error('PROFILE SYNC ERROR:', err.message);
         data = null;
@@ -81,8 +93,15 @@ const Auth = {
     this.currentUser = data;
 
     if (data && data.role === 'teacher') {
-      const { data: t } = await sbClient.from('teachers').select('*').eq('user_id', authUser.id).single();
-      this.teacherProfile = t;
+      const { data: t, error: tErr } = await sbClient.from('teachers').select('*').eq('user_id', authUser.id).maybeSingle();
+      if (!t && !tErr) {
+        // users row exists but teachers row is missing — recover by creating it
+        await this.ensureTeacherRow(data, authUser);
+        const { data: t2 } = await sbClient.from('teachers').select('*').eq('user_id', authUser.id).maybeSingle();
+        this.teacherProfile = t2 || null;
+      } else {
+        this.teacherProfile = t || null;
+      }
     }
     return data;
   },
