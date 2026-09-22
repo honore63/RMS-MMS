@@ -106,8 +106,24 @@ const Sidebar = {
       </div>
       <div class="sidebar-section">
         <div class="sidebar-section-title">Reports</div>
-        <a class="nav-link" data-route="admin/reports" onclick="Router.go('admin/reports')">
-          <i data-lucide="file-bar-chart"></i> Report Center</a>
+        <a class="nav-link nav-parent" data-navgroup="reports" onclick="Sidebar.toggleGroup('reports')">
+          <i data-lucide="bar-chart-3"></i> Reports <i data-lucide="chevron-down" class="nav-chevron"></i></a>
+        <div class="nav-sub" id="nav-sub-reports">
+          <a class="nav-link nav-sub-link" data-route="admin/reports" onclick="Router.go('admin/reports')">
+            <i data-lucide="layout-grid"></i> All Reports</a>
+          <a class="nav-link nav-sub-link" data-route="admin/reports/cards" onclick="Router.go('admin/reports/cards')">
+            <i data-lucide="file-badge"></i> Student Report Cards</a>
+          <a class="nav-link nav-sub-link" data-route="admin/reports/class" onclick="Router.go('admin/reports/class')">
+            <i data-lucide="school"></i> Class Performance</a>
+          <a class="nav-link nav-sub-link" data-route="admin/reports/subject" onclick="Router.go('admin/reports/subject')">
+            <i data-lucide="book-open"></i> Subject Performance</a>
+          <a class="nav-link nav-sub-link" data-route="admin/reports/student" onclick="Router.go('admin/reports/student')">
+            <i data-lucide="user"></i> Student Performance</a>
+          <a class="nav-link nav-sub-link" data-route="admin/reports/assessment" onclick="Router.go('admin/reports/assessment')">
+            <i data-lucide="clipboard-check"></i> Assessment Report</a>
+          <a class="nav-link nav-sub-link" data-route="admin/reports/school" onclick="Router.go('admin/reports/school')">
+            <i data-lucide="building-2"></i> School Report</a>
+        </div>
       </div>
       <div class="sidebar-section">
         <div class="sidebar-section-title">System Insights</div>
@@ -134,6 +150,19 @@ const Sidebar = {
           <i data-lucide="school"></i> My Classes</a>
         <a class="nav-link" data-route="teacher/my-subjects" onclick="Router.go('teacher/my-subjects')">
           <i data-lucide="book-marked"></i> My Subjects</a>
+      </div>
+      <div class="sidebar-section">
+        <div class="sidebar-section-title">My Reports</div>
+        <a class="nav-link nav-parent" data-navgroup="teacher-reports" onclick="Sidebar.toggleGroup('teacher-reports')">
+          <i data-lucide="bar-chart-3"></i> Reports <i data-lucide="chevron-down" class="nav-chevron"></i></a>
+        <div class="nav-sub" id="nav-sub-teacher-reports">
+          <a class="nav-link nav-sub-link" data-route="teacher/reports/cards" onclick="Router.go('teacher/reports/cards')">
+            <i data-lucide="file-badge"></i> Student Report Cards</a>
+          <a class="nav-link nav-sub-link" data-route="teacher/reports/class" onclick="Router.go('teacher/reports/class')">
+            <i data-lucide="school"></i> Class Performance</a>
+          <a class="nav-link nav-sub-link" data-route="teacher/reports/subject" onclick="Router.go('teacher/reports/subject')">
+            <i data-lucide="book-open"></i> Subject Performance</a>
+        </div>
       </div>
       <a class="nav-link" data-route="teacher/analytics" onclick="Router.go('teacher/analytics')">
         <i data-lucide="trending-up"></i> Analytics</a>

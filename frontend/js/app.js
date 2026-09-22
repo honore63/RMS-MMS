@@ -390,6 +390,12 @@ function registerRoutes() {
   Router.register('admin/marks', renderAdminMarks);
   Router.register('admin/import-history', renderImportHistory);
   Router.register('admin/reports', renderReportCenter || (() => { setHeader('Report Center', 'Reporting System'); setContent('<div class="card"><div class="card-body"><p>Report Center loading...</p></div></div>'); }));
+  Router.register('admin/reports/cards', () => ReportCenter.open('student-card'));
+  Router.register('admin/reports/class', () => ReportCenter.open('class-performance'));
+  Router.register('admin/reports/subject', () => ReportCenter.open('subject-performance'));
+  Router.register('admin/reports/student', () => ReportCenter.open('student-performance'));
+  Router.register('admin/reports/assessment', () => ReportCenter.open('exam-class-summary'));
+  Router.register('admin/reports/school', () => ReportCenter.open('school-performance'));
   Router.register('admin/analytics', renderAnalytics);
   Router.register('admin/audit-logs', renderAuditLogs || (() => { setHeader('Audit Logs', 'Audit log viewer'); setContent('<div class="card"><div class="card-body"><p>Coming soon.</p></div></div>'); }));
   Router.register('admin/documents', renderDocuments);
@@ -401,7 +407,10 @@ function registerRoutes() {
   Router.register('teacher/enter-marks', renderEnterMarks);
   Router.register('teacher/import-marks', () => { setHeader('Import Marks', 'Bulk import learner marks from Excel, CSV, Word or PDF'); MarksImport.open(); });
   Router.register('teacher/submitted-marks', renderSubmittedMarks);
-  Router.register('teacher/reports', renderTeacherReports || (() => { setHeader('Reports', 'Reports'); setContent('<div class="card"><div class="card-body"><p>Reports module is being updated.</p></div></div>'); }));
+  Router.register('teacher/reports', () => ReportCenter.open('student-card'));
+  Router.register('teacher/reports/cards', () => ReportCenter.open('student-card'));
+  Router.register('teacher/reports/class', () => ReportCenter.open('class-performance'));
+  Router.register('teacher/reports/subject', () => ReportCenter.open('subject-performance'));
   Router.register('teacher/analytics', renderTeacherAnalytics);
   Router.register('teacher/notifications', renderNotifications);
   Router.register('teacher/account', renderTeacherAccount);

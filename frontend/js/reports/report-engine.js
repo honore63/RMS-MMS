@@ -23,6 +23,12 @@ const ReportEngine = {
       case 'school-performance': return this.generateSchoolPerformance(ctx);
       case 'teacher-performance': return this.generateTeacherPerformance(ctx);
       case 'grade-distribution': return this.generateGradeDistribution(ctx);
+      case 'student-performance': {
+        const card = await this.generateStudentCard(ctx);
+        card.type = 'student-performance';
+        card.title = 'STUDENT PERFORMANCE REPORT';
+        return card;
+      }
       default: throw new Error(`Unknown report type: ${reportType}`);
     }
   },

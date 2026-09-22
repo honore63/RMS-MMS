@@ -73,6 +73,7 @@ const ReportCenter = {
                 <label>Report Type</label>
                 <select id="rc-report-type" class="select-field" onchange="ReportCenter.onTypeChange(this.value)">
                   <option value="student-card" ${this.state.reportType === 'student-card' ? 'selected' : ''}>Student Report Card</option>
+                  <option value="student-performance" ${this.state.reportType === 'student-performance' ? 'selected' : ''}>Student Performance Summary</option>
                   <option value="exam-class-summary" ${this.state.reportType === 'exam-class-summary' ? 'selected' : ''}>Exam Class Performance Summary</option>
                   <option value="subject-performance" ${this.state.reportType === 'subject-performance' ? 'selected' : ''}>Subject Performance Summary</option>
                   <option value="class-performance" ${this.state.reportType === 'class-performance' ? 'selected' : ''}>Class Performance Report</option>
@@ -209,6 +210,7 @@ const ReportCenter = {
   getReportCategories() {
     return [
       { id: 'student-card', label: 'A. Student Reports', sub: ['Student Report Card', 'Student Academic Report'] },
+      { id: 'student-performance', label: 'H. Student Performance', sub: ['Student Performance Summary'] },
       { id: 'exam-class-summary', label: 'B. Class Reports', sub: ['Exam Class Performance Summary', 'Class Performance Report'] },
       { id: 'subject-performance', label: 'C. Subject Reports', sub: ['Subject Performance Summary', 'Subject Marks Sheet'] },
       { id: 'missing-marks', label: 'D. Assessment Reports', sub: ['Missing Marks Report', 'Assessment Completion Report'] },
@@ -324,6 +326,7 @@ const ReportCenter = {
     const show = (id, v) => { const el = document.getElementById(id); if (el) el.style.display = v ? '' : 'none'; };
     const typeMap = {
       'student-card': ['rc-level-group', 'rc-stream-group', 'rc-class-group', 'rc-mode-group', 'rc-student-group', 'rc-subject-group', 'rc-atype-group'],
+      'student-performance': ['rc-level-group', 'rc-stream-group', 'rc-class-group', 'rc-student-group', 'rc-subject-group', 'rc-atype-group'],
       'exam-class-summary': ['rc-class-group', 'rc-assessment-group'],
       'subject-performance': ['rc-class-group', 'rc-subject-group', 'rc-teacher-group', 'rc-assessment-group'],
       'class-performance': ['rc-class-group'],
@@ -336,15 +339,16 @@ const ReportCenter = {
     const visible = typeMap[type] || [];
     allGroups.forEach(g => show(g, visible.includes(g)));
     const isCard = type === 'student-card';
+    const isStudentView = isCard || type === 'student-performance';
     show('rc-generic-actions', !isCard);
     show('rc-card-actions', isCard);
-    show('rc-card-options', isCard);
+    show('rc-card-options', isStudentView);
     // Orientation selector always visible so user can override Auto
     show('rc-orientation-group', true);
-    if (isCard) {
+    if (isStudentView) {
       this.applyClassFilter();
       const mode = this.state.cardMode || 'individual';
-      show('rc-student-group', mode === 'individual');
+      show('rc-student-group', !isCard || mode === 'individual');
       const subjLbl = document.querySelector('#rc-subject-group label');
       if (subjLbl) subjLbl.textContent = 'Subject Filter (optional — default: all assigned subjects)';
     }
@@ -362,6 +366,13 @@ const ReportCenter = {
     if (data.term?.name) parts.push(safe(data.term.name));
     parts.push(orientation === 'landscape' ? 'A4-Landscape' : 'A4-Portrait');
     return parts.join('_') + '.pdf';
+  },
+
+  open(reportType) {
+    const valid = ['student-card', 'student-performance', 'class-performance', 'subject-performance', 'exam-class-summary', 'missing-marks', 'school-performance', 'teacher-performance', 'grade-distribution'];
+    this.state.reportType = valid.includes(reportType) ? reportType : 'student-card';
+    if (this.state.reportType === 'student-card' && !this.state.cardMode) this.state.cardMode = 'individual';
+    return this.render();
   },
 
   readCardInputs() {
@@ -459,6 +470,7 @@ const ReportCenter = {
     previewArea.innerHTML = Utils.loading();
 
     try {
+      this.readCardInputs();
       const config = {
         reportType: this.state.reportType,
         academicYear: this.state.academicYear || undefined,
@@ -467,12 +479,17 @@ const ReportCenter = {
         subjectId: this.state.subjectId || undefined,
         teacherId: this.state.teacherId || undefined,
         assessmentId: this.state.assessmentId || undefined,
-        studentId: this.state.studentId || undefined
+        studentId: this.state.studentId || undefined,
+        assessmentTypeId: this.state.assessmentTypeId || undefined,
+        teacherComment: this.state.teacherComment || '',
+        dosComment: this.state.dosComment || '',
+        decisionOverride: this.state.decisionOverride || ''
       };
 
       const data = await ReportEngine.generate(config);
       const typeMap = {
-        'student-card': 'studentCard', 'exam-class-summary': 'examClassSummary',
+        'student-card': 'studentCard', 'student-performance': 'studentPerformance',
+        'exam-class-summary': 'examClassSummary',
         'subject-performance': 'subjectPerformance', 'class-performance': 'classPerformance',
         'missing-marks': 'missingMarks', 'school-performance': 'schoolPerformance',
         'teacher-performance': 'teacherPerformance', 'grade-distribution': 'gradeDistribution'

@@ -42,6 +42,56 @@ const ReportTemplates = {
       ${footer}`;
   },
 
+  studentPerformance(data) {
+    const { settings, learner, cls, year, term, subjRows, overallPct, overallGrade, overallPf, totalSubjects, passed, failed } = data;
+    const level = data.level || { label: '' };
+    const header = ReportHeader.getOfficialHeader({ settings, title: 'STUDENT PERFORMANCE REPORT', subtitle: `${learner?.full_name || ''} – ${cls?.name || ''}`, levelLabel: level.label || '' });
+
+    let tbody = '';
+    (subjRows || []).forEach((row, i) => {
+      tbody += `<tr><td class="text-center">${i + 1}</td><td>${Utils.escapeHtml(row.subject?.name || row.subject)}</td><td class="text-center">${row.hasMarks ? row.obtained : '—'}</td><td class="text-center">${row.hasMarks ? row.maxMark : '—'}</td><td class="text-center">${row.pct == null ? 'N/A' : row.pct.toFixed(1) + '%'}</td><td class="text-center font-bold">${row.grade}</td><td class="text-center"><span class="badge ${row.status === 'PASS' ? 'badge-success' : row.status === 'FAIL' ? 'badge-danger' : 'badge-warning'}">${row.status}</span></td><td>${Utils.escapeHtml(row.remark || '')}</td></tr>`;
+    });
+
+    const distRows = (data.gradeDist || []).map(g => `<span class="badge badge-info">${Utils.escapeHtml(g.grade)}: ${g.count}</span>`).join(' ');
+    const posText = data.position ? `${data.position} out of ${data.positionOutOf}` : 'Not available';
+    const footer = ReportHeader.getFooter({ settings, academicYear: year?.name || '', term: term?.name || '' });
+
+    return `
+      ${header}
+      <div class="rms-report-title">${data.title}</div>
+      <div style="margin-bottom:8px"><span class="badge ${data.approval === 'APPROVED' ? 'badge-success' : data.approval === 'PENDING APPROVAL' ? 'badge-warning' : 'badge-gray'}">${Utils.escapeHtml(data.approval || 'DRAFT')}</span>
+      ${data.hasMissing ? '<span class="badge badge-warning" style="margin-left:8px">Some assessment marks are missing. Final performance may be incomplete.</span>' : ''}</div>
+      <div class="rms-meta-grid">
+        <div><span class="rms-meta-lbl">Student Name:</span> ${Utils.escapeHtml(learner?.full_name || '-')}</div>
+        <div><span class="rms-meta-lbl">Student Code:</span> ${Utils.escapeHtml(learner?.learner_code || '-')}</div>
+        <div><span class="rms-meta-lbl">Level:</span> ${Utils.escapeHtml(level.label || '-')}</div>
+        <div><span class="rms-meta-lbl">Class:</span> ${Utils.escapeHtml(cls?.name || '-')}</div>
+        <div><span class="rms-meta-lbl">Stream:</span> ${Utils.escapeHtml(cls?.stream || learner?.stream || '-')}</div>
+        <div><span class="rms-meta-lbl">Gender:</span> ${Utils.escapeHtml(learner?.gender || '-')}</div>
+        <div><span class="rms-meta-lbl">Academic Year:</span> ${Utils.escapeHtml(year?.name || '-')}</div>
+        <div><span class="rms-meta-lbl">Term:</span> ${Utils.escapeHtml(term?.name || '-')}</div>
+      </div>
+      <table class="rms-table">
+        <thead><tr><th>No.</th><th>Subject</th><th>Total</th><th>Max</th><th>%</th><th>Grade</th><th>Status</th><th>Remark</th></tr></thead>
+        <tbody>${tbody}</tbody>
+      </table>
+      <div class="rms-summary-grid">
+        <div class="rms-stat"><span class="rms-stat-val">${totalSubjects}</span><span class="rms-stat-lbl">Total Subjects</span></div>
+        <div class="rms-stat"><span class="rms-stat-val" style="color:#16a34a">${passed}</span><span class="rms-stat-lbl">Passed</span></div>
+        <div class="rms-stat"><span class="rms-stat-val" style="color:#dc2626">${failed}</span><span class="rms-stat-lbl">Failed</span></div>
+        <div class="rms-stat"><span class="rms-stat-val">${overallPct == null ? 'N/A' : overallPct.toFixed(1) + '%'}</span><span class="rms-stat-lbl">Average</span></div>
+        <div class="rms-stat"><span class="rms-stat-val">${overallGrade?.grade || '—'}</span><span class="rms-stat-lbl">Overall Grade</span></div>
+        <div class="rms-stat"><span class="rms-stat-val">${Utils.escapeHtml(overallPf || '')}</span><span class="rms-stat-lbl">Status</span></div>
+        <div class="rms-stat"><span class="rms-stat-val">${Utils.escapeHtml(posText)}</span><span class="rms-stat-lbl">Class Position</span></div>
+        <div class="rms-stat"><span class="rms-stat-val">${Utils.escapeHtml(data.decision || '')}</span><span class="rms-stat-lbl">Final Decision</span></div>
+      </div>
+      <div class="rms-grade-dist"><strong>Grade Distribution:</strong> ${distRows || '—'}</div>
+      <div class="rms-meta" style="margin-bottom:12px"><strong>Overall Comment:</strong> ${Utils.escapeHtml(data.overallComment || '')}</div>
+      <div class="rms-meta" style="margin-bottom:12px"><strong>Teacher's Comment:</strong> ${Utils.escapeHtml(data.teacherComment || '')}</div>
+      <div class="rms-meta" style="margin-bottom:12px"><strong>DOS Comment:</strong> ${Utils.escapeHtml(data.dosComment || '')}</div>
+      ${footer}`;
+  },
+
   examClassSummary(data) {
     const { settings, cls, year, term, assess, stats, learnerRows, positions, scale, totalLearners, assessedCount, missingMarks } = data;
     const header = ReportHeader.getOfficialHeader({ settings, title: 'EXAM CLASS PERFORMANCE SUMMARY', subtitle: `${cls?.name || ''} – ${assess?.name || ''}` });

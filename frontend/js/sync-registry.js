@@ -20,6 +20,13 @@
   Realtime.route('admin/assessments', ['assessments', 'assessment_types', 'teacher_assignments', 'marks', 'teachers', 'academic_years', 'terms']);
   Realtime.route('admin/assessment-types', ['assessment_types', 'assessments']);
   Realtime.route('admin/marks', ['assessments', 'assessment_types', 'marks', 'learners', 'teachers', 'classes']);
+  Realtime.route('admin/reports', ['assessments', 'assessment_types', 'marks', 'learners', 'classes', 'subjects', 'academic_years', 'terms', 'school_settings', 'grading_scales']);
+  Realtime.route('admin/reports/cards', ['assessments', 'assessment_types', 'marks', 'learners', 'classes', 'subjects', 'academic_years', 'terms', 'school_settings', 'grading_scales']);
+  Realtime.route('admin/reports/class', ['assessments', 'assessment_types', 'marks', 'learners', 'classes', 'subjects', 'academic_years', 'terms', 'school_settings', 'grading_scales']);
+  Realtime.route('admin/reports/subject', ['assessments', 'assessment_types', 'marks', 'learners', 'classes', 'subjects', 'academic_years', 'terms', 'school_settings', 'grading_scales']);
+  Realtime.route('admin/reports/student', ['assessments', 'assessment_types', 'marks', 'learners', 'classes', 'subjects', 'academic_years', 'terms', 'school_settings', 'grading_scales']);
+  Realtime.route('admin/reports/assessment', ['assessments', 'assessment_types', 'marks', 'learners', 'classes', 'subjects', 'academic_years', 'terms', 'school_settings', 'grading_scales']);
+  Realtime.route('admin/reports/school', ['assessments', 'assessment_types', 'marks', 'learners', 'classes', 'subjects', 'academic_years', 'terms', 'school_settings', 'grading_scales']);
 Realtime.route('admin/analytics', ['assessments', 'marks', 'learners', 'classes', 'subjects', 'grading_scales']);
    Realtime.route('admin/audit-logs', ['audit_logs']);
   Realtime.route('admin/documents', ['documents']);
@@ -29,6 +36,10 @@ Realtime.route('admin/analytics', ['assessments', 'marks', 'learners', 'classes'
   Realtime.route('teacher/my-classes', ['learners', 'classes', 'teacher_assignments']);
   Realtime.route('teacher/my-subjects', ['subjects', 'teacher_assignments']);
   Realtime.route('teacher/submitted-marks', ['assessments', 'marks']);
+  Realtime.route('teacher/reports', ['assessments', 'assessment_types', 'marks', 'learners', 'classes', 'subjects', 'academic_years', 'terms', 'school_settings', 'grading_scales']);
+  Realtime.route('teacher/reports/cards', ['assessments', 'assessment_types', 'marks', 'learners', 'classes', 'subjects', 'academic_years', 'terms', 'school_settings', 'grading_scales']);
+  Realtime.route('teacher/reports/class', ['assessments', 'assessment_types', 'marks', 'learners', 'classes', 'subjects', 'academic_years', 'terms', 'school_settings', 'grading_scales']);
+  Realtime.route('teacher/reports/subject', ['assessments', 'assessment_types', 'marks', 'learners', 'classes', 'subjects', 'academic_years', 'terms', 'school_settings', 'grading_scales']);
 
   /* Marks entry: refresh the list live, but NEVER rebuild the page
      while the teacher is actively entering marks (guarded below). */
