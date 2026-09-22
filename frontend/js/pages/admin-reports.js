@@ -552,7 +552,7 @@ const ReportCenter = {
     const w = window.open('', '_blank');
     if (!w) { Utils.toast('Allow pop-ups to print', 'error'); return; }
     const pageRule = orientation === 'landscape' ? 'size: A4 landscape; margin: 12mm;' : 'size: A4 portrait; margin: 12mm;';
-    const cssLinks = `<link rel="stylesheet" href="${new URL('css/styles.css', window.location.href).href}"><link rel="stylesheet" href="${new URL('css/report-card.css', window.location.href).href}">`;
+    const cssLinks = `<link rel="stylesheet" href="${new URL('css/styles.css', window.location.href).href}"><link rel="stylesheet" href="${new URL('css/report-card.css', window.location.href).href}"><link rel="stylesheet" href="${new URL('css/student-report-card.css', window.location.href).href}">`;
     w.document.write(`<!DOCTYPE html><html><head><meta charset="utf-8"><title>${Utils.escapeHtml(title || filename || 'Report')}</title>${cssLinks}<style>@page{${pageRule}}html,body{margin:0;padding:0;background:#fff}table{page-break-inside:auto}tr{page-break-inside:avoid;break-inside:avoid}thead{display:table-header-group}tfoot{display:table-footer-group}.rms-a4-container{box-shadow:none!important;margin:0 auto!important}.no-print,.report-preview-toolbar-flex{display:none!important}</style></head><body>${html}</body></html>`);
     w.document.close();
     w.focus();

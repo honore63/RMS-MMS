@@ -141,6 +141,12 @@ const ReportStudent = {
     return mx > 0 ? Math.round((obt / mx) * 10000) / 100 : null;
   },
 
+  colMatches(col, a) {
+    return String(a.assessment_type_id || a.name) === String(col.typeId || col.name)
+      || String(a.assessment_type_id) === String(col.key)
+      || col.key === String(a.assessment_type_id || a.name);
+  },
+
   async buildCard({ learner, cls, year, term, subjects, official, types, allMarks, settings, scale, passMark, subjectIds, teacherComment, dosComment, decisionOverride }) {
     const level = this.levelOfClass(cls);
     const eduCat = EducationLevels.getCategory(cls);
@@ -160,6 +166,25 @@ const ReportStudent = {
     const myMarks = (allMarks || []).filter(m => String(m.learner_id) === String(learner.id));
     const columns = this.typeColumns(official, types);
 
+    // Per-component column metadata: max sums + weight shares (reference Total row)
+    const allWeighted = official.length > 0 && official.every(a => {
+      const w = this.effWeight(a, types);
+      return w != null && w > 0;
+    });
+    const totalWeight = allWeighted
+      ? official.reduce((s, a) => s + this.effWeight(a, types), 0)
+      : 0;
+    const columnMeta = columns.map(col => {
+      const colAssess = official.filter(a => this.colMatches(col, a));
+      const max = colAssess.reduce((s, a) => s + Number(a.maximum_mark || 0), 0);
+      const wsum = allWeighted ? colAssess.reduce((s, a) => s + this.effWeight(a, types), 0) : 0;
+      return {
+        ...col,
+        max,
+        sub: allWeighted && totalWeight > 0 ? `(${Math.round((wsum / totalWeight) * 100)}%)` : (max ? `(${max})` : '')
+      };
+    });
+
     const subjRows = [];
     let totObt = 0, totMax = 0, withMarks = 0, passed = 0, failed = 0;
     for (const subj of levelSubjects) {
@@ -171,7 +196,7 @@ const ReportStudent = {
         continue;
       }
       const components = columns.map(col => {
-        const colAssess = sAssess.filter(a => String(a.assessment_type_id || a.name) === String(col.typeId || col.name) || String(a.assessment_type_id) === String(col.key) || col.key === String(a.assessment_type_id || a.name));
+        const colAssess = sAssess.filter(a => this.colMatches(col, a));
         const rel = valid.filter(m => colAssess.some(a => String(a.id) === String(m.assessment_id)));
         if (!rel.length) return null;
         const obt = rel.reduce((s, m) => s + Number(m.mark), 0);
@@ -190,6 +215,16 @@ const ReportStudent = {
       if (pct != null) { withMarks++; totObt += obt; totMax += mx; if (pf === 'PASS') passed++; else failed++; }
       subjRows.push({ subject: subj, components, obtained: obt, maxMark: mx, pct, grade: pct == null ? '—' : g.grade, descriptor: g.descriptor, status: pf, remark, hasMarks: pct != null });
     }
+
+    // Reference-style Total row: per-component sums across subjects with marks
+    const columnTotals = columnMeta.map((col, ci) => {
+      let obt = 0, has = false;
+      subjRows.forEach(r => {
+        const c = r.components && r.components[ci];
+        if (c != null && r.hasMarks) { obt += Number(c.obtained || 0); has = true; }
+      });
+      return { obtained: obt, max: col.max, has };
+    });
 
     const overallPct = totMax > 0 && withMarks > 0 ? Math.round((totObt / totMax) * 10000) / 100 : null;
     const overallGrade = overallPct == null ? { grade: '—', descriptor: '' } : ReportUtils.calcGrade(overallPct, scale);
@@ -220,7 +255,8 @@ const ReportStudent = {
     return {
       type: 'student-card', title: 'STUDENT REPORT CARD',
       settings, learner, cls, year, term, level, eduCat,
-      subjRows, columns, totalSubjects: levelSubjects.length, withMarks,
+      subjRows, columns, columnMeta, columnTotals,
+      totalSubjects: levelSubjects.length, withMarks,
       passed, failed, totalObtained: totObt, totalMax,
       overallPct, overallGrade, overallPf, avg: overallPct,
       gradeDist, teacherName, teacherComment: teacherFinal, dosComment: dosFinal,
@@ -317,61 +353,179 @@ const ReportStudent = {
     return out;
   },
 
+  shortRemark(pct, scale) {
+    if (pct == null) return '—';
+    if (typeof GradingEngine !== 'undefined' && scale && scale.length) {
+      try {
+        const info = GradingEngine.calculateGradeSync(pct, scale);
+        if (info.descriptor) return info.descriptor;
+        if (info.grade) return info.grade;
+      } catch (e) { /* fallback below */ }
+    }
+    if (pct >= 90) return 'Outstanding';
+    if (pct >= 80) return 'Excellent';
+    if (pct >= 70) return 'Very Good';
+    if (pct >= 60) return 'Good';
+    if (pct >= 50) return 'Satisfactory';
+    if (pct >= 40) return 'Needs Improvement';
+    return 'Fail';
+  },
+
+  gradeBars(dist) {
+    const items = (dist || []).filter(g => g.count > 0);
+    if (!items.length) return '<div class="src-chart-title">Grade Distribution</div><p class="text-sm text-muted">No grade data</p>';
+    const shades = ['#111111', '#333333', '#555555', '#777777', '#999999', '#bbbbbb', '#dddddd'];
+    const max = Math.max(...items.map(g => g.count));
+    const W = 220, H = 110, padB = 18, padT = 14;
+    const slot = W / items.length;
+    const bw = Math.min(30, slot * 0.55);
+    let bars = '';
+    items.forEach((g, i) => {
+      const h = max > 0 ? Math.max(2, ((H - padB - padT) * g.count) / max) : 0;
+      const x = slot * i + (slot - bw) / 2;
+      const y = H - padB - h;
+      bars += `<rect x="${x.toFixed(1)}" y="${y.toFixed(1)}" width="${bw.toFixed(1)}" height="${h.toFixed(1)}" fill="${shades[i % shades.length]}"><title>${Utils.escapeHtml(g.grade)}: ${g.count}</title></rect>`;
+      bars += `<text x="${(x + bw / 2).toFixed(1)}" y="${(y - 3).toFixed(1)}" text-anchor="middle" font-size="9" font-weight="700" fill="#111">${g.count}</text>`;
+      bars += `<text x="${(x + bw / 2).toFixed(1)}" y="${H - 5}" text-anchor="middle" font-size="9" fill="#111">${Utils.escapeHtml(g.grade)}</text>`;
+    });
+    return `<div class="src-chart-title">Grade Distribution</div><svg viewBox="0 0 ${W} ${H}" width="100%" role="img" aria-label="Grade distribution">${bars}</svg>`;
+  },
+
+  passDonut(passed, failed) {
+    const total = passed + failed;
+    if (!total) return '<div class="src-chart-title">Pass/Fail Summary</div><p class="text-sm text-muted">No data</p>';
+    const rate = Math.round((passed / total) * 100);
+    const size = 120, stroke = 16, r = (size - stroke) / 2, c = size / 2;
+    const C = 2 * Math.PI * r;
+    const passLen = (C * passed) / total;
+    return `<div class="src-chart-title">Pass/Fail Summary</div>
+      <svg viewBox="0 0 ${size} ${size}" width="${size}" height="${size}" role="img" aria-label="Pass fail summary">
+        <circle cx="${c}" cy="${c}" r="${r}" fill="none" stroke="#e2e2e2" stroke-width="${stroke}" />
+        <circle cx="${c}" cy="${c}" r="${r}" fill="none" stroke="#111111" stroke-width="${stroke}" stroke-dasharray="${passLen.toFixed(1)} ${(C - passLen).toFixed(1)}" transform="rotate(-90 ${c} ${c})" />
+        <text x="${c}" y="${c + 5}" text-anchor="middle" font-size="15" font-weight="800" fill="#111">${rate}%</text>
+      </svg>
+      <div class="src-legend"><span><span class="src-dot" style="background:#111"></span>Passed&nbsp;${passed}</span><span><span class="src-dot" style="background:#bbb;border:1px solid #555"></span>Failed&nbsp;${failed}</span></div>`;
+  },
+
   renderCardInner(card) {
-    const { settings, learner, cls, year, term, level, subjRows, columns } = card;
-    const header = ReportHeader.getOfficialHeader({ settings, title: 'STUDENT REPORT CARD', subtitle: `${cls?.name || ''}`, levelLabel: level.label });
-    const stream = cls?.stream || learner?.stream || '—';
+    const { settings, learner, cls, year, term, level, subjRows } = card;
+    const cols = card.columnMeta && card.columnMeta.length ? card.columnMeta : (card.columns || []);
+    const totals = card.columnTotals || [];
+    const s = settings || {};
+    const ministryLogo = s.ministry_logo_url || 'public/logo.webp';
+    const schoolLogo = s.school_logo_url || s.logo_url || 'public/logo.webp';
+    const motto = s.school_motto || s.motto || 'RMS-MIS';
+    const stream = cls?.stream || learner?.stream || 'General';
+    const dob = learner?.date_of_birth || learner?.dob || '';
+    const now = new Date();
+    const genDate = Utils.dateStr(now) + ' ' + now.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' });
+
     const headRows = subjRows.map((r, i) => {
       const compTds = (r.components || []).map(c => c == null
-        ? '<td class="text-center text-muted">—</td>'
-        : `<td class="text-center">${c.obtained}</td>`).join('');
-      return `<tr><td class="text-center">${i + 1}</td><td>${Utils.escapeHtml(r.subject.name)}</td>${compTds}<td class="text-center font-bold">${r.hasMarks ? r.obtained : '—'}</td><td class="text-center">${r.hasMarks ? r.maxMark : '—'}</td><td class="text-center">${r.pct == null ? 'N/A' : r.pct.toFixed(1) + '%'}</td><td class="text-center font-bold">${r.grade}</td><td class="text-center"><span class="badge ${r.status === 'PASS' ? 'badge-success' : r.status === 'FAIL' ? 'badge-danger' : 'badge-warning'}">${r.status}</span></td><td>${Utils.escapeHtml(r.remark || '')}</td></tr>`;
+        ? '<td>—</td>'
+        : `<td>${c.obtained}</td>`).join('');
+      return `<tr><td>${i + 1}</td><td class="src-subject">${Utils.escapeHtml(r.subject.name)}</td>${compTds}<td><strong>${r.hasMarks ? r.obtained : '—'}</strong></td><td><strong>${r.pct == null ? 'N/A' : r.pct.toFixed(1)}</strong></td><td><strong>${r.grade}</strong></td><td>${r.status === 'PASS' ? 'Pass' : r.status === 'FAIL' ? 'Fail' : Utils.escapeHtml(r.status)}</td><td>${Utils.escapeHtml(this.shortRemark(r.pct, card.scale))}</td></tr>`;
     }).join('');
-    const compHeaders = (columns || []).map(c => `<th>${Utils.escapeHtml(c.code)}</th>`).join('');
-    const gradeRows = (card.scale || []).map(g => `<tr><td class="text-center font-bold">${Utils.escapeHtml(g.grade)}</td><td class="text-center">${g.minimum_percentage}–${g.maximum_percentage}%</td><td>${Utils.escapeHtml(g.descriptor || g.remark || '')}</td></tr>`).join('');
-    const abbrRows = this.abbrList(card).map(([a, b]) => `<span class="rms-abbr"><strong>${Utils.escapeHtml(a)}</strong> = ${Utils.escapeHtml(b)}</span>`).join('');
-    const distRows = (card.gradeDist || []).map(g => `<span class="badge badge-info">${Utils.escapeHtml(g.grade)}: ${g.count}</span>`).join(' ');
+
+    const compHeaders = cols.map(c => `<th>${Utils.escapeHtml(c.code)}<br><span style="font-size:8px;font-weight:400">${Utils.escapeHtml(c.sub || '')}</span></th>`).join('');
+    const totalTds = cols.map((c, ci) => {
+      const t = totals[ci];
+      return `<td>${t && t.has ? t.obtained : '—'}</td>`;
+    }).join('');
+    const overallShort = this.shortRemark(card.overallPct, card.scale);
     const posText = card.position ? `${card.position} out of ${card.positionOutOf}` : 'Not available';
-    const footer = ReportHeader.getFooter({ settings, academicYear: year?.name || '', term: term?.name || '' });
 
     return `
-      ${header}
-      <div class="rms-report-title">${card.title} — ${level.label}</div>
-      <div style="margin-bottom:8px"><span class="badge ${card.approval === 'APPROVED' ? 'badge-success' : card.approval === 'PENDING APPROVAL' ? 'badge-warning' : 'badge-gray'}">${Utils.escapeHtml(card.approval || 'DRAFT')}</span>
-      ${card.hasMissing ? '<span class="badge badge-warning" style="margin-left:8px">Some assessment marks are missing. Final performance may be incomplete.</span>' : ''}</div>
-      <div class="rms-meta-grid">
-        <div><span class="rms-meta-lbl">Student Name:</span> ${Utils.escapeHtml(learner?.full_name || '-')}</div>
-        <div><span class="rms-meta-lbl">Student Code:</span> ${Utils.escapeHtml(learner?.learner_code || '-')}</div>
-        <div><span class="rms-meta-lbl">Level:</span> ${level.label}</div>
-        <div><span class="rms-meta-lbl">Class:</span> ${Utils.escapeHtml(cls?.name || '-')}</div>
-        <div><span class="rms-meta-lbl">Stream:</span> ${Utils.escapeHtml(stream)}</div>
-        <div><span class="rms-meta-lbl">Gender:</span> ${Utils.escapeHtml(learner?.gender || '-')}</div>
-        <div><span class="rms-meta-lbl">Academic Year:</span> ${Utils.escapeHtml(year?.name || '-')}</div>
-        <div><span class="rms-meta-lbl">Term:</span> ${Utils.escapeHtml(term?.name || '-')}</div>
+    <div class="src-sheet">
+      <div class="src-header">
+        <div class="src-head-left">
+          <img src="${Utils.escapeHtml(ministryLogo)}" class="src-logo" alt="Ministry logo" onerror="this.style.display='none'">
+          <div class="src-logo-caption">REPUBLIC OF RWANDA<br>MINISTRY OF EDUCATION</div>
+        </div>
+        <div class="src-head-center">
+          <div class="src-school-line small">REPUBLIC OF RWANDA</div>
+          <div class="src-school-line mid">MINISTRY OF EDUCATION</div>
+          <div class="src-school-line small">${Utils.escapeHtml(s.province || 'EASTERN PROVINCE')}</div>
+          <div class="src-school-line small">${Utils.escapeHtml(s.district || 'KAYONZA DISTRICT')}</div>
+          <div class="src-school-line small">${Utils.escapeHtml(s.sector || 'GAHINI SECTOR')}</div>
+          <div class="src-school-line big">${Utils.escapeHtml(s.school_name || 'RUKARA MODEL SCHOOL')}</div>
+          <div class="src-school-meta">School Code: ${Utils.escapeHtml(s.school_code || '541023')}</div>
+          <div class="src-school-meta">E-mail: ${Utils.escapeHtml(s.school_email || s.email || '')} &nbsp;|&nbsp; Phone: ${Utils.escapeHtml(s.school_phone || s.phone || '')}</div>
+        </div>
+        <div class="src-head-right">
+          <img src="${Utils.escapeHtml(schoolLogo)}" class="src-logo" alt="School logo" onerror="this.style.display='none'">
+          <div class="src-logo-caption">${Utils.escapeHtml(motto)}</div>
+          <div class="src-logo-caption">RMS-MIS</div>
+        </div>
       </div>
-      <table class="rms-table">
-        <thead><tr><th>No.</th><th>Subject</th>${compHeaders}<th>Total</th><th>Max</th><th>%</th><th>Grade</th><th>Status</th><th>Remark</th></tr></thead>
+      <hr class="src-head-rule">
+      <div class="src-title-main">STUDENT REPORT CARD</div>
+      <div class="src-title-sub">${level.label}</div>
+      <div style="margin-bottom:6px"><span class="src-badge ${card.approval === 'APPROVED' ? 'solid' : ''}">${Utils.escapeHtml(card.approval || 'DRAFT')}</span>
+      ${card.hasMissing ? '<span class="src-badge" style="margin-left:6px">Some marks are missing — final performance may be incomplete.</span>' : ''}</div>
+      <div class="src-info">
+        <div class="src-info-col">
+          <div class="src-info-row"><span class="src-info-lbl">Student Name</span><span class="src-info-sep">:</span><span class="src-info-val">${Utils.escapeHtml(learner?.full_name || '-')}</span></div>
+          <div class="src-info-row"><span class="src-info-lbl">Student Code</span><span class="src-info-sep">:</span><span class="src-info-val">${Utils.escapeHtml(learner?.learner_code || '-')}</span></div>
+          <div class="src-info-row"><span class="src-info-lbl">Class</span><span class="src-info-sep">:</span><span class="src-info-val">${Utils.escapeHtml(cls?.name || '-')}</span></div>
+          <div class="src-info-row"><span class="src-info-lbl">Stream</span><span class="src-info-sep">:</span><span class="src-info-val">${Utils.escapeHtml(stream)}</span></div>
+        </div>
+        <div class="src-info-col">
+          <div class="src-info-row"><span class="src-info-lbl">Academic Year</span><span class="src-info-sep">:</span><span class="src-info-val">${Utils.escapeHtml(year?.name || '-')}</span></div>
+          <div class="src-info-row"><span class="src-info-lbl">Term</span><span class="src-info-sep">:</span><span class="src-info-val">${Utils.escapeHtml(term?.name || '-')}</span></div>
+          ${dob ? `<div class="src-info-row"><span class="src-info-lbl">Date of Birth</span><span class="src-info-sep">:</span><span class="src-info-val">${Utils.escapeHtml(dob)}</span></div>` : ''}
+          <div class="src-info-row"><span class="src-info-lbl">Gender</span><span class="src-info-sep">:</span><span class="src-info-val">${Utils.escapeHtml(learner?.gender === 'M' ? 'Male' : learner?.gender === 'F' ? 'Female' : (learner?.gender || '-'))}</span></div>
+        </div>
+      </div>
+      <table class="src-table">
+        <thead>
+          <tr><th rowspan="2">No.</th><th rowspan="2" style="text-align:left">Subject</th><th colspan="${cols.length || 1}">Assessment Components</th><th rowspan="2">Total<br><span style="font-size:8px;font-weight:400">(100)</span></th><th rowspan="2">Percentage<br><span style="font-size:8px;font-weight:400">(%)</span></th><th rowspan="2">Grade</th><th rowspan="2">Status</th><th rowspan="2">Remark</th></tr>
+          <tr>${compHeaders}</tr>
+        </thead>
         <tbody>${headRows}</tbody>
+        <tfoot><tr><td></td><td class="src-subject">Total</td>${totalTds}<td>${card.totalObtained}</td><td>${card.overallPct == null ? 'N/A' : card.overallPct.toFixed(1)}</td><td>${card.overallGrade?.grade || '—'}</td><td>${card.overallPf === 'PASS' ? 'Pass' : card.overallPf === 'FAIL' ? 'Fail' : Utils.escapeHtml(card.overallPf || '')}</td><td>${Utils.escapeHtml(overallShort)}</td></tr></tfoot>
       </table>
-      <div class="rms-summary-grid">
-        <div class="rms-stat"><span class="rms-stat-val">${card.totalSubjects}</span><span class="rms-stat-lbl">Total Subjects</span></div>
-        <div class="rms-stat"><span class="rms-stat-val">${card.withMarks}</span><span class="rms-stat-lbl">With Marks</span></div>
-        <div class="rms-stat"><span class="rms-stat-val" style="color:#16a34a">${card.passed}</span><span class="rms-stat-lbl">Passed</span></div>
-        <div class="rms-stat"><span class="rms-stat-val" style="color:#dc2626">${card.failed}</span><span class="rms-stat-lbl">Failed</span></div>
-        <div class="rms-stat"><span class="rms-stat-val">${card.overallPct == null ? 'N/A' : card.overallPct.toFixed(1) + '%'}</span><span class="rms-stat-lbl">Overall Average</span></div>
-        <div class="rms-stat"><span class="rms-stat-val">${card.overallGrade?.grade || '—'}</span><span class="rms-stat-lbl">Overall Grade</span></div>
-        <div class="rms-stat"><span class="rms-stat-val">${Utils.escapeHtml(posText)}</span><span class="rms-stat-lbl">Class Position</span></div>
-        <div class="rms-stat"><span class="rms-stat-val">${Utils.escapeHtml(card.decision || '')}</span><span class="rms-stat-lbl">Final Decision</span></div>
+      <div class="src-panels">
+        <div class="src-panel src-summary">
+          <div class="src-panel-title">Summary</div>
+          <div class="src-panel-body">
+            <div class="src-kv"><span>Total Subjects</span><b>${card.totalSubjects}</b></div>
+            <div class="src-kv"><span>Subjects Passed</span><b>${card.passed}</b></div>
+            <div class="src-kv"><span>Subjects Failed</span><b>${card.failed}</b></div>
+            <div class="src-kv"><span>Overall Average</span><b>${card.overallPct == null ? 'N/A' : card.overallPct.toFixed(1) + '%'}</b></div>
+            <div class="src-kv"><span>Overall Grade</span><b>${card.overallGrade?.grade || '—'}</b></div>
+            <div class="src-kv"><span>Class Position</span><b>${Utils.escapeHtml(posText)}</b></div>
+          </div>
+        </div>
+        <div class="src-panel src-performance">
+          <div class="src-panel-title">Overall Performance</div>
+          <div class="src-panel-body">
+            <div style="font-size:10px;font-weight:800;margin-bottom:4px">Performance Analysis</div>
+            <div class="src-charts">
+              <div class="src-chart-box">${this.gradeBars(card.gradeDist)}</div>
+              <div class="src-chart-box">${this.passDonut(card.passed, card.failed)}</div>
+            </div>
+          </div>
+        </div>
       </div>
-      <div class="rms-grade-dist"><strong>Grade Distribution:</strong> ${distRows || '—'}</div>
-      <div class="rms-meta" style="margin-bottom:12px"><strong>Overall Comment:</strong> ${Utils.escapeHtml(card.overallComment || '')}</div>
-      <div class="rms-meta" style="margin-bottom:12px"><strong>Teacher's Comment:</strong> ${Utils.escapeHtml(card.teacherComment || '')}</div>
-      <div class="rms-meta" style="margin-bottom:12px"><strong>DOS Comment:</strong> ${Utils.escapeHtml(card.dosComment || '')}</div>
-      ${schoolSignatureSection(card.teacherName, settings.dos_name, settings.headteacher_name)}
-      <h4 class="rms-report-title" style="margin-top:16px">Grading Scale</h4>
-      <table class="rms-table"><thead><tr><th>Grade</th><th>Percentage Range</th><th>Description</th></tr></thead><tbody>${gradeRows}</tbody></table>
-      <div class="rms-grade-dist"><strong>Abbreviations:</strong> ${abbrRows}</div>
-      ${footer}`;
+      <div class="src-comments">
+        <div class="src-comment"><h5>Teacher's Comment</h5><p>${Utils.escapeHtml(card.teacherComment || '')}</p></div>
+        <div class="src-comment"><h5>DOS Comment</h5><p>${Utils.escapeHtml(card.dosComment || '')}</p></div>
+      </div>
+      <div class="src-signatures">
+        <div class="src-sig"><h5>Class Teacher's Signature</h5><div class="sig-name">${Utils.escapeHtml(card.teacherName || '')}</div><div>Date:&nbsp; ${Utils.escapeHtml(Utils.dateStr(now))}</div><div class="sig-line">Signature</div></div>
+        <div class="src-sig"><h5>DOS Signature</h5><div class="sig-name">${Utils.escapeHtml(s.dos_name || '')}</div><div>Date:&nbsp; ${Utils.escapeHtml(Utils.dateStr(now))}</div><div class="sig-line">Signature</div></div>
+      </div>
+      <div class="src-footer">
+        <div class="src-footer-row">
+          <div><strong>RMS-MIS &nbsp;|&nbsp; ${Utils.escapeHtml(s.school_name || 'Rukara Model School')}</strong><br>Marks Information System</div>
+          <div style="text-align:center">Academic Year: ${Utils.escapeHtml(year?.name || '-')}<br>Term: ${Utils.escapeHtml(term?.name || '-')}</div>
+          <div style="text-align:right">Generated: ${Utils.escapeHtml(genDate)}<br>Page 1 of 1</div>
+        </div>
+        ${s.school_motto || s.motto ? `<div class="src-footer-motto">${Utils.escapeHtml(s.school_motto || s.motto)}</div>` : ''}
+        <div class="src-wave"></div>
+      </div>
+    </div>`;
   },
 
   renderCard(card) {
