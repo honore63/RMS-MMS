@@ -1,0 +1,13 @@
+{
+  "name": "rms-mis-reports-server",
+  "version": "1.0.0",
+  "description": "Serverless PDF generation endpoints for RMS-MIS reports",
+  "main": "index.js",
+  "scripts": {
+    "start": "node ./api/reports/pdf.js"
+  },
+  "dependencies": {
+    "archiver": "^5.3.1",
+    "puppeteer": "^21.3.8"
+  }
+}

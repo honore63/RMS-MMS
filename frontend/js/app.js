@@ -389,7 +389,7 @@ function registerRoutes() {
   Router.register('admin/assessment-types', renderAssessmentTypes);
   Router.register('admin/marks', renderAdminMarks);
   Router.register('admin/import-history', renderImportHistory);
-  Router.register('admin/reports', renderReportCenter || (() => { setHeader('Report Center', 'Reporting System'); setContent('<div class="card"><div class="card-body"><p>Report Center loading...</p></div></div>'); }));
+  Router.register('admin/reports', (typeof renderReportCenter !== 'undefined' ? renderReportCenter : () => { setHeader('Report Center', 'Reporting System'); setContent('<div class="card"><div class="card-body"><p>Report Center loading...</p></div></div>'); }));
   Router.register('admin/reports/cards', () => ReportCenter.open('student-card'));
   Router.register('admin/reports/class', () => ReportCenter.open('class-performance'));
   Router.register('admin/reports/subject', () => ReportCenter.open('subject-performance'));
@@ -397,9 +397,9 @@ function registerRoutes() {
   Router.register('admin/reports/assessment', () => ReportCenter.open('exam-class-summary'));
   Router.register('admin/reports/school', () => ReportCenter.open('school-performance'));
   Router.register('admin/analytics', renderAnalytics);
-  Router.register('admin/audit-logs', renderAuditLogs || (() => { setHeader('Audit Logs', 'Audit log viewer'); setContent('<div class="card"><div class="card-body"><p>Coming soon.</p></div></div>'); }));
+  Router.register('admin/audit-logs', (typeof renderAuditLogs !== 'undefined' ? renderAuditLogs : () => { setHeader('Audit Logs', 'Audit log viewer'); setContent('<div class="card"><div class="card-body"><p>Coming soon.</p></div></div>'); }));
   Router.register('admin/documents', renderDocuments);
-  Router.register('admin/settings', renderSettings || (() => { setHeader('School Settings', 'Configure school settings'); setContent('<div class="card"><div class="card-body"><p>Settings module under development.</p></div></div>'); }));
+  Router.register('admin/settings', (typeof renderSettings !== 'undefined' ? renderSettings : () => { setHeader('School Settings', 'Configure school settings'); setContent('<div class="card"><div class="card-body"><p>Settings module under development.</p></div></div>'); }));
 
   Router.register('teacher/dashboard', renderTeacherDashboard);
   Router.register('teacher/my-classes', renderMyClasses);

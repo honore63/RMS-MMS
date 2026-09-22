@@ -2,7 +2,7 @@ const ReportEngine = {
   current: null,
 
   async generate(config) {
-    const { reportType, academicYear, term, classId, subjectId, teacherId, assessmentId, studentId } = config;
+    const { reportType, academicYear, term, classId, subjectId, subjectIds, teacherId, assessmentId, studentId } = config;
     const settings = await ReportUtils.getSettings();
     const scale = await ReportUtils.getScale();
     const passMark = settings.pass_mark || 50;
@@ -10,7 +10,7 @@ const ReportEngine = {
     const year = academicYear || await ReportUtils.getActiveYear();
     const activeTerm = term || await ReportUtils.getActiveTerm();
 
-    const ctx = { settings, scale, passMark, year, term: activeTerm, classId, subjectId, teacherId, assessmentId, studentId,
+    const ctx = { settings, scale, passMark, year, term: activeTerm, classId, subjectId, subjectIds, teacherId, assessmentId, studentId,
       assessmentTypeId: config.assessmentTypeId, teacherComment: config.teacherComment,
       dosComment: config.dosComment, decisionOverride: config.decisionOverride };
 
@@ -40,7 +40,7 @@ const ReportEngine = {
       const termId = ctx.term && ctx.term.id ? ctx.term.id : ctx.term;
       return ReportStudent.fetchCardData({
         learnerId: ctx.studentId, classId: ctx.classId, yearId, termId,
-        subjectIds: ctx.subjectId ? [ctx.subjectId] : null,
+        subjectIds: (ctx.subjectIds && ctx.subjectIds.length) ? ctx.subjectIds : (ctx.subjectId ? [ctx.subjectId] : null),
         assessmentTypeId: ctx.assessmentTypeId || null,
         teacherComment: ctx.teacherComment || '', dosComment: ctx.dosComment || '',
         decisionOverride: ctx.decisionOverride || ''

@@ -387,7 +387,7 @@ const ReportStudent = {
   gradeBars(dist) {
     const items = (dist || []).filter(g => g.count > 0);
     if (!items.length) return '<div class="src-chart-title">Grade Distribution</div><p class="text-sm text-muted">No grade data</p>';
-    const shades = ['#111111', '#333333', '#555555', '#777777', '#999999', '#bbbbbb', '#dddddd'];
+    const colors = ['#4ade80', '#60a5fa', '#f59e0b', '#f97316', '#ef4444', '#a855f7'];
     const max = Math.max(...items.map(g => g.count));
     const W = 220, H = 110, padB = 18, padT = 14;
     const slot = W / items.length;
@@ -397,9 +397,10 @@ const ReportStudent = {
       const h = max > 0 ? Math.max(2, ((H - padB - padT) * g.count) / max) : 0;
       const x = slot * i + (slot - bw) / 2;
       const y = H - padB - h;
-      bars += `<rect x="${x.toFixed(1)}" y="${y.toFixed(1)}" width="${bw.toFixed(1)}" height="${h.toFixed(1)}" fill="${shades[i % shades.length]}"><title>${Utils.escapeHtml(g.grade)}: ${g.count}</title></rect>`;
-      bars += `<text x="${(x + bw / 2).toFixed(1)}" y="${(y - 3).toFixed(1)}" text-anchor="middle" font-size="9" font-weight="700" fill="#111">${g.count}</text>`;
-      bars += `<text x="${(x + bw / 2).toFixed(1)}" y="${H - 5}" text-anchor="middle" font-size="9" fill="#111">${Utils.escapeHtml(g.grade)}</text>`;
+      const col = colors[i % colors.length];
+      bars += `<rect x="${x.toFixed(1)}" y="${y.toFixed(1)}" width="${bw.toFixed(1)}" height="${h.toFixed(1)}" fill="${col}" rx="2"><title>${Utils.escapeHtml(g.grade)}: ${g.count}</title></rect>`;
+      bars += `<text x="${(x + bw / 2).toFixed(1)}" y="${(y - 3).toFixed(1)}" text-anchor="middle" font-size="9" font-weight="700" fill="#1e293b">${g.count}</text>`;
+      bars += `<text x="${(x + bw / 2).toFixed(1)}" y="${H - 5}" text-anchor="middle" font-size="9" font-weight="600" fill="#1e293b">${Utils.escapeHtml(g.grade)}</text>`;
     });
     return `<div class="src-chart-title">Grade Distribution</div><svg viewBox="0 0 ${W} ${H}" width="100%" role="img" aria-label="Grade distribution">${bars}</svg>`;
   },
@@ -413,11 +414,11 @@ const ReportStudent = {
     const passLen = (C * passed) / total;
     return `<div class="src-chart-title">Pass/Fail Summary</div>
       <svg viewBox="0 0 ${size} ${size}" width="${size}" height="${size}" role="img" aria-label="Pass fail summary">
-        <circle cx="${c}" cy="${c}" r="${r}" fill="none" stroke="#e2e2e2" stroke-width="${stroke}" />
-        <circle cx="${c}" cy="${c}" r="${r}" fill="none" stroke="#111111" stroke-width="${stroke}" stroke-dasharray="${passLen.toFixed(1)} ${(C - passLen).toFixed(1)}" transform="rotate(-90 ${c} ${c})" />
-        <text x="${c}" y="${c + 5}" text-anchor="middle" font-size="15" font-weight="800" fill="#111">${rate}%</text>
+        <circle cx="${c}" cy="${c}" r="${r}" fill="none" stroke="#ef4444" stroke-width="${stroke}" />
+        <circle cx="${c}" cy="${c}" r="${r}" fill="none" stroke="#10b981" stroke-width="${stroke}" stroke-dasharray="${passLen.toFixed(1)} ${(C - passLen).toFixed(1)}" transform="rotate(-90 ${c} ${c})" />
+        <text x="${c}" y="${c + 5}" text-anchor="middle" font-size="15" font-weight="800" fill="#0d47a1">${rate}%</text>
       </svg>
-      <div class="src-legend"><span><span class="src-dot" style="background:#111"></span>Passed&nbsp;${passed}</span><span><span class="src-dot" style="background:#bbb;border:1px solid #555"></span>Failed&nbsp;${failed}</span></div>`;
+      <div class="src-legend"><span><span class="src-dot" style="background:#10b981"></span>Passed&nbsp;${passed}</span><span><span class="src-dot" style="background:#ef4444"></span>Failed&nbsp;${failed}</span></div>`;
   },
 
   renderCardInner(card) {
@@ -526,8 +527,20 @@ const ReportStudent = {
         <div class="src-comment"><h5>DOS Comment</h5><p>${Utils.escapeHtml(card.dosComment || '')}</p></div>
       </div>
       <div class="src-signatures">
-        <div class="src-sig"><h5>Class Teacher's Signature</h5><div class="sig-name">${Utils.escapeHtml(card.teacherName || '')}</div><div>Date:&nbsp; ${Utils.escapeHtml(Utils.dateStr(now))}</div><div class="sig-line">Signature</div></div>
-        <div class="src-sig"><h5>DOS Signature</h5><div class="sig-name">${Utils.escapeHtml(s.dos_name || '')}</div><div>Date:&nbsp; ${Utils.escapeHtml(Utils.dateStr(now))}</div><div class="sig-line">Signature</div></div>
+        <div class="src-sig">
+          <h5>Class Teacher's Signature</h5>
+          <div class="sig-name">${Utils.escapeHtml(card.teacherName || '')}</div>
+          <div>Date:&nbsp; ${Utils.escapeHtml(Utils.dateStr(now))}</div>
+          <div style="margin-top:8px;font-family:cursive;font-size:16px;color:#0d47a1;height:24px;display:flex;align-items:flex-end">${Utils.escapeHtml(card.teacherName ? card.teacherName.split(' ')[0] : 'Signature')}</div>
+          <div class="sig-line">Signature</div>
+        </div>
+        <div class="src-sig">
+          <h5>DOS Signature</h5>
+          <div class="sig-name">${Utils.escapeHtml(s.dos_name || '')}</div>
+          <div>Date:&nbsp; ${Utils.escapeHtml(Utils.dateStr(now))}</div>
+          <div style="margin-top:8px;font-family:cursive;font-size:16px;color:#0d47a1;height:24px;display:flex;align-items:flex-end">${Utils.escapeHtml(s.dos_name ? s.dos_name.split(' ')[0] : 'Signature')}</div>
+          <div class="sig-line">Signature</div>
+        </div>
       </div>
       <div class="src-footer">
         <div class="src-footer-row">
@@ -535,7 +548,7 @@ const ReportStudent = {
           <div style="text-align:center">Academic Year: ${Utils.escapeHtml(year?.name || '-')}<br>Term: ${Utils.escapeHtml(term?.name || '-')}</div>
           <div style="text-align:right">Generated: ${Utils.escapeHtml(genDate)}<br>Page 1 of 1</div>
         </div>
-        ${s.school_motto || s.motto ? `<div class="src-footer-motto">${Utils.escapeHtml(s.school_motto || s.motto)}</div>` : ''}
+        <div class="src-footer-motto">${Utils.escapeHtml(s.school_motto || s.motto || 'Learn, Discipline and Success Our Aim.')}</div>
         <div class="src-wave"></div>
       </div>
     </div>`;

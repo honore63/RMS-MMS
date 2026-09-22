@@ -43,28 +43,28 @@
   font-size: 8.5px;
   font-weight: 700;
   letter-spacing: 0.3px;
-  color: #111;
+  color: #0d47a1;
   line-height: 1.3;
 }
 .src-motto {
   font-size: 8px;
   font-style: italic;
-  color: #333;
+  color: #1565c0;
 }
-.src-school-line { font-weight: 800; color: #111; }
+.src-school-line { font-weight: 800; color: #0d47a1; }
 .src-school-line.small { font-size: 10px; }
 .src-school-line.mid { font-size: 11.5px; }
-.src-school-line.big { font-size: 15px; letter-spacing: 0.4px; }
-.src-school-meta { font-size: 9px; color: #222; }
+.src-school-line.big { font-size: 16px; letter-spacing: 0.4px; }
+.src-school-meta { font-size: 9px; color: #1565c0; font-weight: 500; }
 .src-head-rule {
   border: none;
-  border-top: 2px solid #111;
+  border-top: 3px solid #0d47a1;
   margin: 4px 0 8px 0;
 }
 
 /* ---------- Title bands ---------- */
 .src-title-main {
-  background: #111;
+  background: #0d47a1;
   color: #fff;
   text-align: center;
   font-weight: 800;
@@ -74,9 +74,10 @@
   border-radius: 6px 6px 0 0;
 }
 .src-title-sub {
-  background: #e9e9e9;
-  border: 1px solid #111;
+  background: #e3f2fd;
+  border: 1.5px solid #1976d2;
   border-top: none;
+  color: #0d47a1;
   text-align: center;
   font-weight: 800;
   font-size: 12px;
@@ -89,18 +90,18 @@
 /* ---------- Student info panel ---------- */
 .src-info {
   display: flex;
-  border: 1px solid #111;
+  border: 1.5px solid #1976d2;
   border-radius: 6px;
-  background: #f4f4f5;
+  background: #f0f7ff;
   margin-bottom: 8px;
   overflow: hidden;
 }
 .src-info-col { flex: 1; padding: 6px 10px; }
-.src-info-col + .src-info-col { border-left: 1px solid #111; }
-.src-info-row { display: flex; gap: 6px; padding: 1px 0; font-size: 10.5px; }
-.src-info-lbl { font-weight: 700; min-width: 108px; }
-.src-info-sep { color: #111; }
-.src-info-val { font-weight: 600; }
+.src-info-col + .src-info-col { border-left: 1.5px solid #1976d2; }
+.src-info-row { display: flex; gap: 6px; padding: 1.5px 0; font-size: 10.5px; }
+.src-info-lbl { font-weight: 700; color: #0d47a1; min-width: 108px; }
+.src-info-sep { color: #1976d2; font-weight: 700; }
+.src-info-val { font-weight: 600; color: #1e293b; }
 
 /* ---------- Marks table ---------- */
 .src-table {
@@ -110,13 +111,13 @@
   margin-bottom: 8px;
 }
 .src-table th, .src-table td {
-  border: 1px solid #333;
-  padding: 3px 4px;
+  border: 1px solid #64b5f6;
+  padding: 4px 5px;
   word-wrap: break-word;
   overflow-wrap: break-word;
 }
 .src-table thead th {
-  background: #111;
+  background: #1565c0;
   color: #fff;
   font-weight: 700;
   text-align: center;
@@ -124,10 +125,14 @@
 .src-table thead tr:first-child th {
   font-size: 10.5px;
 }
-.src-table tbody td { text-align: center; }
-.src-table tbody td.src-subject { text-align: left; }
+.src-table tbody tr:nth-child(even) {
+  background: #f8fafc;
+}
+.src-table tbody td { text-align: center; color: #1e293b; }
+.src-table tbody td.src-subject { text-align: left; font-weight: 500; }
 .src-table tfoot td {
-  background: #e9e9e9;
+  background: #e3f2fd;
+  color: #0d47a1;
   font-weight: 800;
 }
 .src-table tfoot td.src-subject { text-align: left; }
@@ -139,13 +144,13 @@
   margin-bottom: 8px;
 }
 .src-panel {
-  border: 1px solid #111;
+  border: 1.5px solid #1976d2;
   border-radius: 6px;
   overflow: hidden;
   background: #fff;
 }
 .src-panel-title {
-  background: #111;
+  background: #1565c0;
   color: #fff;
   font-weight: 800;
   font-size: 11px;
@@ -154,55 +159,55 @@
 .src-panel-body { padding: 6px 8px; }
 .src-summary { flex: 0 0 30%; }
 .src-performance { flex: 1; }
-.src-kv { display: flex; justify-content: space-between; padding: 2px 0; border-bottom: 1px dotted #bbb; font-size: 10.5px; }
+.src-kv { display: flex; justify-content: space-between; padding: 3px 0; border-bottom: 1px dotted #90caf9; font-size: 10.5px; color: #1e293b; }
 .src-kv:last-child { border-bottom: none; }
-.src-kv b { font-weight: 800; }
+.src-kv b { font-weight: 800; color: #0d47a1; }
 .src-charts { display: flex; gap: 8px; }
 .src-chart-box {
   flex: 1;
-  border: 1px solid #999;
+  border: 1px solid #90caf9;
   border-radius: 4px;
   padding: 4px;
   text-align: center;
 }
-.src-chart-title { font-size: 9.5px; font-weight: 800; margin-bottom: 2px; }
+.src-chart-title { font-size: 9.5px; font-weight: 800; color: #0d47a1; margin-bottom: 2px; }
 .src-legend { font-size: 9px; display: flex; gap: 10px; justify-content: center; margin-top: 2px; }
 .src-dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 3px; vertical-align: baseline; }
 
 /* ---------- Comments ---------- */
 .src-comments {
   display: flex;
-  border: 1px solid #111;
+  border: 1.5px solid #1976d2;
   border-radius: 6px;
-  background: #f4f4f5;
+  background: #f0f7ff;
   margin-bottom: 8px;
   overflow: hidden;
 }
 .src-comment { flex: 1; padding: 6px 10px; font-size: 10px; }
-.src-comment + .src-comment { border-left: 1px solid #111; }
-.src-comment h5 { font-size: 10.5px; font-weight: 800; margin-bottom: 3px; }
-.src-comment p { margin: 0; }
+.src-comment + .src-comment { border-left: 1.5px solid #1976d2; }
+.src-comment h5 { font-size: 10.5px; font-weight: 800; color: #0d47a1; margin-bottom: 3px; }
+.src-comment p { margin: 0; color: #334155; }
 
 /* ---------- Signatures ---------- */
 .src-signatures {
   display: flex;
-  border: 1px solid #111;
+  border: 1.5px solid #1976d2;
   border-radius: 6px;
   margin-bottom: 8px;
   overflow: hidden;
 }
 .src-sig { flex: 1; padding: 6px 10px; font-size: 10px; }
-.src-sig + .src-sig { border-left: 1px solid #111; }
-.src-sig h5 { font-size: 10.5px; font-weight: 800; }
-.src-sig .sig-name { font-weight: 700; margin: 2px 0; }
-.src-sig .sig-line { margin-top: 14px; border-top: 1px solid #111; padding-top: 2px; color: #333; }
+.src-sig + .src-sig { border-left: 1.5px solid #1976d2; }
+.src-sig h5 { font-size: 10.5px; font-weight: 800; color: #0d47a1; }
+.src-sig .sig-name { font-weight: 700; color: #1e293b; margin: 2px 0; }
+.src-sig .sig-line { margin-top: 14px; border-top: 1px solid #1976d2; padding-top: 2px; color: #475569; }
 
 /* ---------- Footer ---------- */
 .src-footer {
-  border-top: 2px solid #111;
+  border-top: 2px solid #0d47a1;
   padding-top: 4px;
   font-size: 8.5px;
-  color: #111;
+  color: #1e293b;
 }
 .src-footer-row {
   display: flex;
@@ -213,24 +218,26 @@
   text-align: center;
   font-style: italic;
   font-weight: 700;
+  color: #0d47a1;
   margin: 2px 0;
 }
 .src-wave {
   height: 14px;
   border-radius: 0 0 4px 4px;
-  background: linear-gradient(100deg, #111 0 55%, #555 55% 78%, #999 78% 100%);
+  background: linear-gradient(100deg, #10b981 0%, #06b6d4 35%, #0284c7 65%, #0d47a1 100%);
   margin-top: 4px;
 }
 .src-badge {
   display: inline-block;
-  border: 1px solid #111;
+  border: 1px solid #1976d2;
   border-radius: 4px;
   padding: 1px 6px;
   font-size: 9px;
   font-weight: 700;
   background: #fff;
+  color: #0d47a1;
 }
-.src-badge.solid { background: #111; color: #fff; }
+.src-badge.solid { background: #0d47a1; color: #fff; }
 
 /* ---------- Print ---------- */
 @media print {
@@ -258,4 +265,23 @@
   .src-table thead { display: table-header-group; }
   .src-table tr { page-break-inside: avoid; break-inside: avoid; }
   .src-panels, .src-comments, .src-signatures { page-break-inside: avoid; break-inside: avoid; }
+}
+
+/* Responsive adjustments for small screens */
+@media (max-width: 900px) {
+  .src-sheet { font-size: 13px; padding: 8px; }
+  .src-header { flex-direction: column; align-items: center; gap: 8px; }
+  .src-head-left, .src-head-right { width: auto; flex-direction: row; gap: 8px; }
+  .src-head-left .src-logo, .src-head-right .src-logo { height: 56px; }
+  .src-head-center { text-align: center; }
+  .src-info { flex-direction: column; }
+  .src-info-col { padding: 8px; border-left: none; }
+  .src-table { display: block; width: 100%; overflow-x: auto; -webkit-overflow-scrolling: touch; }
+  .src-table table, .src-table thead, .src-table tbody, .src-table tfoot, .src-table tr, .src-table th, .src-table td { white-space: nowrap; }
+  .src-table th, .src-table td { padding: 6px 8px; }
+  .src-panels { flex-direction: column; }
+  .src-panel { width: 100%; }
+  .src-charts { flex-direction: column; }
+  .src-signatures { flex-direction: column; }
+  .src-comment { padding: 8px; }
 }

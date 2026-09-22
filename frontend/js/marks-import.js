@@ -1199,7 +1199,7 @@ const MarksImport = (() => {
         details: errRows.length ? errRows : null,
         status: (c.errors || c.duplicates) ? 'partial' : 'completed'
       };
-      await sbClient.from('import_history').insert([historyRow]);
+      await sbClient.from('import_history').insert([historyRow]).catch(() => {});
       await sbClient.from('audit_logs').insert({
         user_id: Auth.currentUser ? Auth.currentUser.id : null,
         user_name: Auth.currentUser ? Auth.currentUser.full_name : null,

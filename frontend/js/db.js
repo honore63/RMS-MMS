@@ -1,22 +1,36 @@
 const DB = {
   async get(table, filters = {}) {
-    let q = sbClient.from(table).select('*');
-    for (const [k, v] of Object.entries(filters)) {
-      if (v !== undefined && v !== null && v !== 'all') q = q.eq(k, v);
+    try {
+      let q = sbClient.from(table).select('*');
+      for (const [k, v] of Object.entries(filters)) {
+        if (v !== undefined && v !== null && v !== 'all') q = q.eq(k, v);
+      }
+      const { data, error } = await q;
+      if (error) throw error;
+      return data || [];
+    } catch (e) {
+      if (e?.code === '42P01' || e?.status === 404 || e?.message?.includes('does not exist') || e?.message?.includes('not found')) {
+        return [];
+      }
+      throw e;
     }
-    const { data, error } = await q;
-    if (error) throw error;
-    return data || [];
   },
 
   async getRelated(table, select, filters = {}) {
-    let q = sbClient.from(table).select(select);
-    for (const [k, v] of Object.entries(filters)) {
-      if (v !== undefined && v !== null && v !== 'all') q = q.eq(k, v);
+    try {
+      let q = sbClient.from(table).select(select);
+      for (const [k, v] of Object.entries(filters)) {
+        if (v !== undefined && v !== null && v !== 'all') q = q.eq(k, v);
+      }
+      const { data, error } = await q;
+      if (error) throw error;
+      return data || [];
+    } catch (e) {
+      if (e?.code === '42P01' || e?.status === 404 || e?.message?.includes('does not exist') || e?.message?.includes('not found')) {
+        return [];
+      }
+      throw e;
     }
-    const { data, error } = await q;
-    if (error) throw error;
-    return data || [];
   },
 
   async insert(table, row) {
@@ -37,15 +51,22 @@ const DB = {
   },
 
   async query(table, select, filters = {}, order = null, limit = null) {
-    let q = sbClient.from(table).select(select);
-    for (const [k, v] of Object.entries(filters)) {
-      if (v !== undefined && v !== null && v !== 'all') q = q.eq(k, v);
+    try {
+      let q = sbClient.from(table).select(select);
+      for (const [k, v] of Object.entries(filters)) {
+        if (v !== undefined && v !== null && v !== 'all') q = q.eq(k, v);
+      }
+      if (order) q = q.order(order.column, { ascending: order.asc ?? false });
+      if (limit) q = q.limit(limit);
+      const { data, error } = await q;
+      if (error) throw error;
+      return data || [];
+    } catch (e) {
+      if (e?.code === '42P01' || e?.status === 404 || e?.message?.includes('does not exist') || e?.message?.includes('not found')) {
+        return [];
+      }
+      throw e;
     }
-    if (order) q = q.order(order.column, { ascending: order.asc ?? false });
-    if (limit) q = q.limit(limit);
-    const { data, error } = await q;
-    if (error) throw error;
-    return data || [];
   },
 
   async count(table, filters = {}) {
