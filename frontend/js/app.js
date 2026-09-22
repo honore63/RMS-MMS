@@ -389,12 +389,11 @@ function registerRoutes() {
   Router.register('admin/assessment-types', renderAssessmentTypes);
   Router.register('admin/marks', renderAdminMarks);
   Router.register('admin/import-history', renderImportHistory);
-  Router.register('admin/reports', renderAdminReports);
+  Router.register('admin/reports', renderReportCenter || (() => { setHeader('Report Center', 'Reporting System'); setContent('<div class="card"><div class="card-body"><p>Report Center loading...</p></div></div>'); }));
   Router.register('admin/analytics', renderAnalytics);
-  Router.register('admin/post-assessment-reports', renderPostAssessmentReports);
-  Router.register('admin/audit-logs', renderAuditLogs);
+  Router.register('admin/audit-logs', renderAuditLogs || (() => { setHeader('Audit Logs', 'Audit log viewer'); setContent('<div class="card"><div class="card-body"><p>Coming soon.</p></div></div>'); }));
   Router.register('admin/documents', renderDocuments);
-  Router.register('admin/settings', renderSettings);
+  Router.register('admin/settings', renderSettings || (() => { setHeader('School Settings', 'Configure school settings'); setContent('<div class="card"><div class="card-body"><p>Settings module under development.</p></div></div>'); }));
 
   Router.register('teacher/dashboard', renderTeacherDashboard);
   Router.register('teacher/my-classes', renderMyClasses);
@@ -402,9 +401,8 @@ function registerRoutes() {
   Router.register('teacher/enter-marks', renderEnterMarks);
   Router.register('teacher/import-marks', () => { setHeader('Import Marks', 'Bulk import learner marks from Excel, CSV, Word or PDF'); MarksImport.open(); });
   Router.register('teacher/submitted-marks', renderSubmittedMarks);
-  Router.register('teacher/reports', renderTeacherReports);
+  Router.register('teacher/reports', renderTeacherReports || (() => { setHeader('Reports', 'Reports'); setContent('<div class="card"><div class="card-body"><p>Reports module is being updated.</p></div></div>'); }));
   Router.register('teacher/analytics', renderTeacherAnalytics);
-  Router.register('teacher/post-assessment-reports', renderPostAssessmentReports);
   Router.register('teacher/notifications', renderNotifications);
   Router.register('teacher/account', renderTeacherAccount);
 }

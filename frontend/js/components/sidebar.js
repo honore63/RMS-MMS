@@ -101,27 +101,13 @@ const Sidebar = {
           <i data-lucide="tags"></i> Assessment Types</a>
         <a class="nav-link" data-route="admin/marks" onclick="Router.go('admin/marks')">
           <i data-lucide="list-checks"></i> Marks</a>
-        <a class="nav-link" data-route="admin/import-history" onclick="Router.go('admin/import-history')">
-          <i data-lucide="archive"></i> Import History</a>
+<a class="nav-link" data-route="admin/import-history" onclick="Router.go('admin/import-history')">
+           <i data-lucide="archive"></i> Import History</a>
       </div>
       <div class="sidebar-section">
         <div class="sidebar-section-title">Reports</div>
-        <a class="nav-link nav-parent" data-navgroup="admin-reports" onclick="Sidebar.toggleGroup('admin-reports')">
-          <i data-lucide="bar-chart-3"></i> Reports <i data-lucide="chevron-down" class="nav-chevron"></i></a>
-        <div class="nav-sub" id="nav-sub-admin-reports">
-          <a class="nav-link nav-sub-link" data-route="admin/post-assessment-reports" onclick="Router.go('admin/post-assessment-reports')">
-            <i data-lucide="clipboard-check"></i> Post-Assessment Report</a>
-          <a class="nav-link nav-sub-link" data-route="admin/reports" data-report-mode="single" onclick="Sidebar.goReport('single')">
-            <i data-lucide="file-text"></i> Student Reports</a>
-          <a class="nav-link nav-sub-link" data-route="admin/reports" data-report-mode="class-list" onclick="Sidebar.goReport('class-list')">
-            <i data-lucide="school"></i> Class Reports</a>
-          <a class="nav-link nav-sub-link" data-route="admin/reports" data-report-mode="class-subject" onclick="Sidebar.goReport('class-subject')">
-            <i data-lucide="book-open"></i> Subject Reports</a>
-          <a class="nav-link nav-sub-link" data-route="admin/reports" data-report-mode="combined" onclick="Sidebar.goReport('combined')">
-            <i data-lucide="layers"></i> Combined Reports</a>
-          <a class="nav-link nav-sub-link" data-route="admin/reports" onclick="Sidebar.goReport('official')">
-            <i data-lucide="file-badge"></i> Existing Reports</a>
-        </div>
+        <a class="nav-link" data-route="admin/reports" onclick="Router.go('admin/reports')">
+          <i data-lucide="file-bar-chart"></i> Report Center</a>
       </div>
       <div class="sidebar-section">
         <div class="sidebar-section-title">System Insights</div>
@@ -149,19 +135,6 @@ const Sidebar = {
         <a class="nav-link" data-route="teacher/my-subjects" onclick="Router.go('teacher/my-subjects')">
           <i data-lucide="book-marked"></i> My Subjects</a>
       </div>
-      <div class="sidebar-section">
-        <div class="sidebar-section-title">My Reports</div>
-        <a class="nav-link nav-parent" data-navgroup="teacher-reports" onclick="Sidebar.toggleGroup('teacher-reports')">
-          <i data-lucide="bar-chart-3"></i> Reports <i data-lucide="chevron-down" class="nav-chevron"></i></a>
-        <div class="nav-sub" id="nav-sub-teacher-reports">
-          <a class="nav-link nav-sub-link" data-route="teacher/post-assessment-reports" onclick="Router.go('teacher/post-assessment-reports')">
-            <i data-lucide="clipboard-check"></i> Post-Assessment Report</a>
-          <a class="nav-link nav-sub-link" data-route="teacher/reports" data-report-mode="single" onclick="Sidebar.goTeacherReport('single')">
-            <i data-lucide="file-text"></i> Single Assessment</a>
-          <a class="nav-link nav-sub-link" data-route="teacher/reports" data-report-mode="combined" onclick="Sidebar.goTeacherReport('combined')">
-            <i data-lucide="layers"></i> Combined Assessments</a>
-        </div>
-      </div>
       <a class="nav-link" data-route="teacher/analytics" onclick="Router.go('teacher/analytics')">
         <i data-lucide="trending-up"></i> Analytics</a>
       <a class="nav-link" data-route="teacher/notifications" onclick="Router.go('teacher/notifications')">
@@ -173,20 +146,14 @@ const Sidebar = {
       </div>`;
   },
 
-  highlight() {
-    const route = Router.current;
-    let anyActive = false;
-    document.querySelectorAll('.nav-link').forEach(l => {
-      let on = l.dataset.route === route;
-      if (l.dataset.reportMode && route === 'admin/reports' && typeof reportMode !== 'undefined') {
-        on = on || reportMode === l.dataset.reportMode;
-      }
-      if (l.dataset.reportMode && route === 'teacher/reports' && typeof teacherReportMode !== 'undefined') {
-        on = on || teacherReportMode === l.dataset.reportMode;
-      }
-      l.classList.toggle('active', on);
-      if (on) anyActive = true;
-    });
+highlight() {
+     const route = Router.current;
+     let anyActive = false;
+     document.querySelectorAll('.nav-link').forEach(l => {
+       let on = l.dataset.route === route;
+       l.classList.toggle('active', on);
+       if (on) anyActive = true;
+     });
 
     document.querySelectorAll('.nav-sub').forEach(sub => {
       const open = Array.from(sub.querySelectorAll('.nav-link')).some(l => l.classList.contains('active'));
@@ -237,17 +204,7 @@ const Sidebar = {
     });
   },
 
-  goReport(mode) {
-    try { if (typeof reportMode !== 'undefined') reportMode = mode || 'single'; } catch (err) { /* not loaded yet */ }
-    Router.go('admin/reports');
-  },
-
-  goTeacherReport(mode) {
-    try { if (typeof teacherReportMode !== 'undefined') teacherReportMode = mode || 'single'; } catch (err) { /* not loaded yet */ }
-    Router.go('teacher/reports');
-  },
-
-  toggle() {
+toggle() {
     if (this.isSmall()) {
       const sb = document.getElementById('sidebar');
       const willOpen = !sb.classList.contains('open');

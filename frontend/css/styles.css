@@ -2700,3 +2700,51 @@ body.report-orientation-portrait .report-paper-container {
 }
 
 
+/* ---------- Report Center Styles ---------- */
+
+.report-center-container { max-width: 960px; margin: 0 auto; }
+
+.rms-report-header { display: flex; align-items: stretch; padding: 16px 20px; border: 2px solid #1e3a5f; border-radius: 8px; margin-bottom: 16px; gap: 16px; }
+.rms-header-left { display: flex; align-items: center; gap: 14px; flex: 1; }
+.rms-header-center { flex: 1; text-align: center; }
+.rms-header-right { display: flex; align-items: center; }
+.rms-header-logo { height: 60px; width: auto; object-fit: contain; }
+.rms-header-text { display: flex; flex-direction: column; gap: 1px; }
+.rms-header-country { font-weight: 800; font-size: 13px; color: #1e3a5f; }
+.rms-header-ministry { font-weight: 600; font-size: 11px; color: #555; }
+.rms-header-province, .rms-header-district, .rms-header-sector { font-size: 10px; color: #666; }
+.rms-header-school { font-weight: 800; font-size: 14px; color: #1e3a5f; }
+.rms-header-code { font-size: 10px; color: #888; }
+.rms-header-email, .rms-header-phone { font-size: 10px; color: #666; }
+.rms-header-title { font-weight: 800; font-size: 16px; color: #1e3a5f; text-transform: uppercase; }
+.rms-header-subtitle { font-size: 12px; color: #555; margin-top: 2px; }
+.rms-header-level { font-size: 11px; color: #888; margin-top: 2px; }
+.rms-header-divider { height: 3px; background: #1e3a5f; margin-bottom: 16px; }
+.rms-report-title { font-weight: 800; font-size: 15px; color: #1e3a5f; text-transform: uppercase; margin-bottom: 12px; border-bottom: 2px solid #2563eb; padding-bottom: 6px; }
+.rms-meta { font-size: 12px; color: #555; margin-bottom: 12px; }
+.rms-meta-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; font-size: 12px; margin-bottom: 16px; }
+.rms-meta-lbl { font-weight: 600; color: #333; }
+.rms-summary { display: flex; gap: 16px; margin-bottom: 16px; flex-wrap: wrap; }
+.rms-summary-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: 12px; margin-bottom: 16px; }
+.rms-stat { background: var(--blue-50); border-radius: 8px; padding: 12px; text-align: center; }
+.rms-stat-val { display: block; font-size: 22px; font-weight: 800; color: #1e3a5f; }
+.rms-stat-lbl { display: block; font-size: 10px; color: #666; margin-top: 2px; }
+.rms-grade-dist { margin-bottom: 12px; padding: 8px; background: var(--blue-50); border-radius: 6px; font-size: 12px; }
+.rms-table { width: 100%; border-collapse: collapse; font-size: 12px; margin-bottom: 16px; }
+.rms-table th { background: #1e3a5f; color: #fff; padding: 8px 6px; text-align: center; font-weight: 600; }
+.rms-table td { padding: 6px; border-bottom: 1px solid #e5e7eb; text-align: center; }
+.rms-table tr:nth-child(even) { background: #f9fafb; }
+.rms-table tbody tr:hover { background: #eff6ff; }
+.rms-report-footer { display: flex; justify-content: space-between; padding: 12px 20px; border-top: 2px solid #1e3a5f; font-size: 10px; color: #666; margin-top: 24px; }
+.rms-page-break { page-break-after: always; }
+
+@media print {
+  .rms-report-header { border: 2px solid #1e3a5f; }
+  .rms-table th { background: #1e3a5f !important; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+  .rms-summary-grid { grid-template-columns: repeat(3, 1fr); }
+  .rms-report-footer { border-top: 2px solid #1e3a5f; }
+}
+
+.form-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+@media (max-width: 640px) { .form-grid { grid-template-columns: 1fr; } }
+

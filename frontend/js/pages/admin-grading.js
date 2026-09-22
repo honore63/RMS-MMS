@@ -390,7 +390,7 @@ function renderGradingContent() {
   `;
 }
 
-/* Export for use in admin-reports.js */
+/* ---------- Window exports ---------- */
 if (typeof window !== 'undefined') {
   window.renderGradingTab = renderGradingTab;
   window.saveGrading = saveGrading;

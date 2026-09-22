@@ -1,922 +1,232 @@
-let reportAssess = '';
-let dosEduLevel = 'all';
-let gradingScaleCache = null;
-let settingsTab = 'school';
-let schoolSettingsCache = null;
-let reportMode = 'single';
-let dosYearId = '';
-let dosTermId = '';
-let dosClassId = '';
-let dosSubjectId = '';
-let dosLearnerId = '';
-let dosMissingTypeId = '';
+const ReportCenter = {
+  state: {
+    reportType: 'student-card',
+    academicYear: '',
+    term: '',
+    classId: '',
+    subjectId: '',
+    teacherId: '',
+    assessmentId: '',
+    studentId: '',
+    loading: false,
+    previewHtml: ''
+  },
 
-async function getGrading() {
-  if (!gradingScaleCache) gradingScaleCache = await DB.get('grading_scales');
-  return gradingScaleCache;
-}
+  async render() {
+    setHeader('Report Center', 'Professional Academic Reporting System');
+    setContent(Utils.loading());
 
-async function getSchoolSettings() {
-  if (schoolSettingsCache) return schoolSettingsCache;
-  const data = await DB.query('school_settings', '*');
-  schoolSettingsCache = data[0] || {
-    school_name: 'Rukara Model School', school_address: '', school_motto: '',
-    school_phone: '', school_email: '', school_website: '', school_code: '',
-    headteacher_name: '', headteacher_phone: '', headteacher_email: '',
-    deputy_academic_name: '', deputy_academic_phone: '',
-    deputy_admin_name: '', deputy_admin_phone: '',
-    dos_name: '', dos_phone: '', dos_email: '',
-    logo_url: 'public/logo.webp', pass_mark: 50, ranking_enabled: true, decimal_marks_enabled: false, assessment_roster_policy: 'auto_add'
-  };
-  return schoolSettingsCache;
-}
+    const [years, terms, classes, subjects, teachers, assessments, assessmentTypes] = await Promise.all([
+      DB.get('academic_years'), DB.get('terms'), DB.get('classes'),
+      DB.get('subjects'), DB.get('teachers'), DB.get('assessments'),
+      ReportUtils.getAssessmentTypes()
+    ]);
 
-function schoolReportHeader(title, opts = {}) {
-  const s = opts.settings || {};
-  const logoUrl = s.logo_url || 'public/logo.webp';
-  const logoHtml = logoUrl 
-    ? `<img src="${Utils.escapeHtml(logoUrl)}" alt="School Logo" class="school-logo-img">` 
-    : '';
-  
-  const mottoHtml = s.school_motto 
-    ? `<p class="motto">${Utils.escapeHtml(s.school_motto)}</p>` 
-    : '';
+    const activeYear = years.find(y => y.status === 'active') || years[0] || {};
+    const activeTerm = terms.find(t => t.status === 'active') || terms[0] || {};
 
-  const contactLine1 = [];
-  if (s.school_address) contactLine1.push(Utils.escapeHtml(s.school_address));
-  if (s.school_phone) contactLine1.push('Tel: ' + Utils.escapeHtml(s.school_phone));
-  if (s.school_email) contactLine1.push('Email: ' + Utils.escapeHtml(s.school_email));
+    this.state.academicYear = activeYear.id || '';
+    this.state.term = activeTerm.id || '';
 
-  const contactLine2 = [];
-  if (s.school_website) contactLine2.push('Web: ' + Utils.escapeHtml(s.school_website));
-  if (s.school_code) contactLine2.push('School Code: ' + Utils.escapeHtml(s.school_code));
+    const reportCategories = this.getReportCategories();
 
-  const isOfficial = opts.status === 'approved' || opts.status === 'locked' || opts.isOfficial;
-  const statusBadge = isOfficial
-    ? `<span class="report-status-pill report-status-approved"><i data-lucide="check-circle-2"></i> OFFICIAL / APPROVED REPORT</span>`
-    : `<span class="report-status-pill report-status-draft"><i data-lucide="file-edit"></i> DRAFT / WORKING REPORT</span>`;
-
-  return `
-    <div class="school-report-header">
-      ${logoHtml}
-      <h2>${Utils.escapeHtml(s.school_name || 'Rukara Model School')}</h2>
-      ${mottoHtml}
-      ${contactLine1.length ? `<p class="contact-line">${contactLine1.join(' &nbsp;|&nbsp; ')}</p>` : ''}
-      ${contactLine2.length ? `<p class="contact-line">${contactLine2.join(' &nbsp;|&nbsp; ')}</p>` : ''}
-    </div>
-
-    <div class="report-title-section">
-      <div class="report-main-title">${Utils.escapeHtml(title)}</div>
-      <div style="margin-top:6px">${statusBadge}</div>
-    </div>
-
-    <div class="report-info-panel">
-      ${opts.academicYear ? `<div class="report-info-item"><span class="label">Academic Year</span><div class="value">${Utils.escapeHtml(opts.academicYear)}</div></div>` : ''}
-      ${opts.term ? `<div class="report-info-item"><span class="label">Term</span><div class="value">${Utils.escapeHtml(opts.term)}</div></div>` : ''}
-      ${opts.className ? `<div class="report-info-item"><span class="label">Class</span><div class="value">${Utils.escapeHtml(opts.className)}</div></div>` : ''}
-      ${opts.subject ? `<div class="report-info-item"><span class="label">Subject</span><div class="value">${Utils.escapeHtml(opts.subject)}</div></div>` : ''}
-      ${opts.unit ? `<div class="report-info-item"><span class="label">Unit</span><div class="value">${Utils.escapeHtml(opts.unit)}</div></div>` : ''}
-      ${opts.assessmentType ? `<div class="report-info-item"><span class="label">Assessment Type</span><div class="value">${Utils.escapeHtml(opts.assessmentType)}</div></div>` : ''}
-      ${opts.teacher ? `<div class="report-info-item"><span class="label">Teacher</span><div class="value">${Utils.escapeHtml(opts.teacher)}</div></div>` : ''}
-      ${opts.date ? `<div class="report-info-item"><span class="label">Assessment Date</span><div class="value">${Utils.escapeHtml(opts.date)}</div></div>` : ''}
-      ${opts.totalMax ? `<div class="report-info-item"><span class="label">Total Possible Marks</span><div class="value">${opts.totalMax} Marks</div></div>` : ''}
-      ${opts.assessmentsCount ? `<div class="report-info-item"><span class="label">Assessments Combined</span><div class="value">${opts.assessmentsCount} Assessments</div></div>` : ''}
-      ${opts.generatedBy ? `<div class="report-info-item"><span class="label">Generated By</span><div class="value">${Utils.escapeHtml(opts.generatedBy)}</div></div>` : ''}
-    </div>
-
-    ${opts.assessmentsList && opts.assessmentsList.length ? `
-    <div class="report-assess-included">
-      <div class="report-assess-tbl-title">Assessments Included</div>
-      <table class="report-assess-tbl">
-        <thead>
-          <tr><th style="width:44px">No.</th><th>Unit</th><th>Type</th><th>Assessment</th><th>Max Mark</th><th>Date</th><th>Status</th></tr>
-        </thead>
-        <tbody>
-          ${opts.assessmentsList.map((a, i) => `
-            <tr>
-              <td class="text-center">${i + 1}</td>
-              <td class="font-semibold">${Utils.escapeHtml(a.unit || a.name)}</td>
-              <td>${Utils.escapeHtml(a._typeName || '-')}</td>
-              <td>${Utils.escapeHtml(a.name)}</td>
-              <td class="text-center">${Number(a.maximum_mark) || 0}</td>
-              <td class="text-center">${a.assessment_date ? Utils.dateStr(a.assessment_date) : '-'}</td>
-              <td class="text-center"><span class="badge ${Utils.statusColor(a.status)}"><i data-lucide="${Utils.statusIcon(a.status)}"></i> ${Utils.escapeHtml(a.status)}</span></td>
-            </tr>`).join('')}
-        </tbody>
-      </table>
-    </div>` : ''}`;
-}
-
-function schoolSignatureSection(teacherName, dosName, headTeacherName, schoolName) {
-  const teacher = teacherName || '____________________';
-  const dos = dosName || '____________________';
-  const ht = headTeacherName || '____________________';
-  const school = schoolName || 'Rukara Model School';
-
-  return `
-    <div class="report-signatures">
-      <div class="sig-box">
-        <div class="sig-title">Prepared by:</div>
-        <div class="sig-name">${Utils.escapeHtml(teacher)}</div>
-        <div class="sig-sub">Teacher</div>
-        <div class="sig-line">Signature: ______________</div>
-        <div class="sig-line">Date: __________________</div>
-      </div>
-      <div class="sig-box">
-        <div class="sig-title">Reviewed by:</div>
-        <div class="sig-name">${Utils.escapeHtml(dos)}</div>
-        <div class="sig-sub">Director of Studies (DOS)</div>
-        <div class="sig-line">Signature: ______________</div>
-        <div class="sig-line">Date: __________________</div>
-      </div>
-      <div class="sig-box">
-        <div class="sig-title">Approved by:</div>
-        <div class="sig-name">${Utils.escapeHtml(ht)}</div>
-        <div class="sig-sub">Head Teacher</div>
-        <div class="sig-line">Signature: ______________</div>
-        <div class="sig-line">Date: __________________</div>
-      </div>
-    </div>
-    <div class="report-doc-footer">
-      <div>${Utils.escapeHtml(school)} | RMS-MIS - Rukara Model School Marks Information System</div>
-      <div>Generated on: ${Utils.dateTimeStr(new Date())}</div>
-    </div>`;
-}
-
-function resetSettingsCache() { schoolSettingsCache = null; }
-
-/* ============================================================
-   REPORTS
-   ============================================================ */
-
-const DOS_REPORT_TABS = [
-  { id: 'official', icon: 'file-badge', label: 'Official Report Cards' },
-  { id: 'single', icon: 'file-text', label: 'Single Assessment' },
-  { id: 'combined', icon: 'layers', label: 'Combined Assessments' },
-  { id: 'missing', icon: 'clipboard-alert', label: 'Missing Marks' },
-  { id: 'class-list', icon: 'list', label: 'Class List' },
-  { id: 'class-subject', icon: 'book-open-text', label: 'Class / Subject' },
-  { id: 'school', icon: 'school', label: 'School Performance' },
-  { id: 'search', icon: 'search', label: 'Student Search' }
-];
-
-async function renderAdminReports() {
-  setHeader('Reports', 'Generate and export assessment & performance reports');
-  setContent(Utils.loading());
-  const [assessments, classes, subjects, years, terms, types] = await Promise.all([
-    DB.get('assessments'), DB.get('classes'), DB.get('subjects'), DB.get('academic_years'), DB.get('terms'), getAssessmentTypes()
-  ]);
-
-  const sorted = [...assessments].sort((a, b) => {
-    const ca = classes.find(x => x.id === a.class_id)?.name || '';
-    const cb = classes.find(x => x.id === b.class_id)?.name || '';
-    const sa = subjects.find(x => x.id === a.subject_id)?.name || '';
-    const sb = subjects.find(x => x.id === b.subject_id)?.name || '';
-    return ca.localeCompare(cb) || sa.localeCompare(sb) || String(a.assessment_date).localeCompare(String(b.assessment_date)) || String(a.name).localeCompare(String(b.name));
-  });
-
-  if (!dosYearId && typeof getActiveYearId === 'function') dosYearId = getActiveYearId(years) || '';
-  if (!dosTermId && dosYearId) dosTermId = terms.find(t => t.academic_year_id === dosYearId && t.is_active)?.id || '';
-
-  const tabs = `
-    <div class="report-tabs mb-6">
-      ${DOS_REPORT_TABS.map(t => `
-        <button class="report-tab ${reportMode === t.id ? 'active' : ''}" onclick="setAdminReportMode('${t.id}')"><i data-lucide="${t.icon}"></i> ${t.label}</button>`).join('')}
-    </div>`;
-
-  const selYear = `<div class="form-group"><label>Academic Year <span class="required">*</span></label>
-    <select id="dos-year" class="select-field" onchange="dosPickYear(this.value)">
-      <option value="">Select Year</option>
-      ${years.map(y => `<option value="${y.id}" ${dosYearId === y.id ? 'selected' : ''}>${Utils.escapeHtml(y.name)}</option>`).join('')}
-    </select></div>`;
-
-  const termsFiltered = terms.filter(t => !dosYearId || t.academic_year_id === dosYearId);
-  const selTerm = `<div class="form-group"><label>Term <span class="required">*</span></label>
-    <select id="dos-term" class="select-field" onchange="dosPickTerm(this.value)">
-      <option value="">Select Term</option>
-      ${termsFiltered.map(t => `<option value="${t.id}" ${dosTermId === t.id ? 'selected' : ''}>${Utils.escapeHtml(t.name)}</option>`).join('')}
-    </select></div>`;
-
-  // Group classes by education level for optgroup display
-  const classesGrouped = {};
-  const eduLevelOrder = ['Primary', 'Lower Secondary', 'Upper Secondary'];
-  classes.forEach(c => {
-    const cat = EducationLevels.getCategory(c);
-    if (!classesGrouped[cat]) classesGrouped[cat] = [];
-    classesGrouped[cat].push(c);
-  });
-  const classOptGroups = eduLevelOrder.filter(lv => classesGrouped[lv]?.length).map(lv => {
-    const opts = classesGrouped[lv]
-      .filter(c => dosEduLevel === 'all' || EducationLevels.getCategory(c) === dosEduLevel)
-      .map(c => `<option value="${c.id}" ${dosClassId === c.id ? 'selected' : ''}>${Utils.escapeHtml(c.name)}</option>`);
-    if (!opts.length) return '';
-    return `<optgroup label="${lv}">${opts.join('')}</optgroup>`;
-  }).join('');
-
-  const selEduLevel = `<div class="form-group"><label>Education Level</label>
-    <select id="dos-edulevel" class="select-field" onchange="dosPickEduLevel(this.value)">
-      <option value="all" ${dosEduLevel==='all'?'selected':''}>🎓 All Levels</option>
-      <option value="Primary" ${dosEduLevel==='Primary'?'selected':''}>📗 Primary</option>
-      <option value="Lower Secondary" ${dosEduLevel==='Lower Secondary'?'selected':''}>📘 Lower Secondary</option>
-      <option value="Upper Secondary" ${dosEduLevel==='Upper Secondary'?'selected':''}>📙 Upper Secondary</option>
-    </select></div>`;
-
-  const selClass = `<div class="form-group"><label>Class <span class="required">*</span></label>
-    <select id="dos-class" class="select-field" onchange="dosPickClass(this.value)">
-      <option value="">Select Class</option>
-      ${classOptGroups}
-    </select></div>`;
-
-  const selSubject = `<div class="form-group"><label>Subject <span class="required">*</span></label>
-    <select id="dos-subject" class="select-field" onchange="dosPickSubject(this.value)">
-      <option value="">Select Subject</option>
-      ${subjects.map(s => `<option value="${s.id}" ${dosSubjectId === s.id ? 'selected' : ''}>${Utils.escapeHtml(s.name)}</option>`).join('')}
-    </select></div>`;
-
-  const dosCards = {
-    official: typeof getOfficialReportCardHtml === 'function' ? getOfficialReportCardHtml(years, classes, subjects, terms, termsFiltered) : '',
-    'class-list': `
-      <div class="card mb-6">
-        <div class="card-header">
-          <div><h3><i data-lucide="list" style="width:18px;height:18px;vertical-align:middle;margin-right:8px;color:var(--blue-600)"></i>Class List (Student Roster)</h3>
-          <p class="text-sm text-muted mt-1">Download or print the full student list of any class — student number, name, gender and status.</p></div>
-        </div>
-        <div class="flex gap-4 items-end" style="flex-wrap:wrap">
-          ${selYear}${selTerm}${selClass}
-          <div class="form-group"><label class="checkbox-label" style="padding-top:26px"><input type="checkbox" id="dos-classlist-inactive"> Include inactive learners</label></div>
-          <button class="btn btn-primary" onclick="dosGenerateClassList()"><i data-lucide="list"></i> Generate List</button>
-        </div>
-      </div>`,
-    student: `
-      <div class="card mb-6">
-        <div class="card-header">
-          <div><h3><i data-lucide="user-round" style="width:18px;height:18px;vertical-align:middle;margin-right:8px;color:var(--blue-600)"></i>Student Academic Report</h3>
-          <p class="text-sm text-muted mt-1">Full report for one learner across all subjects (approved assessments only).</p></div>
-        </div>
-        <div class="flex gap-4 items-end" style="flex-wrap:wrap">
-          ${selYear}${selTerm}${selClass}
-          <div class="form-group" style="flex:1;min-width:220px"><label>Student <span class="required">*</span></label>
-            <select id="dos-learner" class="select-field">
-              <option value="">Select Student</option>
-            </select></div>
-          <button class="btn btn-primary" onclick="dosGenerateStudent()"><i data-lucide="bar-chart-3"></i> Generate Report</button>
-        </div>
-      </div>`,
-    'class-subject': `
-      <div class="card mb-6">
-        <div class="card-header">
-          <div><h3><i data-lucide="book-open-text" style="width:18px;height:18px;vertical-align:middle;margin-right:8px;color:var(--green-600)"></i>Class Subject Performance Report</h3>
-          <p class="text-sm text-muted mt-1">One subject, all learners in a class. Aggregates every teacher's approved assessments for that subject.</p></div>
-        </div>
-        <div class="flex gap-4 items-end" style="flex-wrap:wrap">
-          ${selYear}${selTerm}${selClass}${selSubject}
-          <button class="btn btn-primary" onclick="dosGenerateClassSubject()"><i data-lucide="bar-chart-3"></i> Generate Report</button>
-        </div>
-      </div>`,
-    'complete-class': `
-      <div class="card mb-6">
-        <div class="card-header">
-          <div><h3><i data-lucide="users-round" style="width:18px;height:18px;vertical-align:middle;margin-right:8px;color:var(--purple-600)"></i>Complete Class Report</h3>
-          <p class="text-sm text-muted mt-1">All learners, all subjects, one overview matrix with overall averages, grades and class ranking.</p></div>
-        </div>
-        <div class="flex gap-4 items-end" style="flex-wrap:wrap">
-          ${selYear}${selTerm}${selClass}
-          <button class="btn btn-primary" onclick="dosGenerateCompleteClass()"><i data-lucide="table-2"></i> Generate Report</button>
-        </div>
-      </div>`,
-    school: `
-      <div class="card mb-6">
-        <div class="card-header">
-          <div><h3><i data-lucide="school" style="width:18px;height:18px;vertical-align:middle;margin-right:8px;color:var(--amber-600)"></i>School Performance Report</h3>
-          <p class="text-sm text-muted mt-1">School-wide averages and pass rates by subject and by class, grouped by Education Level.</p></div>
-        </div>
-        <div class="flex gap-4 items-end" style="flex-wrap:wrap">
-          ${selYear}${selTerm}${selEduLevel}
-          <button class="btn btn-primary" onclick="dosGenerateSchool()"><i data-lucide="bar-chart-3"></i> Generate Report</button>
-        </div>
-      </div>`,
-    search: `
-      <div class="card mb-6">
-        <div class="card-header">
-          <div><h3><i data-lucide="search" style="width:18px;height:18px;vertical-align:middle;margin-right:8px;color:var(--blue-600)"></i>Student Search</h3>
-          <p class="text-sm text-muted mt-1">Search any learner by name or student number, then generate their full academic report.</p></div>
-        </div>
-        <div class="flex gap-3 items-end mb-3" style="flex-wrap:wrap">
-          <div class="form-group" style="flex:1;min-width:260px"><label>Search Student</label>
-            <input id="dos-search-input" class="input-field" type="search" placeholder="Type a name or student number…" oninput="dosSearchLearners(this.value)">
+    setContent(`
+      <div class="report-center-container">
+        <div class="card mb-6">
+          <div class="card-header">
+            <h3><i data-lucide="filter" style="width:18px;height:18px;vertical-align:middle;margin-right:8px;color:var(--blue-600)"></i>Report Filters</h3>
           </div>
-          <div class="form-group"><label>Class (optional)</label>
-            <select id="dos-search-class" class="select-field" onchange="dosSearchLearners(document.getElementById('dos-search-input').value)">
-              <option value="">All Classes</option>
-              ${classes.map(c => `<option value="${c.id}">${Utils.escapeHtml(c.name)}</option>`).join('')}
-            </select></div>
-        </div>
-        <div id="dos-search-results"></div>
-      </div>`,
-    missing: `
-      <div class="card mb-6">
-        <div class="card-header">
-          <div><h3><i data-lucide="clipboard-alert" style="width:18px;height:18px;vertical-align:middle;margin-right:8px;color:var(--red-600)"></i>Missing Marks Report</h3>
-          <p class="text-sm text-muted mt-1">Identify learners who are missing marks for one or more selected assessments of the same Class and Subject.</p></div>
-        </div>
-        <div class="flex gap-4 items-end" style="flex-wrap:wrap">
-          ${selClass}${selSubject}
-          <div class="form-group"><label>Assessment Type (optional)</label>
-            <select id="dos-missing-type" class="select-field" onchange="dosMissingTypeChanged(this.value)">
-              <option value="">All Types</option>
-              ${types.map(t => `<option value="${t.id}" ${dosMissingTypeId === t.id ? 'selected' : ''}>${Utils.escapeHtml(t.name)}</option>`).join('')}
-            </select></div>
-        </div>
-        <div class="flex gap-2 mt-3">
-          <button class="btn btn-sm btn-outline" onclick="dosMissingSelectAll(true)"><i data-lucide="check-square"></i> Select All</button>
-          <button class="btn btn-sm btn-outline" onclick="dosMissingSelectAll(false)"><i data-lucide="square"></i> Clear</button>
-        </div>
-        <div class="form-group mt-3">
-          <label>Select Assessments</label>
-          <div class="report-cb-grid" id="dos-missing-options"></div>
-        </div>
-        <p class="text-sm text-muted mb-3">Assessments are shown for the selected class, subject and type.</p>
-        <button class="btn btn-primary" onclick="dosGenerateMissing()"><i data-lucide="clipboard-alert"></i> Generate Missing Marks Report</button>
-      </div>`
-  };
-
-  const singleCard = `
-    <div class="card mb-6">
-      <div class="card-header">
-        <div>
-          <h3><i data-lucide="file-bar-chart" style="width:18px;height:18px;vertical-align:middle;margin-right:8px;color:var(--blue-600)"></i>Single Assessment Report</h3>
-          <p class="text-sm text-muted mt-1">Generate an official report for one assessment of any type (quiz, assignment, End-of-Unit assessment, etc.).</p>
-        </div>
-      </div>
-      <div class="flex gap-4 items-end" style="flex-wrap:wrap">
-        <div style="flex:1;min-width:300px">
-          <div class="form-group"><label>Select Assessment <span class="required">*</span></label>
-          <select id="rpt-assess" class="select-field">
-            <option value="">Select Assessment</option>
-            ${sorted.map(a => {
-              const c = classes.find(x => x.id === a.class_id);
-              const s = subjects.find(x => x.id === a.subject_id);
-              const tn = assessmentTypeName(types, a.assessment_type_id, 'End-of-Unit Assessment');
-              return `<option value="${a.id}">${c?.name || ''} — ${s?.name || ''} — ${a.unit || a.name} (${tn}, ${Number(a.maximum_mark) || 0} marks)</option>`;
-            }).join('')}
-          </select></div>
-        </div>
-        <button class="btn btn-primary" onclick="adminGenerateSingle()"><i data-lucide="bar-chart-3"></i> Generate Report</button>
-      </div>
-    </div>`;
-
-  const combinedCard = `
-    <div class="card mb-6">
-      <div class="card-header" style="flex-wrap:wrap;gap:12px">
-        <div>
-          <h3><i data-lucide="layers" style="width:18px;height:18px;vertical-align:middle;margin-right:8px;color:var(--blue-600)"></i>Combined Assessment Report</h3>
-          <p class="text-sm text-muted mt-1">Select 2 or more assessments of the SAME Class and Subject to produce one combined report with totals, averages (weighted when all assessments have weights), grade distribution and per-assessment performance.</p>
-        </div>
-        <div class="flex gap-2">
-          <button class="btn btn-sm btn-outline" onclick="setAdminCombinedAll(true)"><i data-lucide="check-square"></i> Select All</button>
-          <button class="btn btn-sm btn-outline" onclick="setAdminCombinedAll(false)"><i data-lucide="square"></i> Clear</button>
-        </div>
-      </div>
-      <div class="form-group mt-3">
-        <label>Select Assessments <span class="required">*</span></label>
-        <div class="report-cb-grid">
-          ${sorted.map(a => {
-            const c = classes.find(x => x.id === a.class_id);
-            const s = subjects.find(x => x.id === a.subject_id);
-            const tn = assessmentTypeName(types, a.assessment_type_id, 'End-of-Unit Assessment');
-            return `
-            <label class="report-cb-item">
-              <input type="checkbox" class="cb-rpt" value="${a.id}" data-class="${a.class_id}" data-subject="${a.subject_id}">
-              <span class="report-cb-body">
-                <span class="report-cb-title">${Utils.escapeHtml(a.unit || a.name)} &mdash; ${Utils.escapeHtml(a.name)}</span>
-                <span class="report-cb-meta">${Utils.escapeHtml(c?.name || '-')} &bull; ${Utils.escapeHtml(s?.name || '-')} &bull; ${Utils.escapeHtml(tn)} &bull; ${Number(a.maximum_mark) || 0} marks ${a.assessment_date ? '&bull; ' + Utils.dateStr(a.assessment_date) : ''}</span>
-              </span>
-              <span class="badge ${Utils.statusColor(a.status)}"><i data-lucide="${Utils.statusIcon(a.status)}"></i> ${Utils.escapeHtml(a.status)}</span>
-            </label>`;
-          }).join('')}
-        </div>
-      </div>
-      <button class="btn btn-primary" onclick="adminGenerateCombined()"><i data-lucide="layers"></i> Generate Combined Report</button>
-    </div>`;
-
-  const modeCard = reportMode === 'single' ? singleCard
-    : reportMode === 'combined' ? combinedCard
-    : dosCards[reportMode] || '';
-
-  setContent(tabs + '<div id="rpt-content"></div>' + modeCard);
-
-  if (reportMode === 'student' && dosClassId) dosPickClass(dosClassId);
-  if (reportMode === 'search') dosSearchLearners('');
-  if (reportMode === 'missing') dosRefreshMissingOptions();
-}
-
-function setAdminReportMode(m) {
-  reportMode = m;
-  if (m === 'search') { dosYearId = ''; dosTermId = ''; dosClassId = ''; dosSubjectId = ''; dosLearnerId = ''; }
-  renderAdminReports();
-}
-
-function setAdminCombinedAll(checked) {
-  document.querySelectorAll('.cb-rpt').forEach(cb => cb.checked = checked);
-}
-
-async function adminGenerateSingle() {
-  const assessId = document.getElementById('rpt-assess')?.value;
-  if (!assessId) return Utils.toast('Select an assessment', 'error');
-  const rptDiv = document.getElementById('rpt-content');
-  rptDiv.innerHTML = Utils.loading();
-  try {
-    const data = await ReportEngine.buildSingle(assessId);
-    ReportEngine.render(data, 'rpt-content');
-  } catch (e) {
-    rptDiv.innerHTML = '';
-    Utils.toast(e.message || 'Error generating report', 'error');
-  }
-}
-
-async function adminGenerateCombined() {
-  const selected = Array.from(document.querySelectorAll('.cb-rpt:checked')).map(n => n.value);
-  if (selected.length < 2) return Utils.toast('Select at least 2 assessments', 'error');
-  const rptDiv = document.getElementById('rpt-content');
-  rptDiv.innerHTML = Utils.loading();
-  try {
-    const data = await ReportEngine.buildCombined(selected);
-    ReportEngine.render(data, 'rpt-content');
-  } catch (e) {
-    rptDiv.innerHTML = '';
-    Utils.toast(e.message || 'Error generating report', 'error');
-  }
-}
-
-/* ---------- DOS report filter helpers ---------- */
-
-async function dosPickYear(id) {
-  dosYearId = id; dosTermId = ''; 
-  const terms = await DB.get('terms');
-  const sel = document.getElementById('dos-term');
-  if (sel) {
-    const filtered = terms.filter(t => !id || t.academic_year_id === id);
-    sel.innerHTML = '<option value="">Select Term</option>' + filtered.map(t => `<option value="${t.id}">${Utils.escapeHtml(t.name)}</option>`).join('');
-  }
-}
-
-async function dosPickTerm(id) { dosTermId = id; }
-
-async function dosPickClass(id) {
-  dosClassId = id; dosLearnerId = '';
-  if (reportMode === 'missing') { dosRefreshMissingOptions(); return; }
-  if (reportMode !== 'student') return;
-  const sel = document.getElementById('dos-learner');
-  if (!sel) return;
-  if (!id) { sel.innerHTML = '<option value="">Select Student</option>'; return; }
-  const learners = await DB.query('learners', '*', { class_id: id, status: 'active' }, { column: 'full_name', asc: true });
-  sel.innerHTML = '<option value="">Select Student</option>' + learners.map(l => `<option value="${l.id}">${l.learner_code} — ${Utils.escapeHtml(l.full_name)}</option>`).join('');
-}
-
-function dosPickSubject(id) { dosSubjectId = id; if (reportMode === 'missing') dosRefreshMissingOptions(); }
-
-async function dosRefreshMissingOptions() {
-  const box = document.getElementById('dos-missing-options');
-  if (!box) return;
-  const kept = new Set(Array.from(document.querySelectorAll('.dos-cb-miss:checked')).map(n => n.value));
-  const [assessments, types] = await Promise.all([DB.get('assessments'), getAssessmentTypes()]);
-  const list = assessments
-    .filter(a => !dosClassId || a.class_id === dosClassId)
-    .filter(a => !dosSubjectId || a.subject_id === dosSubjectId)
-    .filter(a => !dosMissingTypeId || a.assessment_type_id === dosMissingTypeId)
-    .sort((a, b) => String(a.assessment_date).localeCompare(String(b.assessment_date)) || String(a.name).localeCompare(String(b.name)));
-  if (!list.length) {
-    box.innerHTML = '<p class="text-sm text-muted" style="padding:12px 0">No assessments match the current filters. Choose a class, subject, or assessment type.</p>';
-    return;
-  }
-  box.innerHTML = list.map(a => {
-    const tn = assessmentTypeName(types, a.assessment_type_id, 'End-of-Unit Assessment');
-    return `
-    <label class="report-cb-item">
-      <input type="checkbox" class="dos-cb-miss" value="${a.id}" ${kept.has(a.id) ? 'checked' : ''}>
-      <span class="report-cb-body">
-        <span class="report-cb-title">${Utils.escapeHtml(a.unit || a.name)} &mdash; ${Utils.escapeHtml(a.name)}</span>
-        <span class="report-cb-meta">${Utils.escapeHtml(tn)} &bull; ${Number(a.maximum_mark) || 0} marks ${a.assessment_date ? '&bull; ' + Utils.dateStr(a.assessment_date) : ''}</span>
-      </span>
-      <span class="badge ${Utils.statusColor(a.status)}"><i data-lucide="${Utils.statusIcon(a.status)}"></i> ${Utils.escapeHtml(a.status)}</span>
-    </label>`;
-  }).join('');
-  if (typeof lucide !== 'undefined') lucide.createIcons();
-}
-
-function dosMissingTypeChanged(id) { dosMissingTypeId = id; dosRefreshMissingOptions(); }
-
-function dosMissingSelectAll(checked) {
-  document.querySelectorAll('.dos-cb-miss').forEach(cb => cb.checked = checked);
-}
-
-async function dosGenerateMissing() {
-  const selected = Array.from(document.querySelectorAll('.dos-cb-miss:checked')).map(n => n.value);
-  if (!selected.length) return Utils.toast('Select at least 1 assessment', 'error');
-  const rptDiv = document.getElementById('rpt-content');
-  rptDiv.innerHTML = Utils.loading();
-  try {
-    const data = await ReportEngine.buildMissingMarks(selected);
-    ReportEngine.renderMissingMarks(data, 'rpt-content');
-  } catch (e) {
-    rptDiv.innerHTML = '';
-    Utils.toast(e.message || 'Error generating report', 'error');
-  }
-}
-
-/* ---------- DOS report generators ---------- */
-
-async function dosGenerateStudent() {
-  const learnerId = document.getElementById('dos-learner')?.value;
-  if (!learnerId) return Utils.toast('Select a student', 'error');
-  if (!dosClassId) return Utils.toast('Select a class', 'error');
-  const rptDiv = document.getElementById('rpt-content');
-  rptDiv.innerHTML = Utils.loading();
-  try {
-    const data = await ReportEngine.buildLearnerReport(learnerId, dosClassId, dosYearId || null, dosTermId || null);
-    ReportEngine.renderDOS(data, 'rpt-content');
-  } catch (e) {
-    rptDiv.innerHTML = '';
-    Utils.toast(e.message || 'Error generating report', 'error');
-  }
-}
-
-async function dosGenerateClassList() {
-  if (!dosClassId) return Utils.toast('Select a class', 'error');
-  const includeInactive = document.getElementById('dos-classlist-inactive')?.checked || false;
-  const rptDiv = document.getElementById('rpt-content');
-  rptDiv.innerHTML = Utils.loading();
-  try {
-    const data = await ReportEngine.buildClassList({ classId: dosClassId, yearId: dosYearId || null, termId: dosTermId || null, includeInactive });
-    ReportEngine.renderDOS(data, 'rpt-content');
-  } catch (e) {
-    rptDiv.innerHTML = '';
-    Utils.toast(e.message || 'Error generating class list', 'error');
-  }
-}
-
-async function dosGenerateClassSubject() {
-  if (!dosClassId) return Utils.toast('Select a class', 'error');
-  if (!dosSubjectId) return Utils.toast('Select a subject', 'error');
-  const rptDiv = document.getElementById('rpt-content');
-  rptDiv.innerHTML = Utils.loading();
-  try {
-    const data = await ReportEngine.buildClassSubjectReport(dosClassId, dosSubjectId, dosYearId || null, dosTermId || null);
-    ReportEngine.renderDOS(data, 'rpt-content');
-  } catch (e) {
-    rptDiv.innerHTML = '';
-    Utils.toast(e.message || 'Error generating report', 'error');
-  }
-}
-
-async function dosGenerateCompleteClass() {
-  if (!dosClassId) return Utils.toast('Select a class', 'error');
-  const rptDiv = document.getElementById('rpt-content');
-  rptDiv.innerHTML = Utils.loading();
-  try {
-    const data = await ReportEngine.buildCompleteClassReport(dosClassId, dosYearId || null, dosTermId || null);
-    ReportEngine.renderDOS(data, 'rpt-content');
-  } catch (e) {
-    rptDiv.innerHTML = '';
-    Utils.toast(e.message || 'Error generating report', 'error');
-  }
-}
-
-async function dosGenerateSchool() {
-  const rptDiv = document.getElementById('rpt-content');
-  rptDiv.innerHTML = Utils.loading();
-  try {
-    const data = await ReportEngine.buildSchoolPerformance(dosYearId || null, dosTermId || null);
-    ReportEngine.renderDOS(data, 'rpt-content');
-  } catch (e) {
-    rptDiv.innerHTML = '';
-    Utils.toast(e.message || 'Error generating report', 'error');
-  }
-}
-
-async function dosSearchLearners(q) {
-  const box = document.getElementById('dos-search-results');
-  if (!box) return;
-  const query = (q || '').trim().toLowerCase();
-  const classId = document.getElementById('dos-search-class')?.value || '';
-  if (query.length < 2) {
-    box.innerHTML = '<p class="text-sm text-muted">Type at least 2 characters to search.</p>';
-    return;
-  }
-  box.innerHTML = Utils.loading();
-  let learners = await DB.query('learners', '*', classId ? { class_id: classId, status: 'active' } : { status: 'active' });
-  learners = learners.filter(l =>
-    String(l.full_name || '').toLowerCase().includes(query) ||
-    String(l.learner_code || '').toLowerCase().includes(query)
-  ).slice(0, 30);
-  const classes = await DB.get('classes');
-  box.innerHTML = learners.length ? `
-    <div class="table-container"><table class="data-table">
-      <thead><tr><th>Student No.</th><th>Name</th><th>Class</th><th>Gender</th><th>Action</th></tr></thead>
-      <tbody>${learners.map(l => {
-        const c = classes.find(x => x.id === l.class_id);
-        return `<tr>
-          <td class="col-code">${Utils.escapeHtml(l.learner_code)}</td>
-          <td class="col-name">${Utils.escapeHtml(l.full_name)}</td>
-          <td>${Utils.escapeHtml(c?.name || '-')}</td>
-          <td>${Utils.escapeHtml(l.gender)}</td>
-          <td><button class="btn btn-sm btn-primary" onclick="dosOpenSearchReport('${l.id}','${l.class_id}')"><i data-lucide="file-bar-chart"></i> Generate Report</button></td>
-        </tr>`;
-      }).join('')}</tbody>
-    </table></div>` : '<div style="padding:24px;text-align:center;color:var(--gray-400)">No matching students found.</div>';
-  if (typeof lucide !== 'undefined') lucide.createIcons();
-}
-
-async function dosOpenSearchReport(learnerId, classId) {
-  const rptDiv = document.getElementById('rpt-content');
-  rptDiv.scrollIntoView({ behavior: 'smooth', block: 'start' });
-  rptDiv.innerHTML = Utils.loading();
-  try {
-    const data = await ReportEngine.buildLearnerReport(learnerId, classId, dosYearId || null, dosTermId || null);
-    ReportEngine.renderDOS(data, 'rpt-content');
-  } catch (e) {
-    rptDiv.innerHTML = '';
-    Utils.toast(e.message || 'Error generating report', 'error');
-  }
-}
-
-function showAdminReportSelection() {
-  renderAdminReports();
-}
-
-
-/* ============================================================
-   AUDIT LOGS
-   ============================================================ */
-
-async function renderAuditLogs() {
-  setHeader('Audit Logs', 'Track all system activities');
-  setContent(Utils.loading());
-  const logs = await DB.query('audit_logs', '*', {}, { column: 'timestamp', asc: false });
-  const rows = logs.map(l => `<tr>
-    <td class="text-sm">${l.timestamp ? Utils.dateTimeStr(l.timestamp) : '-'}</td>
-    <td class="col-name">${Utils.escapeHtml(l.user_name || 'System')}</td>
-    <td><span class="badge badge-gray">${Utils.escapeHtml(l.role || '-')}</span></td>
-    <td><span class="badge ${Utils.statusColor(l.action)}"><i data-lucide="${Utils.statusIcon(l.action)}"></i> ${Utils.escapeHtml(l.action)}</span></td>
-    <td>${Utils.escapeHtml(l.new_value || '-')}</td>
-    <td>${Utils.escapeHtml(l.old_value || '-')}</td></tr>`).join('');
-
-  setContent(`<div class="card">
-    <div class="card-header"><h3><i data-lucide="history" style="width:18px;height:18px;vertical-align:middle;margin-right:8px;color:var(--blue-600)"></i>Activity Log</h3></div>
-    <div class="table-container"><table class="data-table"><thead><tr><th>Date/Time</th><th>User</th><th>Role</th><th>Action</th><th>Details</th><th>Previous</th></tr></thead>
-    <tbody>${rows || `<tr><td colspan="6">${Utils.empty('No audit logs', 'history')}</td></tr>`}</tbody></table></div></div>`);
-}
-
-/* ============================================================
-   SETTINGS
-   ============================================================ */
-
-async function renderSettings() {
-  setHeader('Settings', 'Configure school information, branding, and system settings');
-  setContent(Utils.loading());
-  const [settingsData, gradingData] = await Promise.all([
-    DB.query('school_settings', '*'), DB.get('grading_scales')
-  ]);
-  const s = settingsData[0] || { school_name: 'Rukara Model School', pass_mark: 50, ranking_enabled: true, decimal_marks_enabled: false };
-
-  const gradeRows = gradingData.map((g, i) => `<tr>
-    <td><input type="number" class="input-field" value="${g.minimum_percentage}" data-idx="${i}" data-field="min" style="width:80px" onchange="updateGrade(this)"></td>
-    <td><input type="number" class="input-field" value="${g.maximum_percentage}" data-idx="${i}" data-field="max" style="width:80px" onchange="updateGrade(this)"></td>
-    <td><input type="text" class="input-field" value="${g.grade}" data-idx="${i}" data-field="grade" style="width:80px" onchange="updateGrade(this)"></td>
-    <td><input type="text" class="input-field" value="${g.remark}" data-idx="${i}" data-field="remark" onchange="updateGrade(this)"></td>
-    <td><button class="btn btn-sm btn-danger" onclick="removeGrade(${i})"><i data-lucide="trash-2"></i></button></td></tr>`).join('');
-
-  const logoPreview = s.logo_url
-    ? `<div style="margin-top:12px;text-align:center"><img src="${Utils.escapeHtml(s.logo_url)}" alt="School Logo" style="max-height:120px;max-width:100%;border:1px solid var(--gray-200);border-radius:var(--radius);padding:8px;object-fit:contain"></div>`
-    : `<div style="margin-top:12px;text-align:center;padding:32px;background:var(--gray-50);border:2px dashed var(--gray-300);border-radius:var(--radius);color:var(--gray-400)"><i data-lucide="image" style="width:32px;height:32px;margin-bottom:8px;display:block;margin:0 auto 8px"></i>No logo uploaded</div>`;
-
-  const tabBtns = [
-    { id: 'school', icon: 'building-2', label: 'School Information' },
-    { id: 'logo', icon: 'image', label: 'Logo' },
-    { id: 'leadership', icon: 'crown', label: 'Leadership' },
-    { id: 'assessment', icon: 'sliders-horizontal', label: 'Assessment' },
-    { id: 'grading', icon: 'graduation-cap', label: 'Grading Scale' },
-  ];
-  const tabNav = tabBtns.map(t => `<button class="tab-btn ${settingsTab === t.id ? 'active' : ''}" onclick="settingsTab='${t.id}';renderSettings()"><i data-lucide="${t.icon}" style="width:14px;height:14px"></i> ${t.label}</button>`).join('');
-
-  let tabContent = '';
-
-  if (settingsTab === 'school') {
-    tabContent = `
-      <div class="card">
-        <div class="card-header"><h3><i data-lucide="building-2" style="width:18px;height:18px;vertical-align:middle;margin-right:8px;color:var(--blue-600)"></i>School Information</h3></div>
-        <div class="form-row"><div class="form-group"><label>School Name <span class="required">*</span></label><input id="set-name" class="input-field" value="${Utils.escapeHtml(s.school_name || '')}"></div>
-        <div class="form-group"><label>School Code</label><input id="set-code" class="input-field" value="${Utils.escapeHtml(s.school_code || '')}" placeholder="e.g., RMS-001"></div></div>
-        <div class="form-group"><label>Address</label><input id="set-address" class="input-field" value="${Utils.escapeHtml(s.school_address || '')}" placeholder="e.g., Rukara, Rwanda"></div>
-        <div class="form-row"><div class="form-group"><label>Phone Number</label><input id="set-phone" class="input-field" value="${Utils.escapeHtml(s.school_phone || '')}" placeholder="+250 XXX XXX XXX"></div>
-        <div class="form-group"><label>Email</label><input id="set-email" class="input-field" type="email" value="${Utils.escapeHtml(s.school_email || '')}" placeholder="school@example.com"></div></div>
-        <div class="form-row"><div class="form-group"><label>Website</label><input id="set-website" class="input-field" value="${Utils.escapeHtml(s.school_website || '')}" placeholder="www.example.com"></div>
-        <div class="form-group"><label>School Motto</label><input id="set-motto" class="input-field" value="${Utils.escapeHtml(s.school_motto || '')}" placeholder="e.g., Knowledge is Power"></div></div>
-      </div>`;
-  }
-
-  if (settingsTab === 'logo') {
-    tabContent = `
-      <div class="card">
-        <div class="card-header"><h3><i data-lucide="image" style="width:18px;height:18px;vertical-align:middle;margin-right:8px;color:var(--blue-600)"></i>School Logo</h3></div>
-        <p class="text-sm text-muted mb-4">Upload the official school logo. It will appear on all official reports, mark sheets, and printed documents.</p>
-        ${logoPreview}
-        <div class="mt-4">
-          <div class="form-group"><label>Upload Logo</label>
-            <input type="file" id="set-logo-file" accept="image/*" class="input-field" onchange="handleLogoUpload(this.files[0])">
-          </div>
-          <div class="flex gap-2">
-            ${s.logo_url ? `<button class="btn btn-danger" onclick="removeLogo()"><i data-lucide="trash-2"></i> Remove Logo</button>` : ''}
-            <button class="btn btn-secondary" onclick="previewReportHeader()"><i data-lucide="eye"></i> Preview Report Header</button>
+          <div class="card-body">
+            <div class="form-grid">
+              <div class="form-group">
+                <label>Report Category</label>
+                <select id="rc-category" class="select-field" onchange="ReportCenter.onCategoryChange(this.value)">
+                  ${reportCategories.map(c => `<option value="${c.id}" ${c.id === this.state.reportType ? 'selected' : ''}>${c.label}</option>`).join('')}
+                </select>
+              </div>
+              <div class="form-group">
+                <label>Report Type</label>
+                <select id="rc-report-type" class="select-field" onchange="ReportCenter.onTypeChange(this.value)">
+                  <option value="student-card" ${this.state.reportType === 'student-card' ? 'selected' : ''}>Student Report Card</option>
+                  <option value="exam-class-summary" ${this.state.reportType === 'exam-class-summary' ? 'selected' : ''}>Exam Class Performance Summary</option>
+                  <option value="subject-performance" ${this.state.reportType === 'subject-performance' ? 'selected' : ''}>Subject Performance Summary</option>
+                  <option value="class-performance" ${this.state.reportType === 'class-performance' ? 'selected' : ''}>Class Performance Report</option>
+                  <option value="missing-marks" ${this.state.reportType === 'missing-marks' ? 'selected' : ''}>Missing Marks Report</option>
+                  <option value="school-performance" ${this.state.reportType === 'school-performance' ? 'selected' : ''}>School Performance Summary</option>
+                  <option value="teacher-performance" ${this.state.reportType === 'teacher-performance' ? 'selected' : ''}>Teacher Performance Report</option>
+                  <option value="grade-distribution" ${this.state.reportType === 'grade-distribution' ? 'selected' : ''}>Grade Distribution</option>
+                </select>
+              </div>
+              <div class="form-group">
+                <label>Academic Year</label>
+                <select id="rc-year" class="select-field" onchange="ReportCenter.state.academicYear=this.value">
+                  ${years.map(y => `<option value="${y.id}" ${y.id === this.state.academicYear ? 'selected' : ''}>${Utils.escapeHtml(y.name)}</option>`).join('')}
+                </select>
+              </div>
+              <div class="form-group">
+                <label>Term</label>
+                <select id="rc-term" class="select-field" onchange="ReportCenter.state.term=this.value">
+                  ${terms.map(t => `<option value="${t.id}" ${t.id === this.state.term ? 'selected' : ''}>${Utils.escapeHtml(t.name)} (Term ${t.term_no || ''})</option>`).join('')}
+                </select>
+              </div>
+              <div class="form-group" id="rc-class-group">
+                <label>Class</label>
+                <select id="rc-class" class="select-field" onchange="ReportCenter.state.classId=this.value">
+                  <option value="">All Classes</option>
+                  ${classes.map(c => `<option value="${c.id}" ${c.id === this.state.classId ? 'selected' : ''}>${Utils.escapeHtml(c.name)}</option>`).join('')}
+                </select>
+              </div>
+              <div class="form-group" id="rc-subject-group" style="display:none">
+                <label>Subject</label>
+                <select id="rc-subject" class="select-field" onchange="ReportCenter.state.subjectId=this.value">
+                  <option value="">All Subjects</option>
+                  ${subjects.map(s => `<option value="${s.id}" ${s.id === this.state.subjectId ? 'selected' : ''}>${Utils.escapeHtml(s.name)} (${Utils.escapeHtml(s.level || '')})</option>`).join('')}
+                </select>
+              </div>
+              <div class="form-group" id="rc-teacher-group" style="display:none">
+                <label>Teacher</label>
+                <select id="rc-teacher" class="select-field" onchange="ReportCenter.state.teacherId=this.value">
+                  <option value="">All Teachers</option>
+                  ${teachers.map(t => `<option value="${t.id}" ${t.id === this.state.teacherId ? 'selected' : ''}>${Utils.escapeHtml(t.full_name)}</option>`).join('')}
+                </select>
+              </div>
+              <div class="form-group" id="rc-assessment-group" style="display:none">
+                <label>Assessment</label>
+                <select id="rc-assessment" class="select-field" onchange="ReportCenter.state.assessmentId=this.value">
+                  <option value="">All Assessments</option>
+                  ${assessments.map(a => `<option value="${a.id}" ${a.id === this.state.assessmentId ? 'selected' : ''}>${Utils.escapeHtml(a.name)} - ${Utils.escapeHtml(a.unit || '')}</option>`).join('')}
+                </select>
+              </div>
+              <div class="form-group" id="rc-student-group" style="display:none">
+                <label>Student</label>
+                <select id="rc-student" class="select-field" onchange="ReportCenter.state.studentId=this.value">
+                  <option value="">Select Student</option>
+                </select>
+              </div>
+            </div>
+            <div class="flex gap-3 mt-4">
+              <button class="btn btn-primary" onclick="ReportCenter.generate()"><i data-lucide="bar-chart-3"></i> Generate Report</button>
+              <button class="btn btn-secondary" onclick="ReportCenter.preview()"><i data-lucide="eye"></i> Preview</button>
+              <button class="btn btn-outline" onclick="ReportCenter.print()"><i data-lucide="printer"></i> Print</button>
+              <button class="btn btn-outline" onclick="ReportCenter.exportExcel()"><i data-lucide="file-spreadsheet"></i> Export Excel</button>
+              <button class="btn btn-outline" onclick="ReportCenter.resetFilters()"><i data-lucide="rotate-ccw"></i> Reset</button>
+            </div>
           </div>
         </div>
-      </div>`;
-  }
-
-  if (settingsTab === 'leadership') {
-    tabContent = `
-      <div class="card mb-6">
-        <div class="card-header"><h3><i data-lucide="crown" style="width:18px;height:18px;vertical-align:middle;margin-right:8px;color:var(--amber-600)"></i>Head Teacher</h3></div>
-        <div class="form-row"><div class="form-group"><label>Full Name</label><input id="set-ht-name" class="input-field" value="${Utils.escapeHtml(s.headteacher_name || '')}"></div>
-        <div class="form-group"><label>Phone</label><input id="set-ht-phone" class="input-field" value="${Utils.escapeHtml(s.headteacher_phone || '')}"></div></div>
-        <div class="form-group"><label>Email</label><input id="set-ht-email" class="input-field" type="email" value="${Utils.escapeHtml(s.headteacher_email || '')}"></div>
+        <div id="rc-preview-area"></div>
       </div>
-      <div class="card mb-6">
-        <div class="card-header"><h3><i data-lucide="award" style="width:18px;height:18px;vertical-align:middle;margin-right:8px;color:var(--blue-600)"></i>Deputy Head Teacher â€” Academics</h3></div>
-        <div class="form-row"><div class="form-group"><label>Full Name</label><input id="set-dha-name" class="input-field" value="${Utils.escapeHtml(s.deputy_academic_name || '')}"></div>
-        <div class="form-group"><label>Phone</label><input id="set-dha-phone" class="input-field" value="${Utils.escapeHtml(s.deputy_academic_phone || '')}"></div></div>
-      </div>
-      <div class="card mb-6">
-        <div class="card-header"><h3><i data-lucide="award" style="width:18px;height:18px;vertical-align:middle;margin-right:8px;color:var(--green-600)"></i>Deputy Head Teacher â€” Administration</h3></div>
-        <div class="form-row"><div class="form-group"><label>Full Name</label><input id="set-dha-admin-name" class="input-field" value="${Utils.escapeHtml(s.deputy_admin_name || '')}"></div>
-        <div class="form-group"><label>Phone</label><input id="set-dha-admin-phone" class="input-field" value="${Utils.escapeHtml(s.deputy_admin_phone || '')}"></div></div>
-      </div>
-      <div class="card">
-        <div class="card-header"><h3><i data-lucide="briefcase" style="width:18px;height:18px;vertical-align:middle;margin-right:8px;color:var(--purple-600)"></i>Director of Studies (DOS)</h3></div>
-        <div class="form-row"><div class="form-group"><label>Full Name</label><input id="set-dos-name" class="input-field" value="${Utils.escapeHtml(s.dos_name || '')}"></div>
-        <div class="form-group"><label>Phone</label><input id="set-dos-phone" class="input-field" value="${Utils.escapeHtml(s.dos_phone || '')}"></div></div>
-        <div class="form-group"><label>Email</label><input id="set-dos-email" class="input-field" type="email" value="${Utils.escapeHtml(s.dos_email || '')}"></div>
-      </div>`;
-  }
+    `);
+    if (typeof lucide !== 'undefined') lucide.createIcons();
+  },
 
-  if (settingsTab === 'assessment') {
-    tabContent = `
-      <div class="card">
-        <div class="card-header"><h3><i data-lucide="sliders-horizontal" style="width:18px;height:18px;vertical-align:middle;margin-right:8px;color:var(--green-600)"></i>Assessment Settings</h3></div>
-        <div class="form-group"><label>Pass Mark (%)</label><input id="set-pass" type="number" class="input-field" value="${s.pass_mark || 50}" min="0" max="100" style="width:120px"></div>
-        <div class="form-group"><label>Newly Enrolled Learners in Existing Assessments</label>
-          <select id="set-roster-policy" class="select-field">
-            <option value="auto_add" ${(s.assessment_roster_policy || 'auto_add') === 'auto_add' ? 'selected' : ''}>Auto-add (recommended) — new learners appear in existing assessments</option>
-            <option value="freeze_on_submit" ${s.assessment_roster_policy === 'freeze_on_submit' ? 'selected' : ''}>Freeze on submission — assessment rosters are fixed when marks are submitted</option>
-          </select>
-          <p class="form-hint">Auto-add: when a learner is registered into the class, they automatically appear in every existing assessment for that class. Freeze: the roster is captured at submission time, so newly enrolled learners only appear in new assessments. Marks are never duplicated in either mode.</p>
-        </div>
-        <div class="form-group"><label class="checkbox-label"><input type="checkbox" id="set-rank" ${s.ranking_enabled ? 'checked' : ''}> Enable Class Ranking</label></div>
-        <div class="form-group"><label class="checkbox-label"><input type="checkbox" id="set-decimal" ${s.decimal_marks_enabled ? 'checked' : ''}> Allow Decimal Marks</label></div>
-      </div>`;
-  }
+  getReportCategories() {
+    return [
+      { id: 'student-card', label: 'A. Student Reports', sub: ['Student Report Card', 'Student Academic Report'] },
+      { id: 'exam-class-summary', label: 'B. Class Reports', sub: ['Exam Class Performance Summary', 'Class Performance Report'] },
+      { id: 'subject-performance', label: 'C. Subject Reports', sub: ['Subject Performance Summary', 'Subject Marks Sheet'] },
+      { id: 'missing-marks', label: 'D. Assessment Reports', sub: ['Missing Marks Report', 'Assessment Completion Report'] },
+      { id: 'school-performance', label: 'E. School Reports', sub: ['School Performance Summary', 'Term Performance Summary'] },
+      { id: 'teacher-performance', label: 'F. Teacher Reports', sub: ['Teacher Performance Report'] },
+      { id: 'grade-distribution', label: 'G. Grade Distribution', sub: ['Grade Distribution Report'] }
+    ];
+  },
 
-  if (settingsTab === 'grading') {
-    tabContent = renderGradingContent ? renderGradingContent() : '<div class="card"><div class="card-body text-center"><i data-lucide="loader" class="spin" style="width:24px;height:24px;color:var(--blue-600);margin:0 auto 12px"></i><p>Loading grading system...</p></div></div>';
-    if (typeof renderGradingTab === 'function') {
-      setTimeout(() => renderGradingTab(), 0);
+  async onCategoryChange(value) {
+    this.state.reportType = value;
+    this.updateFilterVisibility();
+  },
+
+  async onTypeChange(value) {
+    this.state.reportType = value;
+    this.updateFilterVisibility();
+  },
+
+  updateFilterVisibility() {
+    const type = this.state.reportType;
+    const show = (id, v) => { const el = document.getElementById(id); if (el) el.style.display = v ? '' : 'none'; };
+    const typeMap = {
+      'student-card': ['rc-student-group', 'rc-class-group', 'rc-subject-group'],
+      'exam-class-summary': ['rc-class-group', 'rc-assessment-group'],
+      'subject-performance': ['rc-class-group', 'rc-subject-group', 'rc-teacher-group', 'rc-assessment-group'],
+      'class-performance': ['rc-class-group'],
+      'missing-marks': ['rc-class-group'],
+      'school-performance': [],
+      'teacher-performance': [],
+      'grade-distribution': ['rc-class-group']
+    };
+    const allGroups = ['rc-class-group', 'rc-subject-group', 'rc-teacher-group', 'rc-assessment-group', 'rc-student-group'];
+    const visible = typeMap[type] || [];
+    allGroups.forEach(g => show(g, visible.includes(g)));
+  },
+
+  async generate() {
+    this.state.loading = true;
+    const previewArea = document.getElementById('rc-preview-area');
+    if (!previewArea) return;
+    previewArea.innerHTML = Utils.loading();
+
+    try {
+      const config = {
+        reportType: this.state.reportType,
+        academicYear: this.state.academicYear || undefined,
+        term: this.state.term || undefined,
+        classId: this.state.classId || undefined,
+        subjectId: this.state.subjectId || undefined,
+        teacherId: this.state.teacherId || undefined,
+        assessmentId: this.state.assessmentId || undefined,
+        studentId: this.state.studentId || undefined
+      };
+
+const data = await ReportEngine.generate(config);
+      const typeMap = {
+        'student-card': 'studentCard', 'exam-class-summary': 'examClassSummary',
+        'subject-performance': 'subjectPerformance', 'class-performance': 'classPerformance',
+        'missing-marks': 'missingMarks', 'school-performance': 'schoolPerformance',
+        'teacher-performance': 'teacherPerformance', 'grade-distribution': 'gradeDistribution'
+      };
+      const templateFn = ReportTemplates[typeMap[data.type]];
+      const html = templateFn ? templateFn(data) : '<p>Report template not found</p>';
+      previewArea.innerHTML = `<div id="rc-report-container">${html}</div>`;
+      if (typeof lucide !== 'undefined') lucide.createIcons();
+    } catch (e) {
+      previewArea.innerHTML = Utils.errorCard('Report Generation Error', e.message || 'Failed to generate report.');
     }
+    this.state.loading = false;
+  },
+
+  async preview() {
+    await this.generate();
+  },
+
+  print() {
+    const container = document.getElementById('rc-report-container');
+    if (!container) { Utils.toast('Generate a report first', 'error'); return; }
+    const w = window.open('', '_blank');
+    if (!w) { Utils.toast('Allow pop-ups to print', 'error'); return; }
+    const css = `<link rel="stylesheet" href="${new URL('css/styles.css', window.location.href).href}"><link rel="stylesheet" href="${new URL('css/report-card.css', window.location.href).href}"><style>@media print{body *{visibility:hidden}#rc-report-container,.rms-report-header,.rms-report-footer,.rms-report-title{visibility:visible}#rc-report-container{position:absolute;left:0;top:0;width:100%}table{page-break-inside:avoid}tr{page-break-inside:avoid}thead{display:table-header-group}.rms-page-break{page-break-after:always}}</style>`;
+    w.document.write(`<!DOCTYPE html><html><head><meta charset="utf-8"><title>Report Print</title>${css}</head><body class="printable-report">${container.innerHTML}</body></html>`);
+    w.document.close();
+    setTimeout(() => w.print(), 500);
+  },
+
+  async exportExcel() {
+    if (typeof XLSX === 'undefined') { Utils.toast('Excel library not loaded', 'error'); return; }
+    const container = document.getElementById('rc-report-container');
+    if (!container) { Utils.toast('Generate a report first', 'error'); return; }
+    const ws = XLSX.utils.table_to_sheet(container.querySelector('table'));
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, 'Report');
+    XLSX.writeFile(wb, `RMS-MIS_Report_${new Date().toISOString().slice(0, 10)}.xlsx`);
+    Utils.toast('Report exported to Excel', 'success');
+  },
+
+  resetFilters() {
+    this.state = { reportType: 'student-card', academicYear: '', term: '', classId: '', subjectId: '', teacherId: '', assessmentId: '', studentId: '', loading: false, previewHtml: '' };
+    this.render();
   }
+};
 
-  setContent(`
-    <div class="tab-bar mb-6" style="flex-wrap:wrap">${tabNav}</div>
-    ${tabContent}
-    <div class="mt-6" style="display:flex;justify-content:flex-end;gap:8px;padding-top:20px;border-top:1px solid var(--gray-200)">
-      <button class="btn btn-secondary" onclick="previewReportHeader()"><i data-lucide="eye"></i> Preview Report Header</button>
-      <button class="btn btn-primary" onclick="saveSettings()"><i data-lucide="save"></i> Save Settings</button>
-    </div>`);
+function renderReportCenter() {
+  ReportCenter.render();
 }
 
-function updateGrade(el) {}
-function addGradeRow() {
-  const tbody = document.getElementById('grade-tbody');
-  const i = tbody.children.length;
-  tbody.insertAdjacentHTML('beforeend', `<tr>
-    <td><input type="number" class="input-field" value="0" data-idx="${i}" data-field="min" style="width:80px" onchange="updateGrade(this)"></td>
-    <td><input type="number" class="input-field" value="0" data-idx="${i}" data-field="max" style="width:80px" onchange="updateGrade(this)"></td>
-    <td><input type="text" class="input-field" value="" data-idx="${i}" data-field="grade" style="width:80px" onchange="updateGrade(this)"></td>
-    <td><input type="text" class="input-field" value="" data-idx="${i}" data-field="remark" onchange="updateGrade(this)"></td>
-    <td><button class="btn btn-sm btn-danger" onclick="this.closest('tr').remove()"><i data-lucide="trash-2"></i></button></td></tr>`);
-  if (typeof lucide !== 'undefined') lucide.createIcons();
-}
-function removeGrade(i) { document.querySelectorAll('#grade-tbody tr')[i]?.remove(); }
-
-async function handleLogoUpload(file) {
-  if (!file) return;
-  if (!file.type.startsWith('image/')) return Utils.toast('Please select an image file', 'error');
-  if (file.size > 5 * 1024 * 1024) return Utils.toast('Image must be under 5MB', 'error');
-
-  try {
-    Utils.toast('Compressing & uploading logo...', 'info');
-    const dataUrl = await Utils.compressImage(file, 300, 300, 0.85);
-    const existing = await DB.query('school_settings', '*');
-    if (existing[0]) {
-      await DB.update('school_settings', existing[0].id, { logo_url: dataUrl });
-    } else {
-      await DB.insert('school_settings', { logo_url: dataUrl });
-    }
-    schoolSettingsCache = null;
-    Utils.toast('Logo uploaded successfully', 'success');
-    renderSettings();
-  } catch (err) {
-    console.error('Logo upload error:', err);
-    let msg = err.message || 'Upload failed';
-    if (msg.includes('column') || msg.includes('400')) {
-      msg = 'Database missing columns. Please run sql/migration-school-settings.sql in Supabase SQL Editor.';
-    }
-    Utils.toast('Error: ' + msg, 'error');
-  }
-}
-
-async function removeLogo() {
-  if (!confirm('Remove the school logo from all reports?')) return;
-  try {
-    const data = await DB.query('school_settings', '*');
-    if (data[0]) await DB.update('school_settings', data[0].id, { logo_url: '' });
-    schoolSettingsCache = null;
-    Utils.toast('Logo removed', 'success');
-    renderSettings();
-  } catch (err) {
-    Utils.toast('Error removing logo: ' + err.message, 'error');
-  }
-}
-
-function previewReportHeader() {
-  DB.query('school_settings', '*').then(data => {
-    const s = data[0] || {};
-    Modal.show('Report Header Preview', `
-      <div style="background:#fff;padding:24px;border:1px solid var(--gray-200);border-radius:var(--radius)">
-        ${schoolReportHeader('ASSESSMENT MARKS REPORT', {
-          settings: s,
-          className: 'P4A',
-          subject: 'Mathematics',
-          unit: 'Unit 4: Fractions',
-          assessmentType: 'End-of-Unit Assessment',
-          academicYear: '2026/2027',
-          term: 'Term 1',
-          date: '06 September 2026'
-        })}
-        <div style="border:1px dashed var(--gray-200);border-radius:var(--radius);padding:20px;text-align:center;color:var(--gray-400)">
-          <p class="text-sm">Report marks table appears here</p>
-        </div>
-        ${schoolSignatureSection(s.dos_name, s.dos_name, s.headteacher_name)}
-      </div>`,
-      `<button class="btn btn-secondary" onclick="Modal.close()">Close</button>
-       <button class="btn btn-primary" onclick="Modal.close();window.print()"><i data-lucide="printer"></i> Print Preview</button>`, true);
-  });
-}
-
-async function saveSettings() {
-  const s = {
-    school_name: document.getElementById('set-name')?.value?.trim() || 'Rukara Model School',
-    school_code: document.getElementById('set-code')?.value?.trim() || '',
-    school_address: document.getElementById('set-address')?.value?.trim() || '',
-    school_phone: document.getElementById('set-phone')?.value?.trim() || '',
-    school_email: document.getElementById('set-email')?.value?.trim() || '',
-    school_website: document.getElementById('set-website')?.value?.trim() || '',
-    school_motto: document.getElementById('set-motto')?.value?.trim() || '',
-    headteacher_name: document.getElementById('set-ht-name')?.value?.trim() || '',
-    headteacher_phone: document.getElementById('set-ht-phone')?.value?.trim() || '',
-    headteacher_email: document.getElementById('set-ht-email')?.value?.trim() || '',
-    deputy_academic_name: document.getElementById('set-dha-name')?.value?.trim() || '',
-    deputy_academic_phone: document.getElementById('set-dha-phone')?.value?.trim() || '',
-    deputy_admin_name: document.getElementById('set-dha-admin-name')?.value?.trim() || '',
-    deputy_admin_phone: document.getElementById('set-dha-admin-phone')?.value?.trim() || '',
-    dos_name: document.getElementById('set-dos-name')?.value?.trim() || '',
-    dos_phone: document.getElementById('set-dos-phone')?.value?.trim() || '',
-    dos_email: document.getElementById('set-dos-email')?.value?.trim() || '',
-    pass_mark: parseInt(document.getElementById('set-pass')?.value) || 50,
-    ranking_enabled: document.getElementById('set-rank')?.checked ?? true,
-    decimal_marks_enabled: document.getElementById('set-decimal')?.checked ?? false,
-    assessment_roster_policy: document.getElementById('set-roster-policy')?.value || 'auto_add'
-  };
-
-  try {
-    const existing = await DB.query('school_settings', '*');
-    if (existing[0]) await DB.update('school_settings', existing[0].id, s);
-    else await DB.insert('school_settings', s);
-    gradingScaleCache = null;
-    schoolSettingsCache = null;
-    await DB.insert('audit_logs', {
-      user_id: Auth.currentUser?.id,
-      user_name: Auth.currentUser?.full_name,
-      role: Auth.currentUser?.role,
-      action: 'update_school_settings',
-      new_value: 'Updated school settings',
-      timestamp: new Date().toISOString()
-    }).catch(() => {});
-    Utils.toast('Settings saved', 'success');
-  } catch (e) {
-    console.error('Save settings error:', e);
-    let msg = e.message || 'Save failed';
-    if (msg.includes('column') || msg.includes('400')) {
-      msg = 'Database missing columns. Please run sql/migration-school-settings.sql in Supabase SQL Editor.';
-    }
-    Utils.toast('Error: ' + msg, 'error');
-  }
-}

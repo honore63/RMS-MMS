@@ -39,8 +39,7 @@ async function renderTeacherDashboard() {
     const actions = [
       { icon: 'school', bg: 'var(--blue-50)', color: 'var(--blue-600)', title: 'My Classes', desc: 'View your class rosters', route: 'teacher/my-classes' },
       { icon: 'book-open', bg: 'var(--green-50)', color: 'var(--green-600)', title: 'My Subjects', desc: 'Subjects you are assigned to teach', route: 'teacher/my-subjects' },
-      { icon: 'calculator', bg: 'var(--amber-50)', color: 'var(--amber-600)', title: 'Enter Marks', desc: 'Record and submit your marks', route: 'teacher/enter-marks' },
-      { icon: 'file-text', bg: 'var(--blue-50)', color: 'var(--blue-600)', title: 'My Reports', desc: 'View class performance reports', route: 'teacher/reports' }
+{ icon: 'calculator', bg: 'var(--amber-50)', color: 'var(--amber-600)', title: 'Enter Marks', desc: 'Record and submit your marks', route: 'teacher/enter-marks' }
     ];
     const actionCards = actions.map(a => `
       <button class="action-card" onclick="Router.go('${a.route}')" aria-label="${a.title}">
@@ -223,18 +222,8 @@ function toggleClassStudents(classId) {
   renderMyClasses();
 }
 
-async function teacherDownloadClassList(classId, format) {
-  if (!classId) return Utils.toast('No class selected', 'error');
-  try {
-    const data = await ReportEngine.buildClassList({ classId });
-    ReportEngine.current = data;
-    if (format === 'csv') return ReportEngine.exportCsv();
-    if (format === 'word') return ReportEngine.exportWord();
-    if (format === 'pdf') return ReportEngine.exportPdf();
-    return ReportEngine.exportExcel();
-  } catch (e) {
-    Utils.toast('Download error: ' + e.message, 'error');
-  }
+function teacherDownloadClassList(classId, format) {
+   Utils.toast('Reports are not available at this time.', 'info');
 }
 
 async function renderMySubjects() {
@@ -436,9 +425,9 @@ async function handleCombinedExport() {
   Modal.show('Generating Combined Report...', '<div id="teacher-rpt-modal"></div>', '', true);
 
   try {
-    const reportData = await ReportEngine.buildCombined(selectedIds);
+    const reportData = await buildCombinedReportData(selectedIds);
     lastCombinedReportData = reportData;
-    ReportEngine.render(reportData, 'teacher-rpt-modal');
+    renderCombinedReportModal(reportData);
   } catch (err) {
     console.error('Combined export error:', err);
     Utils.toast('Error generating report: ' + err.message, 'error');

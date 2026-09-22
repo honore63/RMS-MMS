@@ -20,10 +20,8 @@
   Realtime.route('admin/assessments', ['assessments', 'assessment_types', 'teacher_assignments', 'marks', 'teachers', 'academic_years', 'terms']);
   Realtime.route('admin/assessment-types', ['assessment_types', 'assessments']);
   Realtime.route('admin/marks', ['assessments', 'assessment_types', 'marks', 'learners', 'teachers', 'classes']);
-  Realtime.route('admin/reports', ['assessments', 'assessment_types', 'marks', 'learners', 'classes', 'subjects', 'academic_years', 'terms', 'school_settings', 'grading_scales']);
-  Realtime.route('admin/analytics', ['assessments', 'marks', 'learners', 'classes', 'subjects', 'grading_scales']);
-  Realtime.route('admin/post-assessment-reports', ['assessments', 'assessment_types', 'marks', 'learners', 'classes', 'subjects', 'academic_years', 'terms', 'school_settings', 'grading_scales']);
-  Realtime.route('admin/audit-logs', ['audit_logs']);
+Realtime.route('admin/analytics', ['assessments', 'marks', 'learners', 'classes', 'subjects', 'grading_scales']);
+   Realtime.route('admin/audit-logs', ['audit_logs']);
   Realtime.route('admin/documents', ['documents']);
   Realtime.route('admin/settings', ['school_settings', 'grading_scales']);
 
@@ -38,10 +36,8 @@
     return typeof marksView === 'undefined' || marksView !== 'entry';
   });
 
-  Realtime.route('teacher/reports', ['assessments', 'marks', 'learners', 'school_settings', 'grading_scales']);
-  Realtime.route('teacher/analytics', ['assessments', 'assessment_types', 'marks', 'learners', 'classes', 'subjects', 'teacher_assignments', 'academic_years', 'terms', 'school_settings', 'grading_scales']);
-  Realtime.route('teacher/post-assessment-reports', ['assessments', 'assessment_types', 'marks', 'learners', 'classes', 'subjects', 'teacher_assignments', 'academic_years', 'terms', 'school_settings', 'grading_scales']);
-  Realtime.route('teacher/notifications', ['notifications']);
+Realtime.route('teacher/analytics', ['assessments', 'assessment_types', 'marks', 'learners', 'classes', 'subjects', 'teacher_assignments', 'academic_years', 'terms', 'school_settings', 'grading_scales']);
+   Realtime.route('teacher/notifications', ['notifications']);
 
   /* ---------- Targeted in-place updates ---------- */
 
