@@ -2738,11 +2738,165 @@ body.report-orientation-portrait .report-paper-container {
 .rms-report-footer { display: flex; justify-content: space-between; padding: 12px 20px; border-top: 2px solid #1e3a5f; font-size: 10px; color: #666; margin-top: 24px; }
 .rms-page-break { page-break-after: always; }
 
+/* ========== A4 REPORT STYLES ========== */
+
+.rms-a4-container {
+  width: 210mm;
+  min-height: 297mm;
+  max-width: 210mm;
+  margin: 0 auto;
+  padding: 12mm;
+  box-sizing: border-box;
+  background: #fff;
+  position: relative;
+  border: 1px solid var(--gray-200, #e5e7eb);
+  box-shadow: 0 4px 18px rgba(15, 23, 42, 0.12);
+  overflow: hidden;
+}
+
+.rms-a4-container.rms-a4-landscape {
+  width: 297mm;
+  min-height: 210mm;
+  max-width: 297mm;
+}
+
+.rms-a4-page {
+  width: 210mm;
+  min-height: 297mm;
+  max-width: 210mm;
+  margin: 0 auto;
+  padding: 12mm;
+  box-sizing: border-box;
+  background: #fff;
+  position: relative;
+  page-break-after: always;
+}
+
+.rms-a4-page.rms-a4-landscape {
+  width: 297mm;
+  min-height: 210mm;
+  max-width: 297mm;
+}
+
+/* A4 print @page rules (orientation is overridden per-report in the print window) */
+@page {
+  size: A4 portrait;
+  margin: 12mm;
+}
+
 @media print {
-  .rms-report-header { border: 2px solid #1e3a5f; }
-  .rms-table th { background: #1e3a5f !important; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
-  .rms-summary-grid { grid-template-columns: repeat(3, 1fr); }
-  .rms-report-footer { border-top: 2px solid #1e3a5f; }
+  body { background: #fff !important; }
+  
+  .rms-a4-container,
+  .rms-a4-page {
+    width: 210mm !important;
+    max-width: 210mm !important;
+    min-height: 297mm !important;
+    padding: 12mm !important;
+    margin: 0 !important;
+    box-shadow: none !important;
+    page-break-after: always;
+  }
+  
+  .rms-a4-container.rms-a4-landscape,
+  .rms-a4-page.rms-a4-landscape {
+    width: 297mm !important;
+    max-width: 297mm !important;
+    min-height: 210mm !important;
+  }
+  
+  @page {
+    size: A4 portrait;
+    margin: 12mm;
+  }
+
+  .rms-report-header,
+  .rms-header-left,
+  .rms-header-center,
+  .rms-header-right {
+    display: flex !important;
+  }
+  
+  .rms-header-logo {
+    height: 20mm !important;
+    max-width: 35mm !important;
+    object-fit: contain !important;
+  }
+
+  .rms-table {
+    font-size: 10px !important;
+    page-break-inside: auto;
+  }
+
+  .rms-table thead {
+    display: table-header-group;
+  }
+
+  .rms-table tfoot {
+    display: table-footer-group;
+  }
+
+  .rms-table tbody tr {
+    page-break-inside: avoid;
+    break-inside: avoid;
+  }
+
+  .rms-report-title,
+  .rms-meta {
+    page-break-after: avoid;
+    break-after: avoid;
+  }
+
+  .rms-summary,
+  .rms-summary-grid {
+    page-break-inside: avoid;
+    break-inside: avoid;
+  }
+  
+  .rms-table th {
+    background: #1e3a5f !important;
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
+    color-adjust: exact !important;
+  }
+  
+  .rms-summary-grid {
+    grid-template-columns: repeat(4, 1fr) !important;
+  }
+  
+  .rms-stat-val { font-size: 18px !important; }
+  
+  .rms-report-footer {
+    border-top: 2px solid #1e3a5f !important;
+    page-break-inside: avoid;
+    break-inside: avoid;
+  }
+  
+  .rms-page-break {
+    page-break-after: always;
+    height: 0;
+    margin: 0;
+    padding: 0;
+  }
+  
+  .no-print { display: none !important; }
+  
+  .rms-a4-container * {
+    overflow: visible !important;
+    text-overflow: clip !important;
+  }
+}
+
+/* A4 print container wrapper */
+.rms-a4-print-wrapper {
+  width: 210mm;
+  margin: 0 auto;
+  padding: 12mm;
+  box-sizing: border-box;
+}
+
+.rms-a4-print-wrapper.rms-a4-landscape {
+  width: 297mm;
 }
 
 .form-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }

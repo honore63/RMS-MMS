@@ -1,4 +1,10 @@
 const ReportTemplates = {
+  _wrap(templateFn, data) {
+    const orientation = ReportHeader.getOrientation(data.type || templateFn.name);
+    const html = templateFn(data);
+    return ReportHeader.getA4Container(html, orientation);
+  },
+
   studentCard(data) {
     const { settings, learner, cls, year, term, subjRows, overallPct, overallGrade, overallPf, totalSubjects, passed, failed, avg, totalObtained, totalMax, scale } = data;
     const levelLbl = (cls?.level || '').toUpperCase().includes('PRIMARY') ? 'PRIMARY' : (cls?.level || '').toUpperCase().includes('S') ? (['S1','S2','S3'].includes(cls.level.toUpperCase()) ? 'LOWER SECONDARY' : 'UPPER SECONDARY') : 'SECONDARY';
@@ -47,9 +53,8 @@ const ReportTemplates = {
       tbody += `<tr><td class="text-center">${pos}</td><td>${Utils.escapeHtml(row.learner.full_name)}</td><td class="text-center">${Utils.escapeHtml(row.learner.learner_code || '-')}</td><td class="text-center">${row.pct != null ? ReportUtils.formatMark(row.pct * (assess?.maximum_mark || 100) / 100, assess?.maximum_mark || 100) : 'N/R'}</td><td class="text-center">${row.pct != null ? ReportUtils.formatPct(row.pct) : 'N/R'}</td><td class="text-center font-bold">${row.grade}</td><td class="text-center"><span class="badge ${row.passFail === 'PASS' ? 'badge-success' : 'badge-danger'}">${row.passFail}</span></td></tr>`;
     });
 
-    const gradeDistHtml = ReportUtils.getGradeDistribution(learnerRows.filter(r => r.pct != null).map(r => r.grade), scale).then(d => {
-      return d.map(g => `<span class="badge badge-info">${g.grade}: ${g.count}</span>`).join(' ');
-    });
+    const gradeDist = ReportUtils.getGradeDistribution(learnerRows.filter(r => r.pct != null).map(r => r.grade), scale);
+    const gradeDistHtml = (gradeDist || []).map(g => `<span class="badge badge-info">${g.grade}: ${g.count}</span>`).join(' ');
 
     const footer = ReportHeader.getFooter({ settings, academicYear: year.name || '', term: term.name || '' });
 
@@ -87,7 +92,8 @@ const ReportTemplates = {
       tbody += `<tr><td class="text-center">${posMap[row.learner.id] || i + 1}</td><td>${Utils.escapeHtml(row.learner.full_name)}</td><td class="text-center">${Utils.escapeHtml(row.learner.learner_code || '-')}</td><td class="text-center">${ReportUtils.formatPct(row.pct)}</td><td class="text-center font-bold">${row.grade}</td><td class="text-center"><span class="badge ${row.passFail === 'PASS' ? 'badge-success' : 'badge-danger'}">${row.passFail}</span></td></tr>`;
     });
 
-    const gradeDistHtml = ReportUtils.getGradeDistribution(learnerRows.filter(r => r.pct != null).map(r => r.grade), scale).then(d => d.map(g => `<span class="badge badge-info">${g.grade}: ${g.count}</span>`).join(' '));
+    const gradeDist = ReportUtils.getGradeDistribution(learnerRows.filter(r => r.pct != null).map(r => r.grade), scale);
+    const gradeDistHtml = (gradeDist || []).map(g => `<span class="badge badge-info">${g.grade}: ${g.count}</span>`).join(' ');
 
     const footer = ReportHeader.getFooter({ settings, academicYear: year.name || '', term: term.name || '' });
 

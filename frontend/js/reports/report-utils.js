@@ -44,7 +44,7 @@ const ReportUtils = {
     return { ranges: [], total: pcts.length };
   },
 
-  async getGradeDistribution(grades, scale) {
+  getGradeDistribution(grades, scale) {
     if (typeof GradingEngine !== 'undefined') {
       return GradingEngine.getGradeDistribution(grades, scale);
     }

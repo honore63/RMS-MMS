@@ -77,6 +77,41 @@ const ReportHeader = {
 
   getPageBreak() {
     return '<div class="rms-page-break" style="page-break-after:always; height:0; margin:0; padding:0;"></div>';
+  },
+
+  getA4Container(html, orientation = 'portrait') {
+    const isLandscape = orientation === 'landscape';
+    const cls = isLandscape ? 'rms-a4-container rms-a4-landscape' : 'rms-a4-container';
+    return `
+      <div class="${cls}" data-report-orientation="${orientation}">
+        ${html}
+      </div>`;
+  },
+
+  getA4Page(html, orientation = 'portrait') {
+    const isLandscape = orientation === 'landscape';
+    const cls = isLandscape ? 'rms-a4-page rms-a4-landscape' : 'rms-a4-page';
+    return `
+      <div class="${cls}" data-report-orientation="${orientation}">
+        ${html}
+      </div>`;
+  },
+
+  getPageNumbers(count) {
+    const pages = [];
+    for (let i = 1; i <= count; i++) {
+      pages.push(`<span class="rms-page-num">${i}</span> of ${count}`);
+    }
+    return pages.join('');
+  },
+
+  getOrientation(reportType) {
+    const landscapeTypes = [
+      'exam-class-summary', 'subject-performance', 'class-performance',
+      'missing-marks', 'school-performance', 'grade-distribution',
+      'teacher-performance'
+    ];
+    return landscapeTypes.includes(reportType) ? 'landscape' : 'portrait';
   }
 };
 
