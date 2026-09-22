@@ -10,7 +10,9 @@ const ReportEngine = {
     const year = academicYear || await ReportUtils.getActiveYear();
     const activeTerm = term || await ReportUtils.getActiveTerm();
 
-    const ctx = { settings, scale, passMark, year, term: activeTerm, classId, subjectId, teacherId, assessmentId, studentId };
+    const ctx = { settings, scale, passMark, year, term: activeTerm, classId, subjectId, teacherId, assessmentId, studentId,
+      assessmentTypeId: config.assessmentTypeId, teacherComment: config.teacherComment,
+      dosComment: config.dosComment, decisionOverride: config.decisionOverride };
 
     switch (reportType) {
       case 'student-card': return this.generateStudentCard(ctx);
@@ -26,6 +28,18 @@ const ReportEngine = {
   },
 
   async generateStudentCard(ctx) {
+    // Single source of truth: delegate to the dynamic ReportStudent module.
+    if (typeof ReportStudent !== 'undefined' && ctx.studentId && ctx.classId) {
+      const yearId = ctx.year && ctx.year.id ? ctx.year.id : ctx.year;
+      const termId = ctx.term && ctx.term.id ? ctx.term.id : ctx.term;
+      return ReportStudent.fetchCardData({
+        learnerId: ctx.studentId, classId: ctx.classId, yearId, termId,
+        subjectIds: ctx.subjectId ? [ctx.subjectId] : null,
+        assessmentTypeId: ctx.assessmentTypeId || null,
+        teacherComment: ctx.teacherComment || '', dosComment: ctx.dosComment || '',
+        decisionOverride: ctx.decisionOverride || ''
+      });
+    }
     const { settings, scale, passMark, year, term, classId, studentId } = ctx;
     const learner = await DB.get('learners', { id: studentId }).then(r => r[0]);
     if (!learner) throw new Error('Student not found');

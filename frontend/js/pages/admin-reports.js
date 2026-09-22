@@ -8,6 +8,13 @@ const ReportCenter = {
     teacherId: '',
     assessmentId: '',
     studentId: '',
+    assessmentTypeId: '',
+    cardMode: 'individual',
+    cardLevel: 'all',
+    cardStream: '',
+    teacherComment: '',
+    dosComment: '',
+    decisionOverride: '',
     orientation: 'auto',
     loading: false,
     previewHtml: ''
@@ -28,6 +35,23 @@ const ReportCenter = {
 
     this.state.academicYear = activeYear.id || '';
     this.state.term = activeTerm.id || '';
+    if (!this.state.cardMode) this.state.cardMode = 'individual';
+    if (!this.state.cardLevel) this.state.cardLevel = 'all';
+    if (!this.state.cardStream) this.state.cardStream = '';
+
+    // Teacher scope: only classes from own assignments (RLS remains primary guard)
+    let visibleClasses = classes;
+    if (typeof Auth !== 'undefined' && Auth.isTeacher && Auth.isTeacher()) {
+      try {
+        const teacherId = Auth.getTeacherId();
+        const assigns = await DB.query('teacher_assignments', '*', { teacher_id: teacherId });
+        const allowed = new Set((assigns || []).map(a => String(a.class_id)));
+        visibleClasses = (classes || []).filter(c => allowed.has(String(c.id)));
+      } catch (e) { visibleClasses = []; }
+    }
+    const streams = [...new Set((visibleClasses || []).map(c => c.stream).filter(Boolean))];
+    this._allClasses = visibleClasses || [];
+    this._allSubjects = subjects || [];
 
     const reportCategories = this.getReportCategories();
 
@@ -70,11 +94,40 @@ const ReportCenter = {
                   ${terms.map(t => `<option value="${t.id}" ${t.id === this.state.term ? 'selected' : ''}>${Utils.escapeHtml(t.name)} (Term ${t.term_no || ''})</option>`).join('')}
                 </select>
               </div>
+              <div class="form-group" id="rc-level-group" style="display:none">
+                <label>Education Level</label>
+                <select id="rc-level" class="select-field" onchange="ReportCenter.onLevelChange(this.value)">
+                  <option value="all" ${this.state.cardLevel === 'all' ? 'selected' : ''}>All Levels</option>
+                  <option value="Primary" ${this.state.cardLevel === 'Primary' ? 'selected' : ''}>Primary</option>
+                  <option value="Secondary" ${this.state.cardLevel === 'Secondary' ? 'selected' : ''}>Secondary</option>
+                </select>
+              </div>
+              <div class="form-group" id="rc-stream-group" style="display:none">
+                <label>Stream</label>
+                <select id="rc-stream" class="select-field" onchange="ReportCenter.onStreamChange(this.value)">
+                  <option value="">All Streams</option>
+                  ${streams.map(s => `<option value="${Utils.escapeHtml(s)}" ${this.state.cardStream === s ? 'selected' : ''}>${Utils.escapeHtml(s)}</option>`).join('')}
+                </select>
+              </div>
               <div class="form-group" id="rc-class-group">
                 <label>Class</label>
                 <select id="rc-class" class="select-field" onchange="ReportCenter.onClassChange(this.value)">
                   <option value="">All Classes</option>
-                  ${classes.map(c => `<option value="${c.id}" ${c.id === this.state.classId ? 'selected' : ''}>${Utils.escapeHtml(c.name)}</option>`).join('')}
+                  ${visibleClasses.map(c => `<option value="${c.id}" ${c.id === this.state.classId ? 'selected' : ''}>${Utils.escapeHtml(c.name)}</option>`).join('')}
+                </select>
+              </div>
+              <div class="form-group" id="rc-mode-group" style="display:none">
+                <label>Generation Mode</label>
+                <select id="rc-mode" class="select-field" onchange="ReportCenter.state.cardMode=this.value;ReportCenter.updateFilterVisibility()">
+                  <option value="individual" ${this.state.cardMode === 'individual' ? 'selected' : ''}>Individual Student Report Card</option>
+                  <option value="class" ${this.state.cardMode === 'class' ? 'selected' : ''}>All Students in Class (Batch)</option>
+                </select>
+              </div>
+              <div class="form-group" id="rc-atype-group" style="display:none">
+                <label>Assessment Type (optional)</label>
+                <select id="rc-atype" class="select-field" onchange="ReportCenter.state.assessmentTypeId=this.value">
+                  <option value="">All Assessment Types</option>
+                  ${assessmentTypes.map(t => `<option value="${t.id}" ${this.state.assessmentTypeId === t.id ? 'selected' : ''}>${Utils.escapeHtml(t.name)}</option>`).join('')}
                 </select>
               </div>
               <div class="form-group" id="rc-subject-group" style="display:none">
@@ -114,7 +167,7 @@ const ReportCenter = {
                 <p class="text-sm text-muted mt-1" id="rc-orientation-hint"></p>
               </div>
             </div>
-            <div class="flex gap-3 mt-4" style="flex-wrap:wrap">
+            <div class="flex gap-3 mt-4" style="flex-wrap:wrap" id="rc-generic-actions">
               <button class="btn btn-primary" onclick="ReportCenter.generate()"><i data-lucide="bar-chart-3"></i> Generate Report</button>
               <button class="btn btn-secondary" onclick="ReportCenter.preview()"><i data-lucide="eye"></i> Preview</button>
               <button class="btn btn-secondary" onclick="ReportCenter.downloadPDF()"><i data-lucide="file-down"></i> Download PDF</button>
@@ -123,6 +176,26 @@ const ReportCenter = {
               <button class="btn btn-outline" onclick="ReportCenter.refresh()"><i data-lucide="refresh-cw"></i> Refresh</button>
               <button class="btn btn-outline" onclick="ReportCenter.fullscreenPreview()"><i data-lucide="maximize"></i> Full Screen Preview</button>
               <button class="btn btn-outline" onclick="ReportCenter.resetFilters()"><i data-lucide="rotate-ccw"></i> Reset Filters</button>
+            </div>
+            <div class="flex gap-3 mt-4" style="flex-wrap:wrap;display:none" id="rc-card-actions">
+              <button class="btn btn-primary" onclick="ReportCenter.generateReportCard()"><i data-lucide="file-badge"></i> Generate Report Card</button>
+              <button class="btn btn-secondary" onclick="ReportCenter.generateClassReportCards()"><i data-lucide="layers"></i> Generate All Student Report Cards</button>
+              <button class="btn btn-secondary" onclick="ReportCenter.downloadPDF()"><i data-lucide="file-down"></i> Download PDF</button>
+              <button class="btn btn-outline" onclick="ReportCenter.print()"><i data-lucide="printer"></i> Print</button>
+              <button class="btn btn-outline" onclick="ReportCenter.exportExcel()"><i data-lucide="file-spreadsheet"></i> Export Excel</button>
+              <button class="btn btn-outline" onclick="ReportCenter.fullscreenPreview()"><i data-lucide="maximize"></i> Full Screen Preview</button>
+              <button class="btn btn-outline" onclick="ReportCenter.resetFilters()"><i data-lucide="rotate-ccw"></i> Reset Filters</button>
+            </div>
+          </div>
+        </div>
+        <div class="card mb-6" id="rc-card-options" style="display:none">
+          <div class="card-header"><h3><i data-lucide="message-square-text" style="width:18px;height:18px;vertical-align:middle;margin-right:8px;color:var(--blue-600)"></i>Report Card Comments &amp; Decision</h3></div>
+          <div class="card-body">
+            <p class="text-sm text-muted" style="margin-bottom:12px">Manual comments take priority and are never overwritten. Leave blank to use the automatic performance comment.</p>
+            <div class="form-grid">
+              <div class="form-group"><label>Teacher Comment (manual override)</label><textarea id="rc-teacher-comment" class="select-field" rows="3" placeholder="Leave blank for automatic comment">${Utils.escapeHtml(this.state.teacherComment || '')}</textarea></div>
+              <div class="form-group"><label>DOS Comment (manual override)</label><textarea id="rc-dos-comment" class="select-field" rows="3" placeholder="Leave blank for automatic comment">${Utils.escapeHtml(this.state.dosComment || '')}</textarea></div>
+              <div class="form-group"><label>Final Decision (optional override)</label><input id="rc-decision" class="select-field" placeholder="Auto: PASS / FAIL" value="${Utils.escapeHtml(this.state.decisionOverride || '')}"></div>
             </div>
           </div>
         </div>
@@ -174,6 +247,54 @@ const ReportCenter = {
     hint.textContent = mode;
   },
 
+  levelMatchesClass(cls, level) {
+    if (!level || level === 'all') return true;
+    const cat = EducationLevels.getCategory(cls);
+    if (level === 'Primary') return cat === 'Primary';
+    if (level === 'Secondary') return String(cat).toUpperCase().includes('SECONDARY');
+    return true;
+  },
+
+  applyClassFilter() {
+    const sel = document.getElementById('rc-class');
+    if (!sel) return;
+    const list = (this._allClasses || []).filter(c =>
+      this.levelMatchesClass(c, this.state.cardLevel) &&
+      (!this.state.cardStream || String(c.stream || '') === String(this.state.cardStream)));
+    const cur = this.state.classId || '';
+    sel.innerHTML = '<option value="">All Classes</option>' + list.map(c =>
+      `<option value="${c.id}" ${String(c.id) === String(cur) ? 'selected' : ''}>${Utils.escapeHtml(c.name)}</option>`).join('');
+    if (cur && !list.some(c => String(c.id) === String(cur))) {
+      this.state.classId = '';
+      sel.value = '';
+    }
+    const streamSel = document.getElementById('rc-stream');
+    if (streamSel) {
+      const pool = (this._allClasses || []).filter(c => this.levelMatchesClass(c, this.state.cardLevel));
+      const opts = [...new Set(pool.map(c => c.stream).filter(Boolean))];
+      const cur = this.state.cardStream || '';
+      streamSel.innerHTML = '<option value="">All Streams</option>' + opts.map(s =>
+        `<option value="${Utils.escapeHtml(s)}" ${s === cur ? 'selected' : ''}>${Utils.escapeHtml(s)}</option>`).join('');
+    }
+  },
+
+  onLevelChange(value) {
+    this.state.cardLevel = value || 'all';
+    this.state.cardStream = '';
+    this.state.classId = '';
+    this.state.studentId = '';
+    this.applyClassFilter();
+    this.loadStudents();
+  },
+
+  onStreamChange(value) {
+    this.state.cardStream = value || '';
+    this.state.classId = '';
+    this.state.studentId = '';
+    this.applyClassFilter();
+    this.loadStudents();
+  },
+
   async onClassChange(value) {
     this.state.classId = value;
     await this.loadStudents();
@@ -202,7 +323,7 @@ const ReportCenter = {
     const type = this.state.reportType;
     const show = (id, v) => { const el = document.getElementById(id); if (el) el.style.display = v ? '' : 'none'; };
     const typeMap = {
-      'student-card': ['rc-student-group', 'rc-class-group'],
+      'student-card': ['rc-level-group', 'rc-stream-group', 'rc-class-group', 'rc-mode-group', 'rc-student-group', 'rc-subject-group', 'rc-atype-group'],
       'exam-class-summary': ['rc-class-group', 'rc-assessment-group'],
       'subject-performance': ['rc-class-group', 'rc-subject-group', 'rc-teacher-group', 'rc-assessment-group'],
       'class-performance': ['rc-class-group'],
@@ -211,11 +332,22 @@ const ReportCenter = {
       'teacher-performance': [],
       'grade-distribution': ['rc-class-group']
     };
-    const allGroups = ['rc-class-group', 'rc-subject-group', 'rc-teacher-group', 'rc-assessment-group', 'rc-student-group'];
+    const allGroups = ['rc-level-group', 'rc-stream-group', 'rc-class-group', 'rc-mode-group', 'rc-student-group', 'rc-subject-group', 'rc-atype-group', 'rc-teacher-group', 'rc-assessment-group'];
     const visible = typeMap[type] || [];
     allGroups.forEach(g => show(g, visible.includes(g)));
+    const isCard = type === 'student-card';
+    show('rc-generic-actions', !isCard);
+    show('rc-card-actions', isCard);
+    show('rc-card-options', isCard);
     // Orientation selector always visible so user can override Auto
     show('rc-orientation-group', true);
+    if (isCard) {
+      this.applyClassFilter();
+      const mode = this.state.cardMode || 'individual';
+      show('rc-student-group', mode === 'individual');
+      const subjLbl = document.querySelector('#rc-subject-group label');
+      if (subjLbl) subjLbl.textContent = 'Subject Filter (optional — default: all assigned subjects)';
+    }
     this.updateOrientationHint();
   },
 
@@ -232,7 +364,95 @@ const ReportCenter = {
     return parts.join('_') + '.pdf';
   },
 
+  readCardInputs() {
+    const t = document.getElementById('rc-teacher-comment');
+    const d = document.getElementById('rc-dos-comment');
+    const dec = document.getElementById('rc-decision');
+    if (t) this.state.teacherComment = t.value;
+    if (d) this.state.dosComment = d.value;
+    if (dec) this.state.decisionOverride = dec.value;
+  },
+
+  cardBaseConfig() {
+    return {
+      yearId: this.state.academicYear || undefined,
+      termId: this.state.term || undefined,
+      classId: this.state.classId || undefined,
+      subjectIds: this.state.subjectId ? [this.state.subjectId] : null,
+      assessmentTypeId: this.state.assessmentTypeId || undefined,
+      teacherComment: this.state.teacherComment || '',
+      dosComment: this.state.dosComment || '',
+      decisionOverride: this.state.decisionOverride || ''
+    };
+  },
+
+  cardFilenameFor(learner, cls, year, term) {
+    const safe = (v) => String(v || '').replace(/[^a-zA-Z0-9]+/g, '_').replace(/^_+|_+$/g, '').slice(0, 40) || 'Report';
+    return ['RMS-MIS', 'Student_Report_Card', safe(learner?.full_name), safe(cls?.name), safe(year?.name), safe(term?.name)].join('_') + '.pdf';
+  },
+
+  showCardsPreview({ html, orientation, filename, title, subtitle }) {
+    const previewArea = document.getElementById('rc-preview-area');
+    this.state.previewHtml = html;
+    this.state.previewOrientation = orientation;
+    this.state.previewFilename = filename;
+    const dims = orientation === 'landscape' ? '297 × 210 mm' : '210 × 297 mm';
+    previewArea.innerHTML = `
+      <div class="report-preview-toolbar-flex no-print" style="margin-bottom:12px;display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap">
+        <div><h3 style="font-size:16px;font-weight:700">A4 Preview — ${orientation === 'landscape' ? 'Landscape' : 'Portrait'} (${dims})</h3>
+        <p class="text-sm text-muted">${Utils.escapeHtml(title || '')}${subtitle ? ' — ' + Utils.escapeHtml(subtitle) : ''} — preview matches the printed / PDF document.</p></div>
+        <div class="flex gap-2" style="flex-wrap:wrap">
+          <button class="btn btn-outline btn-sm" onclick="ReportCenter.closePreview()"><i data-lucide="x"></i> Close Preview</button>
+          <button class="btn btn-outline btn-sm" onclick="ReportCenter.print()"><i data-lucide="printer"></i> Print</button>
+          <button class="btn btn-primary btn-sm" onclick="ReportCenter.downloadPDF()"><i data-lucide="file-down"></i> Download PDF</button>
+          <button class="btn btn-outline btn-sm" onclick="ReportCenter.exportExcel()"><i data-lucide="file-spreadsheet"></i> Export Excel</button>
+          <button class="btn btn-outline btn-sm" onclick="ReportCenter.fullscreenPreview()"><i data-lucide="maximize"></i> Full Screen</button>
+        </div>
+      </div>
+      <div id="rc-report-container">${html}</div>`;
+    if (typeof lucide !== 'undefined') lucide.createIcons();
+    previewArea.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  },
+
+  async generateReportCard() {
+    this.readCardInputs();
+    const previewArea = document.getElementById('rc-preview-area');
+    previewArea.innerHTML = Utils.loading();
+    try {
+      const cfg = this.cardBaseConfig();
+      if (!cfg.classId) throw new Error('Select a class.');
+      if (!this.state.studentId) throw new Error('Select a student.');
+      const card = await ReportStudent.fetchCardData({ ...cfg, learnerId: this.state.studentId });
+      const html = ReportStudent.renderCard(card);
+      this.showCardsPreview({ html, orientation: 'portrait', filename: this.cardFilenameFor(card.learner, card.cls, card.year, card.term), title: card.title, subtitle: card.learner?.full_name });
+    } catch (e) {
+      previewArea.innerHTML = Utils.errorCard('Report Card Error', e.message || 'Failed to generate report card.');
+    }
+  },
+
+  async generateClassReportCards() {
+    this.readCardInputs();
+    const previewArea = document.getElementById('rc-preview-area');
+    previewArea.innerHTML = Utils.loading();
+    try {
+      const cfg = this.cardBaseConfig();
+      if (!cfg.classId) throw new Error('Select a class.');
+      const { cards, meta } = await ReportStudent.fetchClassCards(cfg);
+      const html = ReportStudent.renderBatch(cards);
+      const safe = (v) => String(v || '').replace(/[^a-zA-Z0-9]+/g, '_').replace(/^_+|_+$/g, '').slice(0, 40);
+      const filename = ['RMS-MIS', 'Report_Cards', safe(meta.cls?.name), safe(meta.year?.name), safe(meta.term?.name)].join('_') + '.pdf';
+      this.showCardsPreview({ html, orientation: 'portrait', filename, title: 'STUDENT REPORT CARDS', subtitle: `${meta.cls?.name || ''} — ${cards.length} learner${cards.length === 1 ? '' : 's'}` });
+      Utils.toast(`Generated ${cards.length} report card${cards.length === 1 ? '' : 's'}`, 'success');
+    } catch (e) {
+      previewArea.innerHTML = Utils.errorCard('Report Card Error', e.message || 'Failed to generate report cards.');
+    }
+  },
+
   async generate() {
+    if (this.state.reportType === 'student-card') {
+      if ((this.state.cardMode || 'individual') === 'class') return this.generateClassReportCards();
+      return this.generateReportCard();
+    }
     this.state.loading = true;
     const previewArea = document.getElementById('rc-preview-area');
     if (!previewArea) return;
@@ -358,7 +578,7 @@ const ReportCenter = {
   },
 
   resetFilters() {
-    this.state = { reportType: 'student-card', academicYear: this.state.academicYear, term: this.state.term, classId: '', subjectId: '', teacherId: '', assessmentId: '', studentId: '', orientation: 'auto', loading: false, previewHtml: '', previewOrientation: '', previewFilename: '' };
+    this.state = { reportType: 'student-card', academicYear: this.state.academicYear, term: this.state.term, classId: '', subjectId: '', teacherId: '', assessmentId: '', assessmentTypeId: '', studentId: '', cardMode: 'individual', cardLevel: 'all', cardStream: '', teacherComment: '', dosComment: '', decisionOverride: '', orientation: 'auto', loading: false, previewHtml: '', previewOrientation: '', previewFilename: '' };
     this.render();
   }
 };

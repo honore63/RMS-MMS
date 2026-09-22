@@ -2902,3 +2902,11 @@ body.report-orientation-portrait .report-paper-container {
 .form-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
 @media (max-width: 640px) { .form-grid { grid-template-columns: 1fr; } }
 
+/* ---------- Student report-card safeguards (A4 portrait) ---------- */
+.rms-table td, .rms-table th { word-wrap: break-word; overflow-wrap: break-word; }
+.rms-abbr { display: inline-block; margin: 2px 8px 2px 0; font-size: 11px; white-space: normal; }
+@media print {
+  .rms-table td, .rms-table th { word-wrap: break-word; overflow-wrap: break-word; }
+  .rms-abbr { font-size: 9px; }
+}
+
