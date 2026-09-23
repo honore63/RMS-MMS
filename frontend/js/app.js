@@ -356,18 +356,18 @@ async function showApp() {
   const role = Auth.getRole();
   Sidebar.render(role);
   Sidebar.init();
-  const list = await ensureHeaderYears();
-  const sel = document.getElementById('global-year-select');
-  if (sel) {
-    sel.innerHTML = list.map(y => `<option value="${y.id}">${Utils.escapeHtml(y.name)} ${y.status === 'active' ? '(System)' : ''}</option>`).join('');
-    sel.value = getActiveYearId(list) || '';
-    const lbl = document.getElementById('acad-year-label');
-    if (lbl) lbl.style.display = 'inline';
-  }
   registerRoutes();
   Router.init();
   if (typeof Realtime !== 'undefined') Realtime.init();
   if (typeof refreshNotificationBadge === 'function') refreshNotificationBadge();
+  ensureHeaderYears().then(list => {
+    const sel = document.getElementById('global-year-select');
+    if (!sel) return;
+    sel.innerHTML = list.map(y => `<option value="${y.id}">${Utils.escapeHtml(y.name)} ${y.status === 'active' ? '(System)' : ''}</option>`).join('');
+    sel.value = getActiveYearId(list) || '';
+    const lbl = document.getElementById('acad-year-label');
+    if (lbl) lbl.style.display = 'inline';
+  });
   if (!window.location.hash || window.location.hash === '#') {
     if (role === 'dos') Router.go('admin/dashboard');
     else if (role === 'teacher') Router.go('teacher/dashboard');

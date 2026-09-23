@@ -443,13 +443,14 @@ async function classSave() {
 async function classEdit(c) {
   const years = await DB.get('academic_years');
   const cat   = c.education_level || EducationLevels.getCategory(c);
+  const scopedCats = (typeof Scope !== 'undefined' && Scope.isScoped()) ? Scope.categories() : null;
 
   Modal.show('✏️ Edit Class Details', `
     <div class="form-group">
       <label><i data-lucide="layers" style="width:13px;height:13px;margin-right:4px"></i>Education Level <span class="required">*</span></label>
       <select id="ce-category" class="select-field">
         ${scopedCats
-          ? scopedCats.map(cat => `<option value="${cat}" ${cat===cat?'selected':''}>${cat==='Primary'?'📗':'📘'} ${cat}</option>`).join('')
+          ? scopedCats.map(category => `<option value="${category}" ${category===cat?'selected':''}>${category==='Primary'?'📗':'📘'} ${category}</option>`).join('')
           : `<option value="Primary" ${cat==='Primary'?'selected':''}>Primary (P1 - P6)</option>
              <option value="Lower Secondary" ${cat==='Lower Secondary'?'selected':''}>Lower Secondary (S1 - S3)</option>
              <option value="Upper Secondary" ${cat==='Upper Secondary'?'selected':''}>Upper Secondary (S4 - S6)</option>`}

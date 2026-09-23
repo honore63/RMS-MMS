@@ -9,12 +9,16 @@ const ReportEngine = {
 
   async generate(config) {
     const { reportType, academicYear, term, classId, subjectId, subjectIds, teacherId, assessmentId, studentId } = config;
-    const settings = await ReportUtils.getSettings();
-    const scale = await ReportUtils.getScale();
+    const [settings, scale] = await Promise.all([
+      ReportUtils.getSettings(),
+      ReportUtils.getScale()
+    ]);
     const passMark = settings.pass_mark || 50;
 
-    const year = academicYear || await ReportUtils.getActiveYear();
-    const activeTerm = term || await ReportUtils.getActiveTerm();
+    const [year, activeTerm] = await Promise.all([
+      academicYear ? ReportUtils.getYear(academicYear) : ReportUtils.getActiveYear(),
+      term ? ReportUtils.getTerm(term) : ReportUtils.getActiveTerm()
+    ]);
 
     const ctx = { settings, scale, passMark, year, term: activeTerm, classId, subjectId, subjectIds, teacherId, assessmentId, studentId,
       assessmentTypeId: config.assessmentTypeId, teacherComment: config.teacherComment,
@@ -119,8 +123,13 @@ const ReportEngine = {
     if (!assess) throw new Error('No assessment found');
 
     const assessIds = assessments.map(a => a.id);
-    const allMarks = await DB.query('marks', '*', { assessment_id: assessIds, mark: null }, { column: 'learner_id' });
-    const allMarksWithValue = await DB.query('marks', '*', { assessment_id: assessIds, mark: null }, { column: 'learner_id' });
+    const allMarks = await DB.query('marks', '*', { assessment_id: assessIds }, { column: 'learner_id' });
+    const marksByLearner = new Map();
+    allMarks.forEach(mark => {
+      const key = String(mark.learner_id);
+      if (!marksByLearner.has(key)) marksByLearner.set(key, []);
+      marksByLearner.get(key).push(mark);
+    });
 
     const totalLearners = learners.length;
     let assessedCount = 0;
@@ -128,7 +137,7 @@ const ReportEngine = {
     const learnerRows = [];
 
     for (const learner of learners) {
-      const marks = await DB.query('marks', '*', { learner_id: learner.id, assessment_id: assessIds });
+      const marks = marksByLearner.get(String(learner.id)) || [];
       const validMarks = marks.filter(m => m.mark != null);
       if (validMarks.length) {
         assessedCount++;
@@ -156,21 +165,34 @@ const ReportEngine = {
   },
 
   async generateSubjectPerformance(ctx) {
-    const { settings, scale, passMark, year, term, classId, subjectId, teacherId } = ctx;
+    const { settings, scale, passMark, year, term, classId, subjectId, subjectIds, teacherId } = ctx;
     const cls = await DB.get('classes', { id: classId }).then(r => r[0]);
     assertClassScope(cls);
-    const subject = await DB.get('subjects', { id: subjectId }).then(r => r[0]);
+    const selectedSubjectIds = (subjectIds && subjectIds.length) ? subjectIds : (subjectId ? [subjectId] : []);
+    const selectedSubjects = selectedSubjectIds.length
+      ? await DB.query('subjects', '*', { id: selectedSubjectIds })
+      : [];
+    const subject = selectedSubjects.length === 1
+      ? selectedSubjects[0]
+      : { name: selectedSubjects.map(item => item.name).join(', ') || 'Selected Subjects' };
     const learners = await ReportUtils.getLearners(classId);
 
-    const filter = { class_id: classId, academic_year_id: year.id || undefined, subject_id: subjectId, status: ['approved', 'locked'] };
+    const filter = { class_id: classId, academic_year_id: year.id || undefined, subject_id: selectedSubjectIds, status: ['approved', 'locked'] };
     if (teacherId) filter.teacher_id = teacherId;
     const assessments = await DB.query('assessments', '*', filter, { column: 'assessment_date', asc: false });
     const assessIds = assessments.map(a => a.id);
 
+    const allMarks = await DB.query('marks', '*', { assessment_id: assessIds }, { column: 'learner_id' });
+    const marksByLearner = new Map();
+    allMarks.forEach(mark => {
+      const key = String(mark.learner_id);
+      if (!marksByLearner.has(key)) marksByLearner.set(key, []);
+      marksByLearner.get(key).push(mark);
+    });
     const learnerRows = [];
     const pcts = [];
     for (const learner of learners) {
-      const marks = await DB.query('marks', '*', { learner_id: learner.id, assessment_id: assessIds });
+      const marks = marksByLearner.get(String(learner.id)) || [];
       const validMarks = marks.filter(m => m.mark != null);
       if (validMarks.length) {
         const totalObtained = validMarks.reduce((s, m) => s + Number(m.mark), 0);
@@ -201,10 +223,19 @@ const ReportEngine = {
     const cls = await DB.get('classes', { id: classId }).then(r => r[0]);
     assertClassScope(cls);
     const learners = await ReportUtils.getLearners(classId);
+    const assessments = await DB.query('assessments', '*', { class_id: classId, academic_year_id: year.id || undefined, term_id: term.id || undefined, status: ['approved', 'locked'] }, { column: 'assessment_date', asc: false });
+    const assessIds = assessments.map(a => a.id);
+    const allMarks = assessIds.length ? await DB.query('marks', '*', { assessment_id: assessIds }, { column: 'learner_id' }) : [];
+    const marksByLearner = new Map();
+    allMarks.forEach(mark => {
+      const key = String(mark.learner_id);
+      if (!marksByLearner.has(key)) marksByLearner.set(key, []);
+      marksByLearner.get(key).push(mark);
+    });
     const learnerStats = [];
 
     for (const learner of learners) {
-      const marks = await DB.query('marks', '*', { learner_id: learner.id, academic_year_id: year.id || undefined, term_id: term.id || undefined });
+      const marks = marksByLearner.get(String(learner.id)) || [];
       const validMarks = marks.filter(m => m.mark != null);
       if (validMarks.length) {
         const totalObtained = validMarks.reduce((s, m) => s + Number(m.mark), 0);
@@ -266,14 +297,28 @@ const ReportEngine = {
 
   async generateSchoolPerformance(ctx) {
     const { settings, scale, passMark, year, term } = ctx;
-    const classes = await DB.get('classes');
+    const classFilters = typeof Scope !== 'undefined' && Scope.isScoped()
+      ? { education_level: Scope.categories() }
+      : {};
+    const classes = await DB.get('classes', classFilters);
+    const learners = await DB.query('learners', '*', { class_id: classes.map(cls => cls.id), status: 'active' });
+    const allMarks = await ReportUtils.getMarksForLearners(learners.map(learner => learner.id), {
+      academic_year_id: year.id || undefined,
+      term_id: term.id || undefined
+    });
+    const marksByLearner = new Map();
+    allMarks.forEach(mark => {
+      const key = String(mark.learner_id);
+      if (!marksByLearner.has(key)) marksByLearner.set(key, []);
+      marksByLearner.get(key).push(mark);
+    });
     const classReports = [];
 
     for (const cls of classes) {
-      const learners = await ReportUtils.getLearners(cls.id);
+      const classLearners = learners.filter(learner => String(learner.class_id) === String(cls.id));
       const allPcts = [];
-      for (const learner of learners) {
-        const marks = await DB.query('marks', '*', { learner_id: learner.id, academic_year_id: year.id || undefined, term_id: term.id || undefined });
+      for (const learner of classLearners) {
+        const marks = marksByLearner.get(String(learner.id)) || [];
         const validMarks = marks.filter(m => m.mark != null);
         if (validMarks.length) {
           const totalObtained = validMarks.reduce((s, m) => s + Number(m.mark), 0);
@@ -282,7 +327,7 @@ const ReportEngine = {
         }
       }
       const stats = await ReportUtils.computeStats(allPcts, passMark);
-      classReports.push({ class: cls.name, learners: learners.length, stats });
+      classReports.push({ class: cls.name, learners: classLearners.length, stats });
     }
 
     const totalLearners = classReports.reduce((s, c) => s + c.learners, 0);
@@ -306,11 +351,21 @@ const ReportEngine = {
     const approvedAssessments = assessments.filter(a => ['approved', 'locked'].includes(a.status));
     const submittedAssessments = assessments.filter(a => a.status === 'submitted');
 
+    const learners = await DB.query('learners', '*', { class_id: classIds, status: 'active' });
+    const allMarks = await ReportUtils.getMarksForLearners(learners.map(learner => learner.id), {
+      academic_year_id: year.id || undefined
+    });
+    const marksByLearner = new Map();
+    allMarks.forEach(mark => {
+      const key = String(mark.learner_id);
+      if (!marksByLearner.has(key)) marksByLearner.set(key, []);
+      marksByLearner.get(key).push(mark);
+    });
     const learnerStats = [];
     for (const classId of classIds) {
-      const learners = await ReportUtils.getLearners(classId);
-      for (const learner of learners) {
-        const marks = await DB.query('marks', '*', { learner_id: learner.id, academic_year_id: year.id || undefined });
+      const classLearners = learners.filter(learner => String(learner.class_id) === String(classId));
+      for (const learner of classLearners) {
+        const marks = marksByLearner.get(String(learner.id)) || [];
         const validMarks = marks.filter(m => m.mark != null);
         if (validMarks.length) {
           const totalObtained = validMarks.reduce((s, m) => s + Number(m.mark), 0);
@@ -327,14 +382,25 @@ const ReportEngine = {
 
   async generateGradeDistribution(ctx) {
     const { settings, scale, passMark, year, term, classId } = ctx;
-    const classes = classId ? await DB.get('classes', { id: classId }).then(r => r[0] ? [r[0]] : []) : await DB.get('classes');
+    const classes = classId ? await DB.get('classes', { id: classId }).then(r => r[0] ? [r[0]] : []) : await DB.get('classes', typeof Scope !== 'undefined' && Scope.isScoped() ? { education_level: Scope.categories() } : {});
+    const learners = await DB.query('learners', '*', { class_id: classes.map(cls => cls.id), status: 'active' });
+    const allMarks = await ReportUtils.getMarksForLearners(learners.map(learner => learner.id), {
+      academic_year_id: year.id || undefined,
+      term_id: term.id || undefined
+    });
+    const marksByLearner = new Map();
+    allMarks.forEach(mark => {
+      const key = String(mark.learner_id);
+      if (!marksByLearner.has(key)) marksByLearner.set(key, []);
+      marksByLearner.get(key).push(mark);
+    });
     const gradeData = [];
     const allPcts = [];
 
     for (const cls of classes) {
-      const learners = await ReportUtils.getLearners(cls.id);
-      for (const learner of learners) {
-        const marks = await DB.query('marks', '*', { learner_id: learner.id, academic_year_id: year.id || undefined, term_id: term.id || undefined });
+      const classLearners = learners.filter(learner => String(learner.class_id) === String(cls.id));
+      for (const learner of classLearners) {
+        const marks = marksByLearner.get(String(learner.id)) || [];
         const validMarks = marks.filter(m => m.mark != null);
         if (validMarks.length) {
           const totalObtained = validMarks.reduce((s, m) => s + Number(m.mark), 0);

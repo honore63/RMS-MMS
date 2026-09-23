@@ -97,12 +97,22 @@ async function renderTeachers() {
   setHeader('Teachers', 'View and manage teacher profiles for the authorized education level');
   setContent(Utils.loading());
 
-  const [teachers, assignments, classes, subjects] = await Promise.all([
-    DB.query('teachers', '*', {}, { column: 'full_name' }),
-    DB.query('teacher_assignments', '*'),
-    DB.get('classes'),
-    DB.get('subjects')
-  ]);
+  let teachers;
+  let assignments;
+  let classes;
+  let subjects;
+  try {
+    [teachers, assignments, classes, subjects] = await Promise.all([
+      DB.query('teachers', '*', {}, { column: 'full_name' }),
+      DB.query('teacher_assignments', '*'),
+      DB.get('classes'),
+      DB.get('subjects')
+    ]);
+  } catch (e) {
+    console.error('TEACHER LIST ERROR:', e);
+    setContent(`<div class="alert alert-danger"><strong>Teachers could not be loaded.</strong><br>${Utils.escapeHtml(e.message || 'Database request failed')}</div>`);
+    return;
+  }
 
   const classMap = new Map((classes || []).map(c => [String(c.id), c]));
   const subjectMap = new Map((subjects || []).map(s => [String(s.id), s]));
@@ -126,11 +136,9 @@ async function renderTeachers() {
     }
   });
 
-  const allowedTeachers = (teachers || []).filter(t => {
-    const meta = teacherMeta.get(String(t.id));
-    if (!meta) return false;
-    return (meta.classNames?.size || 0) > 0 || (meta.subjectNames?.size || 0) > 0;
-  });
+  // RLS determines which teacher records the DOS may read. Keep unassigned
+  // teachers visible so a newly registered teacher can be assigned next.
+  const allowedTeachers = teachers || [];
 
   const filtered = allowedTeachers.filter(t => {
     const meta = teacherMeta.get(String(t.id)) || { classNames: new Set(), subjectNames: new Set(), levels: new Set() };
@@ -373,9 +381,9 @@ function teacherForm() {
     <div class="form-group"><label>Teacher Code (11 Digits) <span class="required">*</span></label><input id="tf-code" class="input-field" placeholder="e.g., 54102325012" maxlength="11"></div>
     <div class="form-group"><label>Full Name <span class="required">*</span></label><input id="tf-name" class="input-field" placeholder="e.g., John Doe"></div>
     <div class="form-group"><label>Email <span class="required">*</span></label><input id="tf-email" class="input-field" placeholder="e.g., john@rukara.edu"></div>
-    <div class="form-group"><label>Password</label><input id="tf-pass" class="input-field" value="teacher123"></div>
+    <div class="form-group"><label>Password <span class="required">*</span></label><input id="tf-pass" class="input-field" type="password" placeholder="At least 8 characters" autocomplete="new-password"></div>
     <div class="form-group"><label>Phone</label><input id="tf-phone" class="input-field" placeholder="e.g., +250788123456"></div>
-    <div class="alert alert-info" style="margin-bottom:0"><i data-lucide="info"></i> The teacher's education level is determined by the classes they are assigned to (see Assignments).</div>`,
+    <div class="alert alert-info" style="margin-bottom:0"><i data-lucide="info"></i> After registration, open Assignments to link this teacher to authorized classes and subjects.</div>`,
     `<button class="btn btn-secondary" data-modal-close="true">Cancel</button>
      <button class="btn btn-primary" id="teacher-save-btn"><i data-lucide="save"></i> Save</button>`);
 
@@ -390,17 +398,37 @@ async function teacherSave() {
   const pass = document.getElementById('tf-pass')?.value;
   const phone = document.getElementById('tf-phone')?.value?.trim();
 
-  if (!code || !name || !email) return Utils.toast('Fill all required fields', 'error');
+  if (!code || !name || !email || !pass) return Utils.toast('Fill all required fields', 'error');
   if (!/^\d{11}$/.test(code)) return Utils.toast('Teacher code must be exactly 11 digits', 'error');
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return Utils.toast('Enter a valid teacher email address', 'error');
+  if (pass.length < 8) return Utils.toast('Password must be at least 8 characters', 'error');
 
   try {
-    const { data: authData, error } = await sbClient.auth.signUp({ email, password: pass || 'teacher123' });
+    const { data: currentSessionData } = await sbClient.auth.getSession();
+    const adminSession = currentSessionData?.session || null;
+    const [{ data: existingCode }, { data: existingEmail }] = await Promise.all([
+      sbClient.from('teachers').select('id').eq('teacher_code', code).maybeSingle(),
+      sbClient.from('users').select('id').eq('email', email).maybeSingle()
+    ]);
+    if (existingCode) return Utils.toast('That teacher code is already registered', 'error');
+    if (existingEmail) return Utils.toast('That email address is already registered', 'error');
+
+    const { data: authData, error } = await sbClient.auth.signUp({ email, password: pass });
     if (error) throw error;
+    if (!authData?.user?.id) throw new Error('Teacher account could not be created');
+
+    if (adminSession && authData.session?.user?.id === authData.user.id) {
+      const { error: restoreError } = await sbClient.auth.setSession({
+        access_token: adminSession.access_token,
+        refresh_token: adminSession.refresh_token
+      });
+      if (restoreError) throw restoreError;
+    }
     await DB.insert('users', { id: authData.user.id, email, full_name: name, role: 'teacher', status: 'active', phone });
     await DB.insert('teachers', { user_id: authData.user.id, teacher_code: code, full_name: name, email, phone, status: 'active' });
     Modal.close();
     Utils.toast('Teacher created', 'success');
-    renderTeachers();
+    await renderTeachers();
   } catch (e) { Utils.toast('Error: ' + e.message, 'error'); }
 }
 

@@ -72,22 +72,25 @@ async function buildAssignmentModal(title, preSelectedTeacher = null, preSelecte
     DB.query('subjects', '*', { status: 'active' }),
     DB.get('academic_years')
   ]);
+  const scopedClasses = typeof Scope !== 'undefined' && Scope.isScoped() ? Scope.filterClasses(classes) : classes;
+  const scopedSubjects = typeof Scope !== 'undefined' && Scope.isScoped() ? Scope.filterSubjects(subjects) : subjects;
 
   const teacherOpts = teachers.map(t => `<option value="${t.id}" ${preSelectedTeacher === t.id ? 'selected' : ''}>${t.full_name} (${t.teacher_code})</option>`).join('');
   const defYear = preSelectedYear || (typeof getActiveYearId === 'function' ? getActiveYearId(years) : null) || '';
   const yearOpts = years.map(y => `<option value="${y.id}" ${defYear === y.id ? 'selected' : ''}>${y.name}</option>`).join('');
 
-  const classCheckboxes = classes.map(c => `
+  const classCheckboxes = (scopedClasses || []).map(c => `
     <label style="display:flex;align-items:center;gap:8px;padding:4px">
       <input type="checkbox" name="af-class" value="${c.id}" ${selectedClasses.has(c.id) ? 'checked' : ''}> ${Utils.escapeHtml(c.name)}
     </label>`).join('');
 
-  const subjectCheckboxes = subjects.map(s => `
+  const subjectCheckboxes = (scopedSubjects || []).map(s => `
     <label style="display:flex;align-items:center;gap:8px;padding:4px">
       <input type="checkbox" name="af-subject" value="${s.id}" ${selectedSubjects.has(s.id) ? 'checked' : ''}> ${Utils.escapeHtml(s.name)}
     </label>`).join('');
 
   return `
+    ${typeof Scope !== 'undefined' && Scope.isScoped() ? `<div class="alert alert-info" style="margin-bottom:14px"><i data-lucide="shield-check"></i> Showing only ${Utils.escapeHtml(Scope.label())} classes and subjects authorized for this DOS.</div>` : ''}
     <div class="form-row">
       <div class="form-group"><label>Teacher <span class="required">*</span></label>
         <select id="af-teacher" class="select-field" ${preSelectedTeacher ? 'disabled' : ''}><option value="">Select</option>${teacherOpts}</select>
@@ -151,10 +154,20 @@ async function assignSaveMultiple(btn) {
   });
 
   try {
-    const { error } = await sbClient.from('teacher_assignments').insert(payLoad);
+    const existing = await DB.query('teacher_assignments', 'teacher_id,class_id,subject_id,academic_year_id', {
+      teacher_id,
+      academic_year_id: year_id
+    });
+    const existingKeys = new Set((existing || []).map(a => `${a.teacher_id}|${a.class_id}|${a.subject_id}|${a.academic_year_id}`));
+    const newPayload = payLoad.filter(a => !existingKeys.has(`${a.teacher_id}|${a.class_id}|${a.subject_id}|${a.academic_year_id}`));
+    if (!newPayload.length) {
+      if (btn) { btn.disabled = false; btn.innerHTML = '<i data-lucide="check"></i> Create Assignments'; }
+      return Utils.toast('All selected assignments already exist', 'info');
+    }
+    const { error } = await sbClient.from('teacher_assignments').insert(newPayload);
     if (error) throw error;
     Modal.close();
-    Utils.toast(`Created ${payLoad.length} assignment(s)`, 'success');
+    Utils.toast(`Created ${newPayload.length} assignment(s)`, 'success');
     renderAssignments();
   } catch (e) {
     if (btn) { btn.disabled = false; btn.innerHTML = '<i data-lucide="check"></i> Create Assignments'; }
@@ -179,17 +192,25 @@ async function assignUpdateMultiple(teacherId, yearId, btn) {
   });
 
   try {
-    // Drop existing assignments for this exact combination
-    let q = sbClient.from('teacher_assignments').delete().eq('teacher_id', teacherId);
-    if (yearId !== 'null') q = q.eq('academic_year_id', yearId);
-    else q = q.is('academic_year_id', null);
-    
-    const { error: dropErr } = await q;
-    if (dropErr) throw dropErr;
+    let existingQuery = sbClient.from('teacher_assignments').select('id,teacher_id,class_id,subject_id,academic_year_id').eq('teacher_id', teacherId);
+    if (yearId !== 'null') existingQuery = existingQuery.eq('academic_year_id', yearId);
+    else existingQuery = existingQuery.is('academic_year_id', null);
+    const { data: existing, error: existingErr } = await existingQuery;
+    if (existingErr) throw existingErr;
 
-    // Apply new payload
-    const { error: insErr } = await sbClient.from('teacher_assignments').insert(payLoad);
-    if (insErr) throw insErr;
+    const desiredKeys = new Set(payLoad.map(a => `${a.teacher_id}|${a.class_id}|${a.subject_id}|${a.academic_year_id}`));
+    const currentKeys = new Set((existing || []).map(a => `${a.teacher_id}|${a.class_id}|${a.subject_id}|${a.academic_year_id}`));
+    const removeIds = (existing || []).filter(a => !desiredKeys.has(`${a.teacher_id}|${a.class_id}|${a.subject_id}|${a.academic_year_id}`)).map(a => a.id);
+    const newPayload = payLoad.filter(a => !currentKeys.has(`${a.teacher_id}|${a.class_id}|${a.subject_id}|${a.academic_year_id}`));
+
+    if (removeIds.length) {
+      const { error: dropErr } = await sbClient.from('teacher_assignments').delete().in('id', removeIds);
+      if (dropErr) throw dropErr;
+    }
+    if (newPayload.length) {
+      const { error: insErr } = await sbClient.from('teacher_assignments').insert(newPayload);
+      if (insErr) throw insErr;
+    }
 
     Modal.close();
     Utils.toast(`Synced to ${payLoad.length} assignment(s)`, 'success');

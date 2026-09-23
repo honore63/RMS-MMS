@@ -1,15 +1,27 @@
 const ReportUtils = {
+  _cache: new Map(),
+
+  invalidate(key) {
+    if (key) this._cache.delete(key);
+    else this._cache.clear();
+  },
+
   async getSettings() {
+    if (this._cache.has('settings')) return this._cache.get('settings');
     try {
-      const res = await DB.query('school_settings', '*');
-      return res[0] || {};
+      const value = (await DB.query('school_settings', '*'))[0] || {};
+      this._cache.set('settings', value);
+      return value;
     } catch (e) {
       return {};
     }
   },
 
   async getScale() {
-    return typeof getGrading === 'function' ? getGrading() : await Utils.getGradingScale();
+    if (this._cache.has('scale')) return this._cache.get('scale');
+    const value = typeof getGrading === 'function' ? await getGrading() : await Utils.getGradingScale();
+    this._cache.set('scale', value || []);
+    return value || [];
   },
 
   calcPct(mark, max) {
@@ -87,20 +99,56 @@ const ReportUtils = {
   },
 
   async getActiveYear() {
+    if (this._cache.has('activeYear')) return this._cache.get('activeYear');
     const years = await DB.get('academic_years');
-    return years.find(y => y.status === 'active') || years[0] || {};
+    const value = years.find(y => y.status === 'active') || years[0] || {};
+    this._cache.set('activeYear', value);
+    return value;
   },
 
   async getActiveTerm() {
+    if (this._cache.has('activeTerm')) return this._cache.get('activeTerm');
     const terms = await DB.get('terms');
-    return terms.find(t => t.status === 'active' || t.is_current) || terms[0] || {};
+    const value = terms.find(t => t.status === 'active' || t.is_current) || terms[0] || {};
+    this._cache.set('activeTerm', value);
+    return value;
+  },
+
+  async getYear(id) {
+    if (!id || typeof id === 'object') return id || {};
+    const key = `year:${id}`;
+    if (this._cache.has(key)) return this._cache.get(key);
+    const value = (await DB.get('academic_years', { id }))[0] || {};
+    this._cache.set(key, value);
+    return value;
+  },
+
+  async getTerm(id) {
+    if (!id || typeof id === 'object') return id || {};
+    const key = `term:${id}`;
+    if (this._cache.has(key)) return this._cache.get(key);
+    const value = (await DB.get('terms', { id }))[0] || {};
+    this._cache.set(key, value);
+    return value;
   },
 
   async getClasses(filter = {}) {
+    if (!Object.keys(filter || {}).length && this._cache.has('classes')) return this._cache.get('classes');
+    if (!Object.keys(filter || {}).length) {
+      const value = await DB.query('classes', '*', {}, { column: 'name', asc: true });
+      this._cache.set('classes', value);
+      return value;
+    }
     return DB.query('classes', '*', filter || {}, { column: 'name', asc: true });
   },
 
   async getSubjects(filter = {}) {
+    if (!Object.keys(filter || {}).length && this._cache.has('subjects')) return this._cache.get('subjects');
+    if (!Object.keys(filter || {}).length) {
+      const value = await DB.query('subjects', '*', {}, { column: 'name', asc: true });
+      this._cache.set('subjects', value);
+      return value;
+    }
     return DB.query('subjects', '*', filter || {}, { column: 'name', asc: true });
   },
 
@@ -115,14 +163,18 @@ const ReportUtils = {
   /** Subjects officially assigned to a class (empty array = not configured). */
   async getClassSubjects(classId) {
     if (!classId) return [];
+    const cacheKey = `classSubjects:${classId}`;
+    if (this._cache.has(cacheKey)) return this._cache.get(cacheKey);
     try {
       const { data, error } = await sbClient
         .from('class_subjects')
         .select('subject_id, subjects(*)')
         .eq('class_id', classId);
       if (error) throw error;
-      return (data || []).map(r => r.subjects).filter(Boolean)
+      const value = (data || []).map(r => r.subjects).filter(Boolean)
         .sort((a, b) => String(a.name).localeCompare(String(b.name)));
+      this._cache.set(cacheKey, value);
+      return value;
     } catch (e) {
       return [];
     }
@@ -133,8 +185,10 @@ const ReportUtils = {
   },
 
   async getAssessmentTypes() {
+    if (this._cache.has('assessmentTypes')) return this._cache.get('assessmentTypes');
     try {
       const res = await DB.query('assessment_types', '*', {}, { column: 'name', asc: true });
+      this._cache.set('assessmentTypes', res || []);
       return res || [];
     } catch (e) {
       return [];
@@ -144,6 +198,12 @@ const ReportUtils = {
   async getLearners(classId, activeOnly = true) {
     const filter = activeOnly ? { class_id: classId, status: 'active' } : { class_id: classId };
     return DB.query('learners', '*', filter, { column: 'full_name', asc: true });
+  },
+
+  async getMarksForLearners(learnerIds, filters = {}) {
+    const ids = (learnerIds || []).filter(Boolean);
+    if (!ids.length) return [];
+    return DB.query('marks', '*', { ...filters, learner_id: ids });
   },
 
   formatPct(v) {

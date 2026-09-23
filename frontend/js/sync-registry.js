@@ -54,11 +54,28 @@ Realtime.route('teacher/analytics', ['assessments', 'assessment_types', 'marks',
 
   /* School settings / grading scale changes invalidate report caches
      so reports always regenerate from fresh Supabase data. */
-  Realtime.on('school_settings', () => { schoolSettingsCache = null; });
-  Realtime.on('grading_scales', () => { gradingScaleCache = null; });
+  Realtime.on('school_settings', () => {
+    if (typeof ReportUtils !== 'undefined') ReportUtils.invalidate('settings');
+  });
+  Realtime.on('grading_scales', () => {
+    if (typeof ReportUtils !== 'undefined') ReportUtils.invalidate('scale');
+  });
 
   /* Assessment type changes invalidate the shared types cache. */
-  Realtime.on('assessment_types', () => { if (typeof assessmentTypesCache !== 'undefined') assessmentTypesCache = null; });
+  Realtime.on('assessment_types', () => {
+    if (typeof ReportUtils !== 'undefined') ReportUtils.invalidate('assessmentTypes');
+  });
+  Realtime.on('classes', () => {
+    if (typeof ReportUtils !== 'undefined') ReportUtils.invalidate('classes');
+  });
+  Realtime.on('subjects', () => {
+    if (typeof ReportUtils !== 'undefined') {
+      ReportUtils.invalidate('subjects');
+      ReportUtils._cache.forEach((value, key) => {
+        if (String(key).startsWith('classSubjects:')) ReportUtils.invalidate(key);
+      });
+    }
+  });
 
   /* While inside the marks entry screen, if the open assessment's
      status changes from another user/device (submitted -> approved,

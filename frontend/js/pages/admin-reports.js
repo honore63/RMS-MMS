@@ -24,14 +24,24 @@ const ReportCenter = {
     setHeader('Report Center', 'Professional Academic Reporting System');
     setContent(Utils.loading());
 
+    const needsAssessments = ['exam-class-summary', 'subject-performance', 'missing-marks'].includes(this.state.reportType);
+    const needsTeachers = ['subject-performance', 'teacher-performance'].includes(this.state.reportType);
+    const classFilters = typeof Scope !== 'undefined' && Scope.isScoped()
+      ? { education_level: Scope.categories() }
+      : {};
     const [years, terms, classes, subjects, teachers, assessments, assessmentTypes] = await Promise.all([
-      DB.get('academic_years'), DB.get('terms'), DB.get('classes'),
-      DB.get('subjects'), DB.get('teachers'), DB.get('assessments'),
-      ReportUtils.getAssessmentTypes()
+      DB.get('academic_years'),
+      DB.get('terms'),
+      DB.get('classes', classFilters),
+      DB.get('subjects'),
+      needsTeachers ? DB.get('teachers', { status: 'active' }) : Promise.resolve([]),
+      needsAssessments ? DB.get('assessments', { status: ['approved', 'locked', 'submitted'] }) : Promise.resolve([]),
+      needsAssessments ? ReportUtils.getAssessmentTypes() : Promise.resolve([])
     ]);
 
     const activeYear = years.find(y => y.status === 'active') || years[0] || {};
     const activeTerm = terms.find(t => t.status === 'active') || terms[0] || {};
+    let reportSubjects = subjects || [];
 
     this.state.academicYear = activeYear.id || '';
     this.state.term = activeTerm.id || '';
@@ -53,17 +63,36 @@ const ReportCenter = {
     const scopedDos = (typeof Scope !== 'undefined' && Scope.isScoped());
     if (scopedDos) {
       visibleClasses = (visibleClasses || []).filter(c => Scope.matchesClass(c));
-      subjects = Scope.filterSubjects(subjects);
+      reportSubjects = Scope.filterSubjects(reportSubjects);
       this.state.cardLevel = Scope.isPrimary() ? 'Primary' : 'Secondary';
     }
     const streams = [...new Set((visibleClasses || []).map(c => c.stream).filter(Boolean))];
     this._allClasses = visibleClasses || [];
-    this._allSubjects = subjects || [];
+    this._allSubjects = reportSubjects;
 
     const reportCategories = this.getReportCategories();
 
     setContent(`
+      <style>
+        .report-workflow { display:grid; grid-template-columns:repeat(7,minmax(88px,1fr)); gap:8px; margin-bottom:18px; }
+        .report-workflow-step { border:1px solid var(--gray-200); background:var(--gray-50); border-radius:10px; padding:10px 8px; text-align:center; color:var(--gray-500); font-size:11px; font-weight:600; }
+        .report-workflow-step strong { display:block; font-size:15px; color:var(--gray-400); margin-bottom:2px; }
+        .report-workflow-step.active { border-color:var(--blue-500); background:rgba(37,99,235,.08); color:var(--blue-700); }
+        .report-workflow-step.active strong { color:var(--blue-600); }
+        .report-workflow-step.done { border-color:rgba(34,197,94,.35); color:var(--green-700); }
+        .report-workflow-step.done strong { color:var(--green-600); }
+        @media (max-width:760px) { .report-workflow { grid-template-columns:repeat(2,1fr); } .report-workflow-step:last-child { grid-column:span 2; } }
+      </style>
       <div class="report-center-container">
+        <div class="report-workflow" id="rc-workflow" aria-label="Report workflow">
+          <div class="report-workflow-step" data-step="1"><strong>1</strong>Report Type</div>
+          <div class="report-workflow-step" data-step="2"><strong>2</strong>Period</div>
+          <div class="report-workflow-step" data-step="3"><strong>3</strong>Class</div>
+          <div class="report-workflow-step" data-step="4"><strong>4</strong>Subjects</div>
+          <div class="report-workflow-step" data-step="5"><strong>5</strong>Learners</div>
+          <div class="report-workflow-step" data-step="6"><strong>6</strong>Preview</div>
+          <div class="report-workflow-step" data-step="7"><strong>7</strong>Generate</div>
+        </div>
         <div class="card mb-6">
           <div class="card-header">
             <h3><i data-lucide="filter" style="width:18px;height:18px;vertical-align:middle;margin-right:8px;color:var(--blue-600)"></i>Report Filters</h3>
@@ -473,6 +502,30 @@ const ReportCenter = {
     const cls = (this._allClasses || []).find(c => String(c.id) === String(this.state.classId));
     const clsName = cls ? cls.name : '';
     el.textContent = `Selected: ${n} Subject${n===1?'':'s'} | ${studentCount} Students | ${term || ''} | ${clsName || ''}`;
+    this.updateWorkflow();
+  },
+
+  updateWorkflow() {
+    const steps = document.querySelectorAll('#rc-workflow .report-workflow-step');
+    if (!steps.length) return;
+    const type = this.state.reportType;
+    const needsClass = !['school-performance', 'teacher-performance'].includes(type);
+    const needsSubjects = ['subject-performance'].includes(type);
+    const needsLearner = ['student-card', 'student-performance'].includes(type)
+      && (type !== 'student-card' || (this.state.cardMode || 'individual') === 'individual');
+    let current = 1;
+    if (!this.state.reportType) current = 1;
+    else if (!this.state.academicYear || !this.state.term) current = 2;
+    else if (needsClass && !this.state.classId) current = 3;
+    else if (needsSubjects && !(this.state.subjectIds || []).length) current = 4;
+    else if (needsLearner && !this.state.studentId) current = 5;
+    else if (!this.state.previewHtml) current = 6;
+    else current = 7;
+    steps.forEach(step => {
+      const number = Number(step.dataset.step);
+      step.classList.toggle('active', number === current);
+      step.classList.toggle('done', number < current);
+    });
   },
 
   buildFilename(data, orientation) {
@@ -579,6 +632,24 @@ const ReportCenter = {
     }
   },
 
+  validateWorkflow() {
+    if (!this.state.academicYear) throw new Error('Please select an academic year.');
+    if (!this.state.term) throw new Error('Please select a term.');
+    const type = this.state.reportType;
+    const needsClass = !['school-performance', 'teacher-performance'].includes(type);
+    if (needsClass && !this.state.classId) throw new Error('Please select a class.');
+    if (needsClass && typeof Scope !== 'undefined' && Scope.isScoped()) {
+      const cls = (this._allClasses || []).find(item => String(item.id) === String(this.state.classId));
+      if (!cls || !Scope.matchesClass(cls)) throw new Error(`The selected class is outside your ${Scope.label()} scope.`);
+    }
+    if (type === 'subject-performance' && !(this.state.subjectIds || []).length) {
+      throw new Error('Please select at least one subject.');
+    }
+    if (['student-performance'].includes(type) && !this.state.studentId) {
+      throw new Error('Please select a learner.');
+    }
+  },
+
   async generate() {
     if (this.state.reportType === 'student-card') {
       if ((this.state.cardMode || 'individual') === 'class') return this.generateClassReportCards();
@@ -591,6 +662,7 @@ const ReportCenter = {
 
     try {
       this.readCardInputs();
+      this.validateWorkflow();
       const config = {
         reportType: this.state.reportType,
         academicYear: this.state.academicYear || undefined,
