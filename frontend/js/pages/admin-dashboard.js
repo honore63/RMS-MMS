@@ -12,20 +12,23 @@ async function renderAdminDashboard() {
       DB.get('assessments')
     ]);
 
-    // Apply Education Level Filter
+    // Apply Education Level Filter (scoped DOS is locked to its level)
+    const scoped = (typeof Scope !== 'undefined' && Scope.isScoped());
     let classes = allClasses;
-    if (adminDashboardEduLevel !== 'all') {
+    if (scoped) {
+      classes = allClasses.filter(c => Scope.matchesClass(c));
+    } else if (adminDashboardEduLevel !== 'all') {
       classes = allClasses.filter(c => EducationLevels.getCategory(c) === adminDashboardEduLevel);
     }
     const classIds = new Set(classes.map(c => c.id));
     
     // Filter learners and assessments based on filtered classes
-    const learners = adminDashboardEduLevel === 'all' 
+    const learners = (!scoped && adminDashboardEduLevel === 'all') 
       ? allLearners 
       : allLearners.filter(l => classIds.has(l.class_id));
 
     const assessments = (allAssessments || []).filter(a => {
-      if (adminDashboardEduLevel === 'all') return true;
+      if (!scoped && adminDashboardEduLevel === 'all') return true;
       return classIds.has(a.class_id);
     });
 
@@ -69,7 +72,15 @@ async function renderAdminDashboard() {
         <span class="ac-open">Open <i data-lucide="arrow-right"></i></span>
       </button>`).join('');
 
-    const filterHtml = `
+    const filterHtml = scoped ? `
+      <div class="card mb-6" style="padding:16px 20px; background:linear-gradient(135deg,rgba(59,130,246,0.1),rgba(37,99,235,0.05))">
+        <div style="display:flex;align-items:center;gap:16px">
+          <div style="font-weight:700;color:var(--blue-800)"><i data-lucide="shield-check" style="width:16px;height:16px;vertical-align:middle"></i> Your Scope:</div>
+          <div><span class="badge badge-info" style="font-size:12px;font-weight:700">${Utils.escapeHtml(Scope.label())}</span>
+          <span class="text-sm text-muted" style="margin-left:10px">${Scope.isPrimary() ? '📗 Primary (P1-P6)' : '📘📙 Secondary (S1-S6)'}</span></div>
+        </div>
+      </div>
+    ` : `
       <div class="card mb-6" style="padding:16px 20px; background:linear-gradient(135deg,rgba(59,130,246,0.1),rgba(37,99,235,0.05))">
         <div style="display:flex;align-items:center;gap:16px">
           <div style="font-weight:700;color:var(--blue-800)"><i data-lucide="filter" style="width:16px;height:16px;vertical-align:middle"></i> View Scope:</div>

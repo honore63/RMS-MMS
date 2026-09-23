@@ -49,6 +49,13 @@ const ReportCenter = {
         visibleClasses = (classes || []).filter(c => allowed.has(String(c.id)));
       } catch (e) { visibleClasses = []; }
     }
+    // Scoped DOS: only classes & subjects inside their education level
+    const scopedDos = (typeof Scope !== 'undefined' && Scope.isScoped());
+    if (scopedDos) {
+      visibleClasses = (visibleClasses || []).filter(c => Scope.matchesClass(c));
+      subjects = Scope.filterSubjects(subjects);
+      this.state.cardLevel = Scope.isPrimary() ? 'Primary' : 'Secondary';
+    }
     const streams = [...new Set((visibleClasses || []).map(c => c.stream).filter(Boolean))];
     this._allClasses = visibleClasses || [];
     this._allSubjects = subjects || [];
@@ -97,10 +104,12 @@ const ReportCenter = {
               </div>
               <div class="form-group" id="rc-level-group" style="display:none">
                 <label>Education Level</label>
-                <select id="rc-level" class="select-field" onchange="ReportCenter.onLevelChange(this.value)">
-                  <option value="all" ${this.state.cardLevel === 'all' ? 'selected' : ''}>All Levels</option>
-                  <option value="Primary" ${this.state.cardLevel === 'Primary' ? 'selected' : ''}>Primary</option>
-                  <option value="Secondary" ${this.state.cardLevel === 'Secondary' ? 'selected' : ''}>Secondary</option>
+                <select id="rc-level" class="select-field" onchange="ReportCenter.onLevelChange(this.value)" ${scopedDos ? 'disabled' : ''}>
+                  ${scopedDos
+                    ? `<option value="${this.state.cardLevel}" selected>${this.state.cardLevel === 'Primary' ? '📗 Primary' : '📘📙 Secondary'} (${Utils.escapeHtml(Scope.label())})</option>`
+                    : `<option value="all" ${this.state.cardLevel === 'all' ? 'selected' : ''}>All Levels</option>
+                       <option value="Primary" ${this.state.cardLevel === 'Primary' ? 'selected' : ''}>Primary</option>
+                       <option value="Secondary" ${this.state.cardLevel === 'Secondary' ? 'selected' : ''}>Secondary</option>`}
                 </select>
               </div>
               <div class="form-group" id="rc-stream-group" style="display:none">

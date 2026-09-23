@@ -57,6 +57,9 @@ const ReportStudent = {
     if (!year || !year.id) throw new Error('Select an academic year.');
     if (!term || !term.id) throw new Error('Select a term.');
     if (!cls || !cls.id) throw new Error('Select a class.');
+    if (typeof Scope !== 'undefined' && Scope.isScoped() && !Scope.matchesClass(cls)) {
+      throw new Error(`Access restricted: ${EducationLevels.getCategory(cls)} classes are outside your ${Scope.label()} scope.`);
+    }
     if (learner && String(learner.class_id) !== String(cls.id)) {
       throw new Error('The selected student does not belong to the selected class.');
     }

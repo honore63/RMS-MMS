@@ -194,6 +194,95 @@ async function getSchoolSettings() {
   }
 }
 
+const Scope = {
+  eduLevel() {
+    try {
+      return (typeof Auth !== 'undefined' && Auth.currentUser) ? (Auth.currentUser.education_level || null) : null;
+    } catch (e) { return null; }
+  },
+
+  isDos() {
+    return typeof Auth !== 'undefined' && Auth.isAdmin();
+  },
+
+  isScoped() {
+    return this.isDos() && !!this.eduLevel();
+  },
+
+  isPrimary() {
+    return this.isScoped() && this.eduLevel() === 'PRIMARY';
+  },
+
+  isSecondary() {
+    return this.isScoped() && this.eduLevel() === 'SECONDARY';
+  },
+
+  label() {
+    if (this.isPrimary()) return 'DOS PRIMARY';
+    if (this.isSecondary()) return 'DOS SECONDARY';
+    if (this.isDos()) return 'DOS GLOBAL';
+    return 'DOS';
+  },
+
+  categories() {
+    if (this.isPrimary()) return ['Primary'];
+    if (this.isSecondary()) return ['Lower Secondary', 'Upper Secondary'];
+    return null;
+  },
+
+  matchesClass(cls) {
+    if (!this.isScoped()) return true;
+    const cat = EducationLevels.getCategory(cls);
+    return (this.categories() || []).includes(cat);
+  },
+
+  matchesSubject(subj) {
+    if (!this.isScoped()) return true;
+    const s = String((subj && subj.level) || 'Both').trim().toUpperCase();
+    if (s === 'BOTH' || s === '') return true;
+    if (this.isPrimary()) return s === 'PRIMARY';
+    if (this.isSecondary()) return ['SECONDARY', 'LOWER SECONDARY', 'UPPER SECONDARY'].includes(s);
+    return true;
+  },
+
+  filterClasses(classes) {
+    return (classes || []).filter(c => this.matchesClass(c));
+  },
+
+  filterSubjects(subjects) {
+    return (subjects || []).filter(s => this.matchesSubject(s));
+  },
+
+  filterLearners(learners, classes) {
+    if (!this.isScoped()) return learners || [];
+    const ids = new Set((classes || []).map(c => String(c.id)));
+    return (learners || []).filter(l => ids.has(String(l.class_id)));
+  },
+
+  filterAssessments(assessments, classes) {
+    if (!this.isScoped()) return assessments || [];
+    const byId = new Map((classes || []).map(c => [String(c.id), c]));
+    return (assessments || []).filter(a => byId.has(String(a.class_id)) && this.matchesClass(byId.get(String(a.class_id))));
+  },
+
+  assertClassAccess(cls) {
+    if (!cls || !cls.id) return;
+    if (!this.matchesClass(cls)) {
+      throw new Error(`Access restricted: ${EducationLevels.getCategory(cls)} classes are outside your ${this.label()} scope.`);
+    }
+  }
+};
+
+function getCurrentUserScope() {
+  return {
+    level: Scope.eduLevel(),
+    isScoped: Scope.isScoped(),
+    isPrimary: Scope.isPrimary(),
+    isSecondary: Scope.isSecondary(),
+    label: Scope.label()
+  };
+}
+
         img.src = e.target.result;
       };
       reader.readAsDataURL(file);

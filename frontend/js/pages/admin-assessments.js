@@ -10,10 +10,14 @@ async function renderAssessments() {
     getAssessmentTypes()
   ]);
   
+  const scoped = (typeof Scope !== 'undefined' && Scope.isScoped());
   const filtered = assessments.filter(a => {
     if (assessFilter !== 'all' && a.status !== assessFilter) return false;
+    const cls = classes.find(c => c.id === a.class_id);
+    if (scoped) {
+      return Scope.matchesClass(cls);
+    }
     if (assessEduLevel !== 'all') {
-      const cls = classes.find(c => c.id === a.class_id);
       if (EducationLevels.getCategory(cls) !== assessEduLevel) return false;
     }
     return true;
@@ -62,12 +66,14 @@ async function renderAssessments() {
         <button class="tab-btn ${assessFilter === 'locked' ? 'active' : ''}" onclick="assessFilter='locked';renderAssessments()">Locked</button>
       </div>
       <div>
-        <select class="select-field" style="margin:0;min-width:200px" onchange="assessEduLevel=this.value;renderAssessments()">
-          <option value="all">🎓 All Education Levels</option>
-          <option value="Primary" ${assessEduLevel==='Primary'?'selected':''}>📗 Primary Only</option>
-          <option value="Lower Secondary" ${assessEduLevel==='Lower Secondary'?'selected':''}>📘 Lower Secondary</option>
-          <option value="Upper Secondary" ${assessEduLevel==='Upper Secondary'?'selected':''}>📙 Upper Secondary</option>
-        </select>
+        ${scoped
+          ? `<span class="badge badge-info" style="font-size:12px;font-weight:700;margin-right:6px">${Utils.escapeHtml(Scope.label())}</span><span class="text-sm text-muted">${Scope.isPrimary() ? '📗 Primary only' : '📘📙 Secondary (S1-S6)'}</span>`
+          : `<select class="select-field" style="margin:0;min-width:200px" onchange="assessEduLevel=this.value;renderAssessments()">
+              <option value="all">🎓 All Education Levels</option>
+              <option value="Primary" ${assessEduLevel==='Primary'?'selected':''}>📗 Primary Only</option>
+              <option value="Lower Secondary" ${assessEduLevel==='Lower Secondary'?'selected':''}>📘 Lower Secondary</option>
+              <option value="Upper Secondary" ${assessEduLevel==='Upper Secondary'?'selected':''}>📙 Upper Secondary</option>
+            </select>`}
       </div>
     </div>
     <div class="card"><div class="table-container"><table class="data-table">

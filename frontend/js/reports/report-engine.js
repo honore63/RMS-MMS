@@ -1,3 +1,9 @@
+function assertClassScope(cls) {
+  if (typeof Scope !== 'undefined' && Scope.isScoped() && cls && cls.id && !Scope.matchesClass(cls)) {
+    throw new Error(`Access restricted: ${EducationLevels.getCategory(cls)} classes are outside your ${Scope.label()} scope.`);
+  }
+}
+
 const ReportEngine = {
   current: null,
 
@@ -50,6 +56,7 @@ const ReportEngine = {
     const learner = await DB.get('learners', { id: studentId }).then(r => r[0]);
     if (!learner) throw new Error('Student not found');
     const cls = await DB.get('classes', { id: learner.class_id }).then(r => r[0]);
+    assertClassScope(cls);
     const eduCat = EducationLevels.getCategory(cls);
 
     const subjects = await ReportUtils.getSubjects({ status: 'active' });
@@ -102,6 +109,7 @@ const ReportEngine = {
   async generateExamClassSummary(ctx) {
     const { settings, scale, passMark, year, term, classId, assessmentId } = ctx;
     const cls = await DB.get('classes', { id: classId }).then(r => r[0]);
+    assertClassScope(cls);
     const learners = await ReportUtils.getLearners(classId);
     const assessments = assessmentId
       ? await DB.get('assessments', { id: assessmentId }).then(r => r[0] ? [r[0]] : [])
@@ -150,6 +158,7 @@ const ReportEngine = {
   async generateSubjectPerformance(ctx) {
     const { settings, scale, passMark, year, term, classId, subjectId, teacherId } = ctx;
     const cls = await DB.get('classes', { id: classId }).then(r => r[0]);
+    assertClassScope(cls);
     const subject = await DB.get('subjects', { id: subjectId }).then(r => r[0]);
     const learners = await ReportUtils.getLearners(classId);
 
@@ -190,6 +199,7 @@ const ReportEngine = {
   async generateClassPerformance(ctx) {
     const { settings, scale, passMark, year, term, classId } = ctx;
     const cls = await DB.get('classes', { id: classId }).then(r => r[0]);
+    assertClassScope(cls);
     const learners = await ReportUtils.getLearners(classId);
     const learnerStats = [];
 

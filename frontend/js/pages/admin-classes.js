@@ -27,6 +27,7 @@ async function renderClasses() {
   });
 
   const categories = ['Primary', 'Lower Secondary', 'Upper Secondary'];
+  const scopedCats  = (typeof Scope !== 'undefined' && Scope.isScoped()) ? Scope.categories() : null;
 
   const filtered = classes.filter(c => {
     const matchS  = !classesSearch || (c.name + ' ' + (c.level || '') + ' ' + (c.stream || '') + ' ' + (c.education_level || '')).toLowerCase().includes(classesSearch.toLowerCase());
@@ -241,10 +242,13 @@ async function renderClasses() {
         <!-- Education Level filter -->
         <div class="form-group" style="margin:0;min-width:170px">
           <select class="select-field" onchange="classesCategory=this.value;renderClasses()">
-            <option value="all">🎓 All Education Levels</option>
-            <option value="Primary" ${classesCategory==='Primary'?'selected':''}>📗 Primary (P1-P6)</option>
-            <option value="Lower Secondary" ${classesCategory==='Lower Secondary'?'selected':''}>📘 Lower Secondary (S1-S3)</option>
-            <option value="Upper Secondary" ${classesCategory==='Upper Secondary'?'selected':''}>📙 Upper Secondary (S4-S6)</option>
+            ${scopedCats
+              ? `<option value="all">${Scope.isPrimary() ? '📗' : '📘📙'} ${Scope.label() === 'DOS PRIMARY' ? 'Primary Scope' : 'Secondary Scope'}</option>` +
+                scopedCats.map(cat => `<option value="${cat}" ${classesCategory===cat?'selected':''}>${cat==='Primary'?'📗':'📘'} ${cat}</option>`).join('')
+              : `<option value="all">🎓 All Education Levels</option>
+                 <option value="Primary" ${classesCategory==='Primary'?'selected':''}>📗 Primary (P1-P6)</option>
+                 <option value="Lower Secondary" ${classesCategory==='Lower Secondary'?'selected':''}>📘 Lower Secondary (S1-S3)</option>
+                 <option value="Upper Secondary" ${classesCategory==='Upper Secondary'?'selected':''}>📙 Upper Secondary (S4-S6)</option>`}
           </select>
         </div>
 
@@ -292,9 +296,11 @@ async function classForm() {
       <label><i data-lucide="layers" style="width:13px;height:13px;margin-right:4px"></i>1. Education Level <span class="required">*</span></label>
       <select id="cf-category" class="select-field" onchange="classOnCategoryChange()">
         <option value="">Select Education Level</option>
-        <option value="Primary">Primary (P1 - P6)</option>
-        <option value="Lower Secondary">Lower Secondary (S1 - S3)</option>
-        <option value="Upper Secondary">Upper Secondary (S4 - S6)</option>
+        ${scopedCats
+          ? scopedCats.map(cat => `<option value="${cat}">${cat==='Primary'?'📗':'📘'} ${cat}</option>`).join('')
+          : `<option value="Primary">Primary (P1 - P6)</option>
+             <option value="Lower Secondary">Lower Secondary (S1 - S3)</option>
+             <option value="Upper Secondary">Upper Secondary (S4 - S6)</option>`}
       </select>
     </div>
 
@@ -413,6 +419,9 @@ async function classSave() {
   if (!check.valid) {
     return Utils.toast(`❌ Invalid Combination: ${check.message}`, 'error');
   }
+  if (typeof Scope !== 'undefined' && Scope.isScoped() && !Scope.categories().includes(education_level)) {
+    return Utils.toast(`❌ ${education_level} classes are outside your ${Scope.label()} scope`, 'error');
+  }
 
   try {
     const existing = await DB.get('classes');
@@ -439,9 +448,11 @@ async function classEdit(c) {
     <div class="form-group">
       <label><i data-lucide="layers" style="width:13px;height:13px;margin-right:4px"></i>Education Level <span class="required">*</span></label>
       <select id="ce-category" class="select-field">
-        <option value="Primary" ${cat==='Primary'?'selected':''}>Primary (P1 - P6)</option>
-        <option value="Lower Secondary" ${cat==='Lower Secondary'?'selected':''}>Lower Secondary (S1 - S3)</option>
-        <option value="Upper Secondary" ${cat==='Upper Secondary'?'selected':''}>Upper Secondary (S4 - S6)</option>
+        ${scopedCats
+          ? scopedCats.map(cat => `<option value="${cat}" ${cat===cat?'selected':''}>${cat==='Primary'?'📗':'📘'} ${cat}</option>`).join('')
+          : `<option value="Primary" ${cat==='Primary'?'selected':''}>Primary (P1 - P6)</option>
+             <option value="Lower Secondary" ${cat==='Lower Secondary'?'selected':''}>Lower Secondary (S1 - S3)</option>
+             <option value="Upper Secondary" ${cat==='Upper Secondary'?'selected':''}>Upper Secondary (S4 - S6)</option>`}
       </select>
     </div>
     <div class="form-group">
@@ -494,6 +505,9 @@ async function classUpdate(id) {
   const check = EducationLevels.isValidCombination(education_level, level, stream);
   if (!check.valid) {
     return Utils.toast(`❌ Invalid Combination: ${check.message}`, 'error');
+  }
+  if (typeof Scope !== 'undefined' && Scope.isScoped() && !Scope.categories().includes(education_level)) {
+    return Utils.toast(`❌ ${education_level} classes are outside your ${Scope.label()} scope`, 'error');
   }
 
   try {

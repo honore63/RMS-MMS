@@ -122,6 +122,7 @@ const Auth = {
 
   getRole() { return this.currentUser?.role || null; },
   getTeacherId() { return this.teacherProfile?.id || null; },
+  getEducationLevel() { return this.currentUser?.education_level || null; },
   isAdmin() { return this.getRole() === 'dos'; },
   isTeacher() { return this.getRole() === 'teacher'; }
 };

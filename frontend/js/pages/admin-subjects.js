@@ -6,6 +6,23 @@
 let subjectsSearch   = '';
 let subjectsStatus   = 'all';
 
+function subjectLevelOptionsHtml(selected) {
+  const opts = [
+    ['Both', 'All Levels'],
+    ['Primary', 'Primary (P1 - P6)'],
+    ['Lower Secondary', 'Lower Secondary (S1 - S3)'],
+    ['Upper Secondary', 'Upper Secondary (S4 - S6)'],
+    ['Secondary', 'Secondary (S1 - S6)']
+  ];
+  const allowed = (typeof Scope !== 'undefined' && Scope.isScoped())
+    ? (Scope.isPrimary() ? ['Both', 'Primary'] : ['Both', 'Lower Secondary', 'Upper Secondary', 'Secondary'])
+    : opts.map(o => o[0]);
+  return opts
+    .filter(o => allowed.includes(o[0]))
+    .map(([v, label]) => `<option value="${v}" ${selected === v || (!selected && v === 'Both') ? 'selected' : ''}>${label}</option>`)
+    .join('');
+}
+
 // ---- Main Render ------------------------------------------------------------
 
 async function renderSubjects() {
@@ -134,11 +151,7 @@ function subjectForm() {
     <div class="form-group">
       <label>Education Level Context</label>
       <select id="sf-level" class="select-field">
-        <option value="Both" selected>All Levels</option>
-        <option value="Primary">Primary (P1 - P6)</option>
-        <option value="Lower Secondary">Lower Secondary (S1 - S3)</option>
-        <option value="Upper Secondary">Upper Secondary (S4 - S6)</option>
-        <option value="Secondary">Secondary (S1 - S6)</option>
+        ${subjectLevelOptionsHtml()}
       </select>
     </div>
     <div class="form-group">
@@ -175,6 +188,9 @@ async function subjectSave() {
 
   if (!name) return Utils.toast('Subject name is required', 'error');
   if (!code) return Utils.toast('Subject code is required', 'error');
+  if (typeof Scope !== 'undefined' && Scope.isScoped() && !Scope.matchesSubject({ level })) {
+    return Utils.toast(`Subject level "${level}" is outside your ${Scope.label()} scope`, 'error');
+  }
 
   try {
     // Duplicate check
@@ -215,11 +231,7 @@ function subjectEdit(s) {
     <div class="form-group">
       <label>Education Level Context</label>
       <select id="se-level" class="select-field">
-        <option value="Both" ${(s.level === 'Both' || !s.level) ? 'selected' : ''}>All Levels</option>
-        <option value="Primary" ${s.level === 'Primary' ? 'selected' : ''}>Primary (P1 - P6)</option>
-        <option value="Lower Secondary" ${s.level === 'Lower Secondary' ? 'selected' : ''}>Lower Secondary (S1 - S3)</option>
-        <option value="Upper Secondary" ${s.level === 'Upper Secondary' ? 'selected' : ''}>Upper Secondary (S4 - S6)</option>
-        <option value="Secondary" ${s.level === 'Secondary' ? 'selected' : ''}>Secondary (S1 - S6)</option>
+        ${subjectLevelOptionsHtml(s.level)}
       </select>
     </div>
     <div class="form-group">
@@ -242,6 +254,9 @@ async function subjectUpdate(id) {
 
   if (!name) return Utils.toast('Subject name is required', 'error');
   if (!code) return Utils.toast('Subject code is required', 'error');
+  if (typeof Scope !== 'undefined' && Scope.isScoped() && !Scope.matchesSubject({ level })) {
+    return Utils.toast(`Subject level "${level}" is outside your ${Scope.label()} scope`, 'error');
+  }
 
   try {
     const existing = await DB.get('subjects');
