@@ -381,11 +381,11 @@ const ReportEngine = {
   async generateGradeDistribution(ctx) {
     const { settings, scale, passMark, year, term, classId } = ctx;
     const classes = classId ? await DB.get('classes', { id: classId }).then(r => r[0] ? [r[0]] : []) : await DB.get('classes', typeof Scope !== 'undefined' && Scope.isScoped() ? { education_level: Scope.categories() } : {});
-    const learners = await DB.query('learners', '*', { class_id: classes.map(cls => cls.id), status: 'active' });
-    const allMarks = await ReportUtils.getMarksForLearners(learners.map(learner => learner.id), {
-      academic_year_id: year.id || undefined,
-      term_id: term.id || undefined
-    });
+    const classIds = classes.map(cls => cls.id);
+    const learners = await DB.query('learners', '*', { class_id: classIds, status: 'active' });
+    const assessments = await DB.query('assessments', '*', { class_id: classIds, academic_year_id: year.id || undefined, term_id: term.id || undefined, status: ['approved', 'locked'] }, { column: 'assessment_date', asc: false });
+    const assessIds = assessments.map(a => a.id);
+    const allMarks = assessIds.length ? await DB.query('marks', '*', { assessment_id: assessIds }, { column: 'learner_id' }) : [];
     const marksByLearner = new Map();
     allMarks.forEach(mark => {
       const key = String(mark.learner_id);
