@@ -183,6 +183,12 @@ const Utils = {
           const ctx = canvas.getContext('2d');
           ctx.drawImage(img, 0, 0, width, height);
           resolve(canvas.toDataURL('image/png', quality));
+        };
+        img.src = e.target.result;
+      };
+      reader.readAsDataURL(file);
+    });
+  }
 };
 
 async function getSchoolSettings() {
@@ -290,13 +296,6 @@ function getCurrentUserScope() {
   };
 }
 
-        img.src = e.target.result;
-      };
-      reader.readAsDataURL(file);
-    });
-  }
-};
-
 const EducationLevels = {
   CATEGORIES: {
     PRIMARY: 'Primary',
@@ -354,12 +353,3 @@ const EducationLevels = {
     return { valid: true };
   }
 };
-
-async function getSchoolSettings() {
-  try {
-    const res = await DB.query('school_settings', '*');
-    return res[0] || {};
-  } catch (e) {
-    return {};
-  }
-}

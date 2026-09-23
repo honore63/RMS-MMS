@@ -19,6 +19,9 @@ const Router = {
     const handler = this.routes[route];
     if (handler) {
       Sidebar.highlight();
+      if (typeof Sidebar.isSmall === 'function' && Sidebar.isSmall()) {
+        Sidebar.closeMobile();
+      }
       try {
         await handler();
       } catch (e) {

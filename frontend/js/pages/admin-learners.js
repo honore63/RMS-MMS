@@ -935,7 +935,7 @@ function renderImportPreview() {
       <div class="import-stat is-amber"><div class="is-value">${c.duplicate}</div><div class="is-label">Duplicates</div></div>
       <div class="import-stat ${c.errors ? 'is-red' : ''}"><div class="is-value">${c.errors}</div><div class="is-label">Errors</div></div>
     </div>
-    <div style="max-height:280px;overflow-y:auto;border:1px solid var(--gray-200);border-radius:var(--radius)">
+    <div style="max-height:280px;overflow:auto;border:1px solid var(--gray-200);border-radius:var(--radius)">
       <table class="data-table" style="font-size:12px">
         <thead><tr><th style="width:44px">No.</th><th>Student Number</th><th>Student Name</th><th>Gender</th><th>Class</th><th>Status</th><th style="width:120px">Notes</th></tr></thead>
         <tbody>${rowsHtml || `<tr><td colspan="7" class="text-center text-muted">No data rows to show</td></tr>`}</tbody>

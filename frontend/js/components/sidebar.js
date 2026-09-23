@@ -29,6 +29,9 @@ const Sidebar = {
           this.toggle();
         }
       }
+      if (e.key === 'Escape' && this.isSmall() && this.isDrawerOpen()) {
+        this.closeMobile();
+      }
     });
 
     window.addEventListener('resize', () => {
@@ -234,7 +237,7 @@ highlight() {
     });
   },
 
-toggle() {
+  toggle() {
     if (this.isSmall()) {
       const sb = document.getElementById('sidebar');
       const willOpen = !sb.classList.contains('open');
@@ -242,9 +245,9 @@ toggle() {
       document.getElementById('app-layout').classList.toggle('sb-mobile-open', willOpen);
     } else {
       const layout = document.getElementById('app-layout');
-      const hidden = layout.classList.toggle('sidebar-hidden');
+      layout.classList.remove('sidebar-hidden');
       try {
-        localStorage.setItem(this.STORAGE_KEY, hidden ? 'collapsed' : 'expanded');
+        localStorage.setItem(this.STORAGE_KEY, 'expanded');
       } catch (err) { /* storage unavailable */ }
     }
     this.updateToggleBtn();
@@ -258,11 +261,14 @@ toggle() {
   },
 
   applyState() {
-    let saved = null;
-    try {
-      saved = localStorage.getItem(this.STORAGE_KEY);
-    } catch (err) { /* storage unavailable */ }
-    document.getElementById('app-layout').classList.toggle('sidebar-hidden', !this.isSmall() && saved === 'collapsed');
+    const layout = document.getElementById('app-layout');
+    if (!layout) return;
+    layout.classList.remove('sidebar-hidden');
+    if (!this.isSmall()) {
+      try {
+        localStorage.setItem(this.STORAGE_KEY, 'expanded');
+      } catch (err) { /* storage unavailable */ }
+    }
     this.updateToggleBtn();
   },
 

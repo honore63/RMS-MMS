@@ -8,7 +8,7 @@ const Auth = {
 
     if (error) {
       const msg = error.message || '';
-      console.error('LOGIN ERROR:', msg);
+      console.error('LOGIN ERROR:', msg, '| status:', error.status, '| full:', JSON.stringify(error));
 
       if (msg.includes('Email logins are disabled') || msg.includes('Email provider is disabled')) {
         throw new Error('EMAIL_PROVIDER_DISABLED');

@@ -321,12 +321,15 @@ WHERE education_level IS NULL;
 UPDATE public.subjects SET level = 'Both' WHERE level IS NULL;
 UPDATE public.subjects SET education_level = level WHERE education_level IS NULL;
 
--- Can the current scoped DOS see a given teacher record? Scope is derived
--- from the teacher's ACADEMIC ASSIGNMENTS (spec #7), not just the label:
---   1) an explicitly other-level teacher is never visible,
---   2) a matching/BOTH/NULL teacher with NO assignments is shared,
---   3) otherwise the teacher is visible ONLY when every assignment's class
---      is within the DOS's level (no assignment leaks into the other level).
+-- Can the current scoped DOS see a given teacher record? The teacher's
+-- education level is DERIVED FROM THEIR ASSIGNMENTS (spec #7 / #13) — the
+-- stored `teachers.education_level` label is NOT used:
+--   1) an unassigned teacher (no assignments yet) is shared to every DOS,
+--      so any scoped DOS can create the teacher and then assign them,
+--   2) otherwise the teacher is visible ONLY when at least one assignment's
+--      class is inside the DOS's level — a teacher who also teaches the
+--      OTHER level is still visible, but the other level's assignments are
+--      hidden by the assignment-level RLS policy (spec #13).
 -- SECURITY DEFINER: reads policed tables, which bypasses RLS here and
 -- prevents the policy from re-entering itself (the 57014 recursion bug).
 CREATE OR REPLACE FUNCTION public.rms_teacher_in_scope(p_teacher_id UUID)
@@ -334,30 +337,23 @@ RETURNS boolean LANGUAGE sql STABLE
 SECURITY DEFINER
 SET search_path = public, pg_temp
 AS $$
-  WITH t AS (
-    SELECT t.education_level AS lvl
-    FROM public.teachers t
-    WHERE t.id = p_teacher_id
-  ),
-  x AS (
-    SELECT DISTINCT c.education_level AS lvl
-    FROM public.teacher_assignments ta
-    JOIN public.classes c ON c.id = ta.class_id
-    WHERE ta.teacher_id = p_teacher_id
-      AND c.education_level IS NOT NULL
-  )
   SELECT
-    CASE
-      WHEN NOT exists(SELECT 1 FROM t) THEN false
-      WHEN t.lvl IS NOT NULL AND t.lvl NOT IN ('BOTH', public.rms_dos_education_level()) THEN false
-      WHEN NOT exists(SELECT 1 FROM x) THEN true
-      WHEN NOT exists(SELECT 1 FROM x xr WHERE NOT public.rms_dos_can_level(xr.lvl)) THEN true
-      ELSE false
-    END
-  FROM t;
+    EXISTS (SELECT 1 FROM public.teachers t WHERE t.id = p_teacher_id)
+    AND (
+      NOT EXISTS (SELECT 1 FROM public.teacher_assignments ta WHERE ta.teacher_id = p_teacher_id)
+      OR EXISTS (
+        SELECT 1
+        FROM public.teacher_assignments ta
+        JOIN public.classes c ON c.id = ta.class_id
+        WHERE ta.teacher_id = p_teacher_id
+          AND public.rms_dos_can_level(c.education_level)
+      )
+    );
 $$;
 
--- Does a teacher level value belong to the current DOS scope? FAIL-CLOSED.
+-- Legacy helper (kept for backward compatibility). Teacher scoping is now
+-- fully assignment-derived via rms_teacher_in_scope; this function is no
+-- longer referenced by any policy.
 CREATE OR REPLACE FUNCTION public.rms_dos_can_teacher(p_level TEXT)
 RETURNS boolean LANGUAGE sql STABLE AS $$
   SELECT
@@ -508,14 +504,6 @@ CREATE POLICY rms_teacher_assignments_insert ON public.teacher_assignments
     AND public.rms_dos_can_subject(
       (SELECT s.level FROM public.subjects s WHERE s.id = subject_id)
     )
-    AND (
-      teacher_id IS NULL
-      OR (
-        SELECT t.education_level IS NULL OR t.education_level = 'BOTH'
-            OR t.education_level = public.rms_dos_education_level()
-        FROM public.teachers t WHERE t.id = teacher_id
-      )
-    )
   );
 CREATE POLICY rms_teacher_assignments_update ON public.teacher_assignments
   FOR UPDATE
@@ -531,14 +519,6 @@ CREATE POLICY rms_teacher_assignments_update ON public.teacher_assignments
     )
     AND public.rms_dos_can_subject(
       (SELECT s.level FROM public.subjects s WHERE s.id = subject_id)
-    )
-    AND (
-      teacher_id IS NULL
-      OR (
-        SELECT t.education_level IS NULL OR t.education_level = 'BOTH'
-            OR t.education_level = public.rms_dos_education_level()
-        FROM public.teachers t WHERE t.id = teacher_id
-      )
     )
   );
 CREATE POLICY rms_teacher_assignments_delete ON public.teacher_assignments
@@ -675,10 +655,14 @@ CREATE POLICY rms_marks_delete ON public.marks
   USING (public.rms_is_dos() AND public.rms_dos_can_marks(marks.assessment_id));
 
 -- ------------------------------------------------------------
--- 9) RLS: teachers — level-scoped teacher management with FULL CRUD
---    for the DOS within its own level. FAIL-CLOSED: a DOS without a
---    resolvable level sees NO teachers and can do nothing.
---    Teachers/headteachers/other roles keep reading all rows.
+-- 9) RLS: teachers — scope is DERIVED FROM ASSIGNMENTS (a teacher's
+--    level = the levels of their assigned classes). A scoped DOS manages
+--    a teacher only when the teacher teaches at least one class inside
+--    that DOS's level (or is not yet assigned). FULL CRUD within scope.
+--    The stored `teachers.education_level` label is NOT used for scoping —
+--    the class is the source of truth (spec #16/#17).
+--    FAIL-CLOSED: a DOS without a resolvable level sees NO teachers and
+--    can do nothing. Teachers/headteachers/other roles keep reading all.
 -- ------------------------------------------------------------
 ALTER TABLE public.teachers ENABLE ROW LEVEL SECURITY;
 
@@ -702,11 +686,11 @@ CREATE POLICY rms_teachers_select ON public.teachers
   );
 CREATE POLICY rms_teachers_insert ON public.teachers
   FOR INSERT
-  WITH CHECK (public.rms_is_dos() AND public.rms_is_scoped_dos() AND public.rms_dos_can_teacher(teachers.education_level));
+  WITH CHECK (public.rms_is_dos() AND public.rms_is_scoped_dos());
 CREATE POLICY rms_teachers_update ON public.teachers
   FOR UPDATE
   USING (public.rms_is_dos() AND public.rms_is_scoped_dos() AND public.rms_teacher_in_scope(teachers.id))
-  WITH CHECK (public.rms_is_dos() AND public.rms_is_scoped_dos() AND public.rms_dos_can_teacher(teachers.education_level));
+  WITH CHECK (public.rms_is_dos() AND public.rms_is_scoped_dos());
 CREATE POLICY rms_teachers_delete ON public.teachers
   FOR DELETE
   USING (public.rms_is_dos() AND public.rms_is_scoped_dos() AND public.rms_teacher_in_scope(teachers.id));

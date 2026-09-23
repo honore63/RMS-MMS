@@ -342,3 +342,26 @@
 }
 .rc-print-body { background: white; margin:0; padding:0; }
 .rc-print-body .rc-paper { box-shadow: none; margin: 0 auto; }
+
+/* ── RESPONSIVE (screen preview on small devices) ─────────── */
+@media (max-width: 768px) {
+  .rc-paper {
+    width: 100% !important;
+    min-height: 0 !important;
+    padding: 12px !important;
+    box-shadow: none !important;
+  }
+  .rc-header { flex-wrap: wrap; gap: 8px; }
+  .rc-table-wrapper {
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    padding-bottom: 4px;
+  }
+  .rc-data-table { min-width: 760px; }
+  .rc-footer-panels { flex-direction: column; }
+  .rc-scale-panel,
+  .rc-desc-panel { width: 100%; }
+  .rc-scale-panel { overflow-x: auto; }
+  .rc-scale-tbl { min-width: 420px; }
+  .rc-footer-panels .rc-desc-box { min-width: 0; }
+}

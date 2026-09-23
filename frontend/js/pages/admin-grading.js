@@ -308,6 +308,7 @@ function restoreDefaultGrading() {
 function generatePreviewTable() {
   const activeRows = gradingState.rows.filter(r => r.is_active).sort((a, b) => a.minimum_percentage - b.minimum_percentage);
   return `
+    <div class="table-container">
     <table class="data-table">
       <thead><tr><th>Range</th><th>Grade</th><th>Descriptor</th><th>Pass/Fail</th><th>Comment</th></tr></thead>
       <tbody>
@@ -322,6 +323,7 @@ function generatePreviewTable() {
         `).join('')}
       </tbody>
     </table>
+    </div>
   `;
 }
 
