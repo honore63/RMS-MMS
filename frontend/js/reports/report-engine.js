@@ -301,11 +301,11 @@ const ReportEngine = {
       ? { education_level: Scope.categories() }
       : {};
     const classes = await DB.get('classes', classFilters);
-    const learners = await DB.query('learners', '*', { class_id: classes.map(cls => cls.id), status: 'active' });
-    const allMarks = await ReportUtils.getMarksForLearners(learners.map(learner => learner.id), {
-      academic_year_id: year.id || undefined,
-      term_id: term.id || undefined
-    });
+    const classIds = classes.map(cls => cls.id);
+    const learners = await DB.query('learners', '*', { class_id: classIds, status: 'active' });
+    const assessments = await DB.query('assessments', '*', { class_id: classIds, academic_year_id: year.id || undefined, term_id: term.id || undefined, status: ['approved', 'locked'] }, { column: 'assessment_date', asc: false });
+    const assessIds = assessments.map(a => a.id);
+    const allMarks = assessIds.length ? await DB.query('marks', '*', { assessment_id: assessIds }, { column: 'learner_id' }) : [];
     const marksByLearner = new Map();
     allMarks.forEach(mark => {
       const key = String(mark.learner_id);
@@ -350,11 +350,9 @@ const ReportEngine = {
     const assessments = await DB.query('assessments', '*', { teacher_id: teacherId, academic_year_id: year.id || undefined }, { column: 'assessment_date', asc: false });
     const approvedAssessments = assessments.filter(a => ['approved', 'locked'].includes(a.status));
     const submittedAssessments = assessments.filter(a => a.status === 'submitted');
-
+    const assessIds = approvedAssessments.map(a => a.id);
     const learners = await DB.query('learners', '*', { class_id: classIds, status: 'active' });
-    const allMarks = await ReportUtils.getMarksForLearners(learners.map(learner => learner.id), {
-      academic_year_id: year.id || undefined
-    });
+    const allMarks = assessIds.length ? await DB.query('marks', '*', { assessment_id: assessIds }, { column: 'learner_id' }) : [];
     const marksByLearner = new Map();
     allMarks.forEach(mark => {
       const key = String(mark.learner_id);
