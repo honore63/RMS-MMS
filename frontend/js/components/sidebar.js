@@ -62,6 +62,7 @@ const Sidebar = {
         <div class="user-info">
           <div class="name">${Utils.escapeHtml(user?.full_name || '')}</div>
           <div class="role">${role === 'dos' && typeof Scope !== 'undefined' ? Utils.escapeHtml(Scope.label()) : Utils.escapeHtml(user?.role || '')}</div>
+          ${role === 'dos' && typeof Scope !== 'undefined' && Scope.subLabel() ? `<div class="role-sub">${Utils.escapeHtml(Scope.subLabel())}</div>` : ''}
         </div>
         ${role === 'dos' ? `<button class="btn-logout" onclick="Router.go('admin/settings')" title="Settings" aria-label="Settings"><i data-lucide="settings"></i></button>` : ''}
         <button class="btn-logout" onclick="App.logout()" title="Sign Out" aria-label="Sign Out"><i data-lucide="log-out"></i></button>

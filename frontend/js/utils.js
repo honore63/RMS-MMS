@@ -224,6 +224,13 @@ const Scope = {
     return 'DOS';
   },
 
+  subLabel() {
+    if (this.isPrimary()) return 'Primary Administration';
+    if (this.isSecondary()) return 'Secondary Administration';
+    if (this.isDos()) return 'Whole School Administration';
+    return '';
+  },
+
   categories() {
     if (this.isPrimary()) return ['Primary'];
     if (this.isSecondary()) return ['Lower Secondary', 'Upper Secondary'];

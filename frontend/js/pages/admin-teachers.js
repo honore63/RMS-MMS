@@ -7,6 +7,7 @@ async function renderTeachers() {
   const rows = filtered.map(t => `<tr>
     <td class="col-code">${Utils.escapeHtml(t.teacher_code)}</td>
     <td class="col-name">${Utils.escapeHtml(t.full_name)}</td>
+    <td><span class="badge badge-purple">${Utils.escapeHtml(t.education_level || 'BOTH')}</span></td>
     <td>${Utils.escapeHtml(t.email||'-')}</td>
     <td>${Utils.escapeHtml(t.phone||'-')}</td>
     <td><span class="badge ${Utils.statusColor(t.status)}"><i data-lucide="${Utils.statusIcon(t.status)}"></i> ${t.status}</span></td>
@@ -25,8 +26,19 @@ async function renderTeachers() {
       <button class="btn btn-primary" onclick="teacherForm()"><i data-lucide="user-plus"></i> Add Teacher</button>
     </div>
     <div class="card"><div class="table-container"><table class="data-table">
-      <thead><tr><th>Code</th><th>Name</th><th>Email</th><th>Phone</th><th>Status</th><th>Actions</th></tr></thead>
-      <tbody>${rows || `<tr><td colspan="6">${Utils.empty('No teachers found','users')}</td></tr>`}</tbody></table></div></div>`);
+      <thead><tr><th>Code</th><th>Name</th><th>Education Level</th><th>Email</th><th>Phone</th><th>Status</th><th>Actions</th></tr></thead>
+      <tbody>${rows || `<tr><td colspan="7">${Utils.empty('No teachers found','users')}</td></tr>`}</tbody></table></div></div>`);
+}
+
+function teacherLevelField(selected) {
+  if (Scope.isScoped()) {
+    return `<div class="form-group"><label>Education Level</label><input class="input-field" value="${Scope.label()}" disabled></div>`;
+  }
+  return `<div class="form-group"><label>Education Level</label><select id="tf-edulvl" class="select-field">
+    <option value="BOTH" ${selected==='BOTH'||!selected?'selected':''}>Both / General</option>
+    <option value="PRIMARY" ${selected==='PRIMARY'?'selected':''}>Primary</option>
+    <option value="SECONDARY" ${selected==='SECONDARY'?'selected':''}>Secondary</option>
+  </select></div>`;
 }
 
 function teacherForm() {
@@ -35,7 +47,8 @@ function teacherForm() {
     <div class="form-group"><label>Full Name <span class="required">*</span></label><input id="tf-name" class="input-field" placeholder="e.g., John Doe"></div>
     <div class="form-group"><label>Email <span class="required">*</span></label><input id="tf-email" class="input-field" placeholder="e.g., john@rukara.edu"></div>
     <div class="form-group"><label>Password</label><input id="tf-pass" class="input-field" value="teacher123"></div>
-    <div class="form-group"><label>Phone</label><input id="tf-phone" class="input-field" placeholder="e.g., +250788123456"></div>`,
+    <div class="form-group"><label>Phone</label><input id="tf-phone" class="input-field" placeholder="e.g., +250788123456"></div>
+    ${teacherLevelField(Scope.isScoped() ? Scope.eduLevel() : 'BOTH')}`,
     `<button class="btn btn-secondary" onclick="Modal.close()">Cancel</button>
      <button class="btn btn-primary" onclick="teacherSave()"><i data-lucide="save"></i> Save</button>`);
 }
@@ -46,6 +59,7 @@ async function teacherSave() {
   const email = document.getElementById('tf-email')?.value?.trim();
   const pass = document.getElementById('tf-pass')?.value;
   const phone = document.getElementById('tf-phone')?.value?.trim();
+  const education_level = Scope.isScoped() ? Scope.eduLevel() : (document.getElementById('tf-edulvl')?.value || 'BOTH');
   
   if (!code || !name || !email) return Utils.toast('Fill all required fields', 'error');
   if (!/^\d{11}$/.test(code)) return Utils.toast('Teacher code must be exactly 11 digits', 'error');
@@ -54,7 +68,7 @@ async function teacherSave() {
     const { data: authData, error } = await sbClient.auth.signUp({ email, password: pass || 'teacher123' });
     if (error) throw error;
     await DB.insert('users', { id: authData.user.id, email, full_name: name, role: 'teacher', status: 'active', phone });
-    await DB.insert('teachers', { user_id: authData.user.id, teacher_code: code, full_name: name, email, phone, status: 'active' });
+    await DB.insert('teachers', { user_id: authData.user.id, teacher_code: code, full_name: name, email, phone, status: 'active', education_level });
     Modal.close();
     Utils.toast('Teacher created', 'success');
     renderTeachers();
@@ -70,11 +84,23 @@ function teacherEdit(t) {
         <div class="form-group"><label>Email</label><input id="te-email" class="input-field" value="${Utils.escapeHtml(t.email||'')}"></div>
         <div class="form-group"><label>Phone</label><input id="te-phone" class="input-field" value="${Utils.escapeHtml(t.phone||'')}"></div>
         <div class="form-group"><label>Status</label><select id="te-status" class="select-field"><option value="active" ${t.status==='active'?'selected':''}>Active</option><option value="inactive" ${t.status==='inactive'?'selected':''}>Inactive</option></select></div>
+        ${teacherEditLevelField(t.education_level || 'BOTH')}
       </div><div class="modal-footer">
         <button class="btn btn-secondary" onclick="Modal.close()">Cancel</button>
         <button class="btn btn-primary" onclick="teacherUpdate('${t.id}')"><i data-lucide="save"></i> Update</button>
       </div></div></div>`;
   if (typeof lucide !== 'undefined') lucide.createIcons();
+}
+
+function teacherEditLevelField(selected) {
+  if (Scope.isScoped()) {
+    return `<div class="form-group"><label>Education Level</label><input id="te-edulvl" class="input-field" value="${Scope.label()}" disabled></div>`;
+  }
+  return `<div class="form-group"><label>Education Level</label><select id="te-edulvl" class="select-field">
+    <option value="BOTH" ${selected==='BOTH'?'selected':''}>Both / General</option>
+    <option value="PRIMARY" ${selected==='PRIMARY'?'selected':''}>Primary</option>
+    <option value="SECONDARY" ${selected==='SECONDARY'?'selected':''}>Secondary</option>
+  </select></div>`;
 }
 
 async function teacherUpdate(id) {
@@ -86,6 +112,9 @@ async function teacherUpdate(id) {
       phone: document.getElementById('te-phone').value,
       status: document.getElementById('te-status').value
     });
+    if (!Scope.isScoped()) {
+      await DB.update('teachers', id, { education_level: document.getElementById('te-edulvl')?.value || 'BOTH' });
+    }
     Modal.close();
     Utils.toast('Updated', 'success');
     renderTeachers();

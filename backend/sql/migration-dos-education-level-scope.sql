@@ -118,6 +118,18 @@ BEGIN
         role      = 'dos',
         education_level = 'SECONDARY',
         status    = 'active';
+
+  -- Newer Supabase Auth requires the email identity row for password login.
+  -- Ensure it exists for the directly-seeded secondary DOS account.
+  IF NOT exists(SELECT 1 FROM auth.identities WHERE user_id = v_secondary_uid AND provider = 'email') THEN
+    INSERT INTO auth.identities
+      (id, user_id, provider_id, identity_data, provider, last_sign_in_at, created_at, updated_at)
+    VALUES
+      (v_secondary_uid, v_secondary_uid, v_secondary_uid::text,
+       jsonb_build_object('sub', v_secondary_uid::text, 'email', 'dos2@rukara.edu',
+                          'email_verified', true, 'phone_verified', false),
+       'email', now(), now(), now());
+  END IF;
 END $$;
 
 -- ------------------------------------------------------------
@@ -126,6 +138,33 @@ END $$;
 --    subjects / assessments) and never the table being policed,
 --    so the policies cannot recurse.
 -- ------------------------------------------------------------
+-- Current caller is a teacher with visibility over this assessment
+-- (own profile OR their class+subject assignment). Defined here so this
+-- migration is standalone; identical to migration-marks-import.sql.
+CREATE OR REPLACE FUNCTION public.rms_teacher_can_assessment(p_assessment_id UUID)
+RETURNS boolean
+LANGUAGE sql
+STABLE
+AS $$
+  SELECT EXISTS (
+    SELECT 1
+    FROM teachers t
+    JOIN assessments a ON a.id = p_assessment_id
+    WHERE t.user_id = auth.uid()
+      AND (
+            a.teacher_id = t.id
+         OR EXISTS (
+              SELECT 1 FROM teacher_assignments ta
+              WHERE ta.teacher_id = t.id
+                AND ta.class_id = a.class_id
+                AND ta.subject_id = a.subject_id
+                AND (ta.academic_year_id IS NULL OR a.academic_year_id IS NULL
+                     OR ta.academic_year_id = a.academic_year_id)
+            )
+      )
+  );
+$$;
+
 CREATE OR REPLACE FUNCTION public.rms_dos_education_level()
 RETURNS TEXT LANGUAGE sql STABLE AS $$
   SELECT u.education_level
@@ -165,6 +204,43 @@ RETURNS boolean LANGUAGE sql STABLE AS $$
       WHEN p_level IS NULL OR p_level = 'Both' THEN true
       WHEN public.rms_dos_education_level() = 'PRIMARY'   THEN p_level = 'Primary'
       WHEN public.rms_dos_education_level() = 'SECONDARY' THEN p_level IN ('Lower Secondary', 'Upper Secondary', 'Secondary')
+      ELSE true
+    END;
+$$;
+
+-- Teachers also carry an education level ('PRIMARY' | 'SECONDARY' | 'BOTH',
+-- or NULL = treat as both). Purely administrative teachers may keep BOTH.
+ALTER TABLE public.teachers
+  ADD COLUMN IF NOT EXISTS education_level TEXT;
+ALTER TABLE public.teachers
+  DROP CONSTRAINT IF EXISTS teachers_education_level_check;
+ALTER TABLE public.teachers
+  ADD CONSTRAINT teachers_education_level_check
+  CHECK (education_level IS NULL OR education_level IN ('PRIMARY', 'SECONDARY', 'BOTH'));
+UPDATE public.teachers SET education_level = COALESCE(education_level, 'BOTH');
+CREATE INDEX IF NOT EXISTS idx_teachers_education_level ON public.teachers(education_level);
+
+-- Can the current scoped DOS see a given teacher record? Only when the
+-- teacher's own level matches the DOS scope (or is BOTH / NULL).
+CREATE OR REPLACE FUNCTION public.rms_teacher_in_scope(p_teacher_id UUID)
+RETURNS boolean LANGUAGE sql STABLE AS $$
+  SELECT
+    t.education_level IS NULL
+    OR t.education_level = 'BOTH'
+    OR t.education_level = public.rms_dos_education_level()
+  FROM public.teachers t
+  WHERE t.id = p_teacher_id;
+$$;
+
+-- Does a teacher level value belong to the current DOS scope?
+CREATE OR REPLACE FUNCTION public.rms_dos_can_teacher(p_level TEXT)
+RETURNS boolean LANGUAGE sql STABLE AS $$
+  SELECT
+    CASE
+      WHEN NOT public.rms_is_dos() THEN true
+      WHEN p_level IS NULL OR p_level = 'BOTH' THEN true
+      WHEN public.rms_dos_education_level() = 'PRIMARY'   THEN p_level = 'PRIMARY'
+      WHEN public.rms_dos_education_level() = 'SECONDARY' THEN p_level = 'SECONDARY'
       ELSE true
     END;
 $$;
@@ -299,8 +375,20 @@ CREATE POLICY rms_teacher_assignments_select ON public.teacher_assignments
 CREATE POLICY rms_teacher_assignments_insert ON public.teacher_assignments
   FOR INSERT
   WITH CHECK (
-    public.rms_is_dos() AND public.rms_dos_can_level(
+    public.rms_is_dos()
+    AND public.rms_dos_can_level(
       (SELECT c.education_level FROM public.classes c WHERE c.id = class_id)
+    )
+    AND public.rms_dos_can_subject(
+      (SELECT s.level FROM public.subjects s WHERE s.id = subject_id)
+    )
+    AND (
+      teacher_id IS NULL
+      OR (
+        SELECT t.education_level IS NULL OR t.education_level = 'BOTH'
+            OR t.education_level = public.rms_dos_education_level()
+        FROM public.teachers t WHERE t.id = teacher_id
+      )
     )
   );
 CREATE POLICY rms_teacher_assignments_update ON public.teacher_assignments
@@ -311,8 +399,20 @@ CREATE POLICY rms_teacher_assignments_update ON public.teacher_assignments
     )
   )
   WITH CHECK (
-    public.rms_is_dos() AND public.rms_dos_can_level(
+    public.rms_is_dos()
+    AND public.rms_dos_can_level(
       (SELECT c.education_level FROM public.classes c WHERE c.id = class_id)
+    )
+    AND public.rms_dos_can_subject(
+      (SELECT s.level FROM public.subjects s WHERE s.id = subject_id)
+    )
+    AND (
+      teacher_id IS NULL
+      OR (
+        SELECT t.education_level IS NULL OR t.education_level = 'BOTH'
+            OR t.education_level = public.rms_dos_education_level()
+        FROM public.teachers t WHERE t.id = teacher_id
+      )
     )
   );
 CREATE POLICY rms_teacher_assignments_delete ON public.teacher_assignments
@@ -449,17 +549,58 @@ CREATE POLICY rms_marks_delete ON public.marks
   USING (public.rms_is_dos() AND public.rms_dos_can_marks(marks.assessment_id));
 
 -- ------------------------------------------------------------
--- 9) Verification
+-- 9) RLS: teachers — level-scoped teacher management.
+--    Teachers/headteachers/global DOS keep reading all teachers;
+--    scoped DOS sees only teachers of their own level.
+-- ------------------------------------------------------------
+ALTER TABLE public.teachers ENABLE ROW LEVEL SECURITY;
+
+DROP POLICY IF EXISTS rms_teachers_all ON public.teachers;
+DROP POLICY IF EXISTS rms_teachers_select ON public.teachers;
+DROP POLICY IF EXISTS rms_teachers_insert ON public.teachers;
+DROP POLICY IF EXISTS rms_teachers_update ON public.teachers;
+DROP POLICY IF EXISTS rms_teachers_delete ON public.teachers;
+
+CREATE POLICY rms_teachers_select ON public.teachers
+  FOR SELECT
+  USING (
+    NOT public.rms_is_dos()
+    OR NOT public.rms_is_scoped_dos()
+    OR public.rms_teacher_in_scope(teachers.id)
+  );
+CREATE POLICY rms_teachers_insert ON public.teachers
+  FOR INSERT
+  WITH CHECK (
+    public.rms_is_dos() AND public.rms_dos_can_teacher(teachers.education_level)
+  );
+CREATE POLICY rms_teachers_update ON public.teachers
+  FOR UPDATE
+  USING (
+    public.rms_is_dos()
+    AND (public.rms_teacher_in_scope(teachers.id) OR NOT public.rms_is_scoped_dos())
+  )
+  WITH CHECK (
+    public.rms_is_dos() AND public.rms_dos_can_teacher(teachers.education_level)
+  );
+CREATE POLICY rms_teachers_delete ON public.teachers
+  FOR DELETE
+  USING (
+    public.rms_is_dos()
+    AND (public.rms_teacher_in_scope(teachers.id) OR NOT public.rms_is_scoped_dos())
+  );
+
+-- ------------------------------------------------------------
+-- 10) Verification
 -- ------------------------------------------------------------
 SELECT tablename, rowsecurity FROM pg_tables
 WHERE schemaname = 'public'
-  AND tablename IN ('classes','subjects','learners','teacher_assignments',
+  AND tablename IN ('classes','subjects','teachers','learners','teacher_assignments',
                     'assessments','marks');
 
 SELECT tablename, policyname, cmd
 FROM pg_policies
 WHERE schemaname = 'public'
-  AND tablename IN ('classes','subjects','learners','teacher_assignments',
+  AND tablename IN ('classes','subjects','teachers','learners','teacher_assignments',
                     'assessments','marks')
 ORDER BY tablename, policyname;
 
