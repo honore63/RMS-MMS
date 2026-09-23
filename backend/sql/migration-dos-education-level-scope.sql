@@ -42,95 +42,127 @@ ALTER TABLE public.users
 CREATE INDEX IF NOT EXISTS idx_users_education_level ON public.users(education_level);
 
 -- ------------------------------------------------------------
--- 2) Seed / confirm the two level-specific DOS accounts.
---    Auth users are created via Supabase Auth (bcrypt hash only).
---    NOTE: we do NOT use ON CONFLICT on auth.users because newer
---    Supabase projects have no unique index on auth.users.email
---    (uniqueness lives in auth.identities). We check-then-insert.
+-- 2) Consolidate + confirm the two level-specific DOS accounts.
+--    Self-healing on every run:
+--      * picks ONE surviving auth.users row per email (prefers a row
+--        that already has password + confirmation + email identity),
+--        then deletes ALL other duplicates and their identities,
+--      * (re)creates the keeper with password `dos123` and a valid
+--        auth.identities email row (REQUIRED by newer Supabase Auth),
+--      * re-links public.users.id to the SURVIVING auth row so that
+--        auth.uid() == profile.id (a mismatch silently made the scope
+--        helpers return NULL -> DOS was treated as GLOBAL).
+--    NOTE: no ON CONFLICT on auth.users (no unique email index).
 -- ------------------------------------------------------------
 CREATE EXTENSION IF NOT EXISTS pgcrypto;
 
 DO $$
 DECLARE
-  v_primary_uid   uuid;
-  v_secondary_uid uuid;
+  r         record;
+  v_keeper  uuid;
+  v_row     record;
+  v_email   text;
+  v_lvl     text;
+  v_name    text;
 BEGIN
-  -- ---- Primary DOS (dos@rukara.edu) -------------------------
-  SELECT id INTO v_primary_uid
-  FROM auth.users WHERE email = 'dos@rukara.edu' LIMIT 1;
+  FOR r IN
+    SELECT * FROM (VALUES
+      ('dos@rukara.edu'::text,  'PRIMARY'::text,   'DOS Primary'::text),
+      ('dos2@rukara.edu'::text, 'SECONDARY'::text, 'DOS Secondary'::text)
+    ) t(email, lvl, nm)
+  LOOP
+    v_email := r.email;
+    v_lvl   := r.lvl;
+    v_name  := r.nm;
 
-  IF v_primary_uid IS NULL THEN
-    INSERT INTO auth.users
-      (instance_id, id, aud, role, email,
-       encrypted_password, email_confirmed_at,
-       raw_app_meta_data, raw_user_meta_data,
-       created_at, updated_at, confirmation_token)
-    VALUES
-      ('00000000-0000-0000-0000-000000000000', gen_random_uuid(),
-       'authenticated', 'authenticated', 'dos@rukara.edu',
-       crypt('dos123', gen_salt('bf')), now(),
-       '{"provider":"email","providers":["email"]}', '{}',
-       now(), now(), '')
-    RETURNING id INTO v_primary_uid;
-  ELSE
-    UPDATE auth.users
-    SET email_confirmed_at = COALESCE(auth.users.email_confirmed_at, now()),
-        updated_at = now()
-    WHERE id = v_primary_uid;
-  END IF;
+    -- 1) Pick the keeper row (healthy one first, else newest).
+    SELECT id INTO v_keeper
+    FROM auth.users u
+    WHERE lower(u.email) = v_email
+      AND crypt('dos123', u.encrypted_password) = u.encrypted_password
+      AND u.email_confirmed_at IS NOT NULL
+      AND exists(SELECT 1 FROM auth.identities i WHERE i.user_id = u.id)
+    ORDER BY u.created_at DESC
+    LIMIT 1;
 
-  INSERT INTO public.users (id, email, full_name, role, education_level, status)
-  VALUES (v_primary_uid, 'dos@rukara.edu', 'DOS Primary', 'dos', 'PRIMARY', 'active')
-  ON CONFLICT (email) DO UPDATE
-    SET full_name = 'DOS Primary',
-        role      = 'dos',
-        education_level = 'PRIMARY',
-        status    = 'active';
+    IF v_keeper IS NULL THEN
+      SELECT id INTO v_keeper
+      FROM auth.users u
+      WHERE lower(u.email) = v_email
+      ORDER BY u.created_at DESC
+      LIMIT 1;
+    END IF;
 
-  -- ---- Secondary DOS (dos2@rukara.edu) ----------------------
-  SELECT id INTO v_secondary_uid
-  FROM auth.users WHERE email = 'dos2@rukara.edu' LIMIT 1;
+    -- 2) Delete every OTHER auth.users row for this email.
+    FOR v_row IN
+      SELECT id FROM auth.users u WHERE lower(u.email) = v_email
+    LOOP
+      IF v_row.id IS DISTINCT FROM v_keeper THEN
+        DELETE FROM auth.identities WHERE user_id = v_row.id;
+        DELETE FROM auth.users   WHERE id = v_row.id;
+      END IF;
+    END LOOP;
 
-  IF v_secondary_uid IS NULL THEN
-    INSERT INTO auth.users
-      (instance_id, id, aud, role, email,
-       encrypted_password, email_confirmed_at,
-       raw_app_meta_data, raw_user_meta_data,
-       created_at, updated_at, confirmation_token)
-    VALUES
-      ('00000000-0000-0000-0000-000000000000', gen_random_uuid(),
-       'authenticated', 'authenticated', 'dos2@rukara.edu',
-       crypt('dos123', gen_salt('bf')), now(),
-       '{"provider":"email","providers":["email"]}', '{}',
-       now(), now(), '')
-    RETURNING id INTO v_secondary_uid;
-  ELSE
-    UPDATE auth.users
-    SET email_confirmed_at = COALESCE(auth.users.email_confirmed_at, now()),
-        updated_at = now()
-    WHERE id = v_secondary_uid;
-  END IF;
+    -- 3) Create the keeper if nothing survived.
+    IF v_keeper IS NULL THEN
+      INSERT INTO auth.users
+        (instance_id, id, aud, role, email,
+         encrypted_password, email_confirmed_at,
+         raw_app_meta_data, raw_user_meta_data,
+         created_at, updated_at, confirmation_token)
+      VALUES
+        ('00000000-0000-0000-0000-000000000000', gen_random_uuid(),
+         'authenticated', 'authenticated', v_email,
+         crypt('dos123', gen_salt('bf')), now(),
+         '{"provider":"email","providers":["email"]}', '{}',
+         now(), now(), '')
+      RETURNING id INTO v_keeper;
+    ELSE
+      UPDATE auth.users
+      SET encrypted_password = crypt('dos123', gen_salt('bf')),
+          email_confirmed_at = COALESCE(auth.users.email_confirmed_at, now()),
+          updated_at = now()
+      WHERE id = v_keeper;
+    END IF;
 
-  INSERT INTO public.users (id, email, full_name, role, education_level, status)
-  VALUES (v_secondary_uid, 'dos2@rukara.edu', 'DOS Secondary', 'dos', 'SECONDARY', 'active')
-  ON CONFLICT (email) DO UPDATE
-    SET full_name = 'DOS Secondary',
-        role      = 'dos',
-        education_level = 'SECONDARY',
-        status    = 'active';
+    -- 4) Ensure the email identity row (password login requirement).
+    IF NOT exists(SELECT 1 FROM auth.identities WHERE user_id = v_keeper AND provider = 'email') THEN
+      INSERT INTO auth.identities
+        (id, user_id, provider_id, identity_data, provider, last_sign_in_at, created_at, updated_at)
+      VALUES
+        (v_keeper, v_keeper, v_keeper::text,
+         jsonb_build_object('sub', v_keeper::text, 'email', v_email,
+                            'email_verified', true, 'phone_verified', false),
+         'email', now(), now(), now());
+    END IF;
 
-  -- Newer Supabase Auth requires the email identity row for password login.
-  -- Ensure it exists for the directly-seeded secondary DOS account.
-  IF NOT exists(SELECT 1 FROM auth.identities WHERE user_id = v_secondary_uid AND provider = 'email') THEN
-    INSERT INTO auth.identities
-      (id, user_id, provider_id, identity_data, provider, last_sign_in_at, created_at, updated_at)
-    VALUES
-      (v_secondary_uid, v_secondary_uid, v_secondary_uid::text,
-       jsonb_build_object('sub', v_secondary_uid::text, 'email', 'dos2@rukara.edu',
-                          'email_verified', true, 'phone_verified', false),
-       'email', now(), now(), now());
-  END IF;
+    -- 5) Re-link the profile to the SURVIVING auth row. If an FK blocks
+    --    the id change, fall back to keeping the old id (account stays
+    --    fail-closed/denied until re-associated) without aborting the run.
+    BEGIN
+      INSERT INTO public.users (id, email, full_name, role, education_level, status)
+      VALUES (v_keeper, v_email, v_name, 'dos', v_lvl, 'active')
+      ON CONFLICT (email) DO UPDATE
+        SET id = EXCLUDED.id,
+            full_name = EXCLUDED.full_name,
+            role      = EXCLUDED.role,
+            education_level = EXCLUDED.education_level,
+            status    = EXCLUDED.status;
+    EXCEPTION WHEN others THEN
+      RAISE NOTICE 'Profile re-link deferred for %: %', v_email, SQLERRM;
+      UPDATE public.users u
+      SET full_name = v_name, role = 'dos',
+          education_level = v_lvl, status = 'active'
+      WHERE u.email = v_email;
+    END;
+  END LOOP;
 END $$;
+
+-- IMPORTANT: after running this migration you MUST sign out and sign in
+-- again with the DOS accounts. The JWT `sub` must equal the surviving
+-- auth row so the scope helpers resolve the education level. A stale
+-- token against a deleted auth row results in DENIED access (fail-closed),
+-- never a widened one.
 
 -- ------------------------------------------------------------
 -- 3) Scope helper functions (used by the RLS policies below).
@@ -145,6 +177,8 @@ CREATE OR REPLACE FUNCTION public.rms_teacher_can_assessment(p_assessment_id UUI
 RETURNS boolean
 LANGUAGE sql
 STABLE
+SECURITY DEFINER
+SET search_path = public, pg_temp
 AS $$
   SELECT EXISTS (
     SELECT 1
@@ -180,31 +214,34 @@ $$;
 
 -- Does the caller's scope allow a class education level value?
 -- Unscoped callers (teachers, headteachers) are always allowed; DOS
--- accounts are limited to their own level (PRIMARY -> 'Primary',
--- SECONDARY -> 'Lower Secondary' / 'Upper Secondary').
+-- accounts are limited to their own level.
+-- FAIL-CLOSED: a DOS whose education level cannot be resolved (profile
+-- missing or mismatched) is DENIED everything, never treated as global.
 CREATE OR REPLACE FUNCTION public.rms_dos_can_level(p_level TEXT)
 RETURNS boolean LANGUAGE sql STABLE AS $$
   SELECT
     CASE
       WHEN NOT public.rms_is_dos() THEN true
+      WHEN public.rms_dos_education_level() IS NULL THEN false
       WHEN p_level IS NULL        THEN true
       WHEN public.rms_dos_education_level() = 'PRIMARY'   THEN p_level = 'Primary'
       WHEN public.rms_dos_education_level() = 'SECONDARY' THEN p_level IN ('Lower Secondary', 'Upper Secondary')
-      ELSE true
+      ELSE false
     END;
 $$;
 
 -- Subject-level check ('Both' is shared and allowed for every scope;
--- 'Secondary' is a SECONDARY-scope alias for Lower+Upper).
+-- 'Secondary' is a SECONDARY-scope alias for Lower+Upper). FAIL-CLOSED.
 CREATE OR REPLACE FUNCTION public.rms_dos_can_subject(p_level TEXT)
 RETURNS boolean LANGUAGE sql STABLE AS $$
   SELECT
     CASE
       WHEN NOT public.rms_is_dos() THEN true
+      WHEN public.rms_dos_education_level() IS NULL THEN false
       WHEN p_level IS NULL OR p_level = 'Both' THEN true
       WHEN public.rms_dos_education_level() = 'PRIMARY'   THEN p_level = 'Primary'
       WHEN public.rms_dos_education_level() = 'SECONDARY' THEN p_level IN ('Lower Secondary', 'Upper Secondary', 'Secondary')
-      ELSE true
+      ELSE false
     END;
 $$;
 
@@ -219,11 +256,16 @@ ALTER TABLE public.teachers
   CHECK (education_level IS NULL OR education_level IN ('PRIMARY', 'SECONDARY', 'BOTH'));
 UPDATE public.teachers SET education_level = COALESCE(education_level, 'BOTH');
 CREATE INDEX IF NOT EXISTS idx_teachers_education_level ON public.teachers(education_level);
-
 -- Can the current scoped DOS see a given teacher record? Only when the
 -- teacher's own level matches the DOS scope (or is BOTH / NULL).
+-- SECURITY DEFINER: this reads public.teachers, so without it a teachers
+-- RLS policy calling it would re-enter the policy (infinite recursion ->
+-- statement timeout 57014). Running as the owner bypasses RLS here.
 CREATE OR REPLACE FUNCTION public.rms_teacher_in_scope(p_teacher_id UUID)
-RETURNS boolean LANGUAGE sql STABLE AS $$
+RETURNS boolean LANGUAGE sql STABLE
+SECURITY DEFINER
+SET search_path = public, pg_temp
+AS $$
   SELECT
     t.education_level IS NULL
     OR t.education_level = 'BOTH'
@@ -232,16 +274,17 @@ RETURNS boolean LANGUAGE sql STABLE AS $$
   WHERE t.id = p_teacher_id;
 $$;
 
--- Does a teacher level value belong to the current DOS scope?
+-- Does a teacher level value belong to the current DOS scope? FAIL-CLOSED.
 CREATE OR REPLACE FUNCTION public.rms_dos_can_teacher(p_level TEXT)
 RETURNS boolean LANGUAGE sql STABLE AS $$
   SELECT
     CASE
       WHEN NOT public.rms_is_dos() THEN true
+      WHEN public.rms_dos_education_level() IS NULL THEN false
       WHEN p_level IS NULL OR p_level = 'BOTH' THEN true
       WHEN public.rms_dos_education_level() = 'PRIMARY'   THEN p_level = 'PRIMARY'
       WHEN public.rms_dos_education_level() = 'SECONDARY' THEN p_level = 'SECONDARY'
-      ELSE true
+      ELSE false
     END;
 $$;
 
@@ -549,45 +592,41 @@ CREATE POLICY rms_marks_delete ON public.marks
   USING (public.rms_is_dos() AND public.rms_dos_can_marks(marks.assessment_id));
 
 -- ------------------------------------------------------------
--- 9) RLS: teachers — level-scoped teacher management.
---    Teachers/headteachers/global DOS keep reading all teachers;
---    scoped DOS sees only teachers of their own level.
+-- 9) RLS: teachers — level-scoped teacher management with FULL CRUD
+--    for the DOS within its own level. FAIL-CLOSED: a DOS without a
+--    resolvable level sees NO teachers and can do nothing.
+--    Teachers/headteachers/other roles keep reading all rows.
 -- ------------------------------------------------------------
 ALTER TABLE public.teachers ENABLE ROW LEVEL SECURITY;
 
-DROP POLICY IF EXISTS rms_teachers_all ON public.teachers;
-DROP POLICY IF EXISTS rms_teachers_select ON public.teachers;
-DROP POLICY IF EXISTS rms_teachers_insert ON public.teachers;
-DROP POLICY IF EXISTS rms_teachers_update ON public.teachers;
-DROP POLICY IF EXISTS rms_teachers_delete ON public.teachers;
+DO $$
+DECLARE pol RECORD;
+BEGIN
+  FOR pol IN
+    SELECT pp.policyname
+    FROM pg_policies pp
+    WHERE pp.schemaname = 'public' AND pp.tablename = 'teachers'
+  LOOP
+    EXECUTE format('DROP POLICY IF EXISTS %I ON public.teachers', pol.policyname);
+  END LOOP;
+END $$;
 
 CREATE POLICY rms_teachers_select ON public.teachers
   FOR SELECT
   USING (
     NOT public.rms_is_dos()
-    OR NOT public.rms_is_scoped_dos()
-    OR public.rms_teacher_in_scope(teachers.id)
+    OR (public.rms_is_scoped_dos() AND public.rms_teacher_in_scope(teachers.id))
   );
 CREATE POLICY rms_teachers_insert ON public.teachers
   FOR INSERT
-  WITH CHECK (
-    public.rms_is_dos() AND public.rms_dos_can_teacher(teachers.education_level)
-  );
+  WITH CHECK (public.rms_is_dos() AND public.rms_is_scoped_dos() AND public.rms_dos_can_teacher(teachers.education_level));
 CREATE POLICY rms_teachers_update ON public.teachers
   FOR UPDATE
-  USING (
-    public.rms_is_dos()
-    AND (public.rms_teacher_in_scope(teachers.id) OR NOT public.rms_is_scoped_dos())
-  )
-  WITH CHECK (
-    public.rms_is_dos() AND public.rms_dos_can_teacher(teachers.education_level)
-  );
+  USING (public.rms_is_dos() AND public.rms_is_scoped_dos() AND public.rms_teacher_in_scope(teachers.id))
+  WITH CHECK (public.rms_is_dos() AND public.rms_is_scoped_dos() AND public.rms_dos_can_teacher(teachers.education_level));
 CREATE POLICY rms_teachers_delete ON public.teachers
   FOR DELETE
-  USING (
-    public.rms_is_dos()
-    AND (public.rms_teacher_in_scope(teachers.id) OR NOT public.rms_is_scoped_dos())
-  );
+  USING (public.rms_is_dos() AND public.rms_is_scoped_dos() AND public.rms_teacher_in_scope(teachers.id));
 
 -- ------------------------------------------------------------
 -- 10) Verification
@@ -597,6 +636,12 @@ WHERE schemaname = 'public'
   AND tablename IN ('classes','subjects','teachers','learners','teacher_assignments',
                     'assessments','marks');
 
+SELECT tablename, count(*) AS policy_count FROM pg_policies
+WHERE schemaname = 'public'
+  AND tablename IN ('classes','subjects','teachers','learners','teacher_assignments',
+                    'assessments','marks')
+GROUP BY tablename ORDER BY tablename;
+
 SELECT tablename, policyname, cmd
 FROM pg_policies
 WHERE schemaname = 'public'
@@ -604,6 +649,17 @@ WHERE schemaname = 'public'
                     'assessments','marks')
 ORDER BY tablename, policyname;
 
-SELECT email, role, education_level, status FROM public.users
-WHERE email IN ('dos@rukara.edu', 'dos2@rukara.edu')
-ORDER BY email;
+-- One auth row per DOS email, identity present, password OK,
+-- and profile.id == surviving auth.id (auth.uid() must equal it).
+SELECT u.id,
+       u.email,
+       u.email_confirmed_at IS NOT NULL AS confirmed,
+       crypt('dos123', u.encrypted_password) = u.encrypted_password AS pw_ok,
+       (SELECT count(*) FROM auth.users x WHERE lower(x.email) = lower(u.email)) AS dup_rows,
+       (SELECT count(*) FROM auth.identities i WHERE i.user_id = u.id) AS identity_count,
+       (p.id = u.id) AS profile_matches_auth,
+       p.role, p.education_level, p.status
+FROM auth.users u
+LEFT JOIN public.users p ON p.id = u.id
+WHERE lower(u.email) IN ('dos@rukara.edu', 'dos2@rukara.edu')
+ORDER BY u.email;
