@@ -216,14 +216,15 @@ $$;
 -- Unscoped callers (teachers, headteachers) are always allowed; DOS
 -- accounts are limited to their own level.
 -- FAIL-CLOSED: a DOS whose education level cannot be resolved (profile
--- missing or mismatched) is DENIED everything, never treated as global.
+-- missing or mismatched) is DENIED everything. A class WITHOUT a level
+-- is also DENIED to a scoped DOS (never shared to both) — unclassified
+-- classes must be backfilled first (see Section 3b).
 CREATE OR REPLACE FUNCTION public.rms_dos_can_level(p_level TEXT)
 RETURNS boolean LANGUAGE sql STABLE AS $$
   SELECT
     CASE
       WHEN NOT public.rms_is_dos() THEN true
       WHEN public.rms_dos_education_level() IS NULL THEN false
-      WHEN p_level IS NULL        THEN true
       WHEN public.rms_dos_education_level() = 'PRIMARY'   THEN p_level = 'Primary'
       WHEN public.rms_dos_education_level() = 'SECONDARY' THEN p_level IN ('Lower Secondary', 'Upper Secondary')
       ELSE false
@@ -231,14 +232,15 @@ RETURNS boolean LANGUAGE sql STABLE AS $$
 $$;
 
 -- Subject-level check ('Both' is shared and allowed for every scope;
--- 'Secondary' is a SECONDARY-scope alias for Lower+Upper). FAIL-CLOSED.
+-- 'Secondary' is a SECONDARY-scope alias for Lower+Upper). FAIL-CLOSED:
+-- NULL subject level is denied to a scoped DOS.
 CREATE OR REPLACE FUNCTION public.rms_dos_can_subject(p_level TEXT)
 RETURNS boolean LANGUAGE sql STABLE AS $$
   SELECT
     CASE
       WHEN NOT public.rms_is_dos() THEN true
       WHEN public.rms_dos_education_level() IS NULL THEN false
-      WHEN p_level IS NULL OR p_level = 'Both' THEN true
+      WHEN p_level = 'Both' THEN true
       WHEN public.rms_dos_education_level() = 'PRIMARY'   THEN p_level = 'Primary'
       WHEN public.rms_dos_education_level() = 'SECONDARY' THEN p_level IN ('Lower Secondary', 'Upper Secondary', 'Secondary')
       ELSE false
@@ -256,22 +258,103 @@ ALTER TABLE public.teachers
   CHECK (education_level IS NULL OR education_level IN ('PRIMARY', 'SECONDARY', 'BOTH'));
 UPDATE public.teachers SET education_level = COALESCE(education_level, 'BOTH');
 CREATE INDEX IF NOT EXISTS idx_teachers_education_level ON public.teachers(education_level);
--- Can the current scoped DOS see a given teacher record? Only when the
--- teacher's own level matches the DOS scope (or is BOTH / NULL).
--- SECURITY DEFINER: this reads public.teachers, so without it a teachers
--- RLS policy calling it would re-enter the policy (infinite recursion ->
--- statement timeout 57014). Running as the owner bypasses RLS here.
+
+-- ------------------------------------------------------------
+-- 3b) Backfill classes.education_level (the REAL table stores the level in
+--     `classes.level`; `education_level` is added by the grouping migration.
+--     Any class left NULL was being shared to BOTH DOSes — the leak).
+--     Idempotent. Matches migration-education-level-class-grouping.sql.
+-- ------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS public.education_levels (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  name TEXT UNIQUE NOT NULL,
+  code TEXT UNIQUE NOT NULL,
+  description TEXT,
+  display_order INT DEFAULT 0,
+  active BOOLEAN DEFAULT true,
+  created_at TIMESTAMPTZ DEFAULT NOW()
+);
+ALTER TABLE public.education_levels ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS "everyone_read_education_levels" ON public.education_levels;
+CREATE POLICY "everyone_read_education_levels" ON public.education_levels FOR SELECT USING (true);
+GRANT SELECT ON TABLE public.education_levels TO authenticated, anon;
+
+INSERT INTO public.education_levels (name, code, description, display_order, active)
+VALUES
+  ('Primary', 'PRIMARY', 'Primary Education (P1 - P6)', 1, true),
+  ('Lower Secondary', 'LOWER_SECONDARY', 'Lower Secondary Education (S1 - S3)', 2, true),
+  ('Upper Secondary', 'UPPER_SECONDARY', 'Upper Secondary Education (S4 - S6)', 3, true),
+  ('Nursery', 'NURSERY', 'Pre-Primary / Nursery Education', 0, false),
+  ('TVET', 'TVET', 'Technical & Vocational Education', 4, false)
+ON CONFLICT (code) DO UPDATE SET
+  name = EXCLUDED.name, description = EXCLUDED.description, display_order = EXCLUDED.display_order;
+
+ALTER TABLE public.classes ADD COLUMN IF NOT EXISTS education_level TEXT;
+ALTER TABLE public.classes ADD COLUMN IF NOT EXISTS education_level_id UUID REFERENCES public.education_levels(id);
+
+UPDATE public.classes
+SET education_level = 'Primary',
+    education_level_id = (SELECT id FROM public.education_levels WHERE code = 'PRIMARY' LIMIT 1)
+WHERE (education_level IS NULL OR education_level <> 'Primary')
+  AND (level IN ('P1','P2','P3','P4','P5','P6') OR level ILIKE 'P%' OR name ILIKE 'P%'
+       OR level ~ '^P[0-9]' OR name ~ '^P[0-9]');
+
+UPDATE public.classes
+SET education_level = 'Lower Secondary',
+    education_level_id = (SELECT id FROM public.education_levels WHERE code = 'LOWER_SECONDARY' LIMIT 1)
+WHERE (education_level IS NULL OR education_level <> 'Lower Secondary')
+  AND (level IN ('S1','S2','S3') OR name ~ '^S[1-3](\s|$)' OR level ~ '^S[1-3]');
+
+UPDATE public.classes
+SET education_level = 'Upper Secondary',
+    education_level_id = (SELECT id FROM public.education_levels WHERE code = 'UPPER_SECONDARY' LIMIT 1)
+WHERE (education_level IS NULL OR education_level <> 'Upper Secondary')
+  AND (level IN ('S4','S5','S6') OR name ~ '^S[4-6](\s|$)' OR level ~ '^S[4-6]');
+
+-- Default fallback for any class still unclassified (never leave NULL,
+-- NULL means "hidden from both DOSes").
+UPDATE public.classes
+SET education_level = 'Lower Secondary',
+    education_level_id = (SELECT id FROM public.education_levels WHERE code = 'LOWER_SECONDARY' LIMIT 1)
+WHERE education_level IS NULL;
+
+UPDATE public.subjects SET level = 'Both' WHERE level IS NULL;
+UPDATE public.subjects SET education_level = level WHERE education_level IS NULL;
+
+-- Can the current scoped DOS see a given teacher record? Scope is derived
+-- from the teacher's ACADEMIC ASSIGNMENTS (spec #7), not just the label:
+--   1) an explicitly other-level teacher is never visible,
+--   2) a matching/BOTH/NULL teacher with NO assignments is shared,
+--   3) otherwise the teacher is visible ONLY when every assignment's class
+--      is within the DOS's level (no assignment leaks into the other level).
+-- SECURITY DEFINER: reads policed tables, which bypasses RLS here and
+-- prevents the policy from re-entering itself (the 57014 recursion bug).
 CREATE OR REPLACE FUNCTION public.rms_teacher_in_scope(p_teacher_id UUID)
 RETURNS boolean LANGUAGE sql STABLE
 SECURITY DEFINER
 SET search_path = public, pg_temp
 AS $$
+  WITH t AS (
+    SELECT t.education_level AS lvl
+    FROM public.teachers t
+    WHERE t.id = p_teacher_id
+  ),
+  x AS (
+    SELECT DISTINCT c.education_level AS lvl
+    FROM public.teacher_assignments ta
+    JOIN public.classes c ON c.id = ta.class_id
+    WHERE ta.teacher_id = p_teacher_id
+      AND c.education_level IS NOT NULL
+  )
   SELECT
-    t.education_level IS NULL
-    OR t.education_level = 'BOTH'
-    OR t.education_level = public.rms_dos_education_level()
-  FROM public.teachers t
-  WHERE t.id = p_teacher_id;
+    CASE
+      WHEN NOT exists(SELECT 1 FROM t) THEN false
+      WHEN t.lvl IS NOT NULL AND t.lvl NOT IN ('BOTH', public.rms_dos_education_level()) THEN false
+      WHEN NOT exists(SELECT 1 FROM x) THEN true
+      WHEN NOT exists(SELECT 1 FROM x xr WHERE NOT public.rms_dos_can_level(xr.lvl)) THEN true
+      ELSE false
+    END
+  FROM t;
 $$;
 
 -- Does a teacher level value belong to the current DOS scope? FAIL-CLOSED.
