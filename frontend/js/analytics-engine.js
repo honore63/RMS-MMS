@@ -34,6 +34,12 @@ const AnalyticsEngine = {
       scale: (await Utils.getGradingScale()) || [],
       settings: (await getSchoolSettings()) || { pass_mark: 50 }
     };
+    if (typeof Scope !== 'undefined' && Scope.isScoped()) {
+      ctx.classes = ctx.classes.filter(c => Scope.matchesClass(c));
+      ctx.subjects = ctx.subjects.filter(s => Scope.matchesSubject(s));
+      const classIds = new Set(ctx.classes.map(c => String(c.id)));
+      ctx.learners = ctx.learners.filter(l => classIds.has(String(l.class_id)));
+    }
     ctx.classByName = id => ctx.classes.find(c => c.id === id);
     ctx.subjectById = id => ctx.subjects.find(s => s.id === id);
     ctx.termById = id => ctx.terms.find(t => t.id === id);
@@ -50,6 +56,9 @@ const AnalyticsEngine = {
       ctx.assignments.forEach(a => pairKeys.add(a.class_id + '|' + a.subject_id));
       ctx.isTeacherScoped = (a) => pairKeys.has(a.class_id + '|' + a.subject_id);
       const allowedClasses = new Set(ctx.assignments.map(a => a.class_id).filter(Boolean));
+      const allowedSubjects = new Set(ctx.assignments.map(a => a.subject_id).filter(Boolean));
+      ctx.classes = ctx.classes.filter(c => allowedClasses.has(c.id));
+      ctx.subjects = ctx.subjects.filter(s => allowedSubjects.has(s.id));
       ctx.learners = ctx.learners.filter(l => allowedClasses.has(l.class_id));
     }
     this._contextCache = ctx;
@@ -121,6 +130,12 @@ const AnalyticsEngine = {
     let { data: assessments, error } = await q;
     if (error) throw error;
     assessments = assessments || [];
+
+    if (typeof Scope !== 'undefined' && Scope.isScoped()) {
+      const classIds = new Set((ctx.classes || []).map(c => String(c.id)));
+      const subjectIds = new Set((ctx.subjects || []).map(s => String(s.id)));
+      assessments = assessments.filter(a => classIds.has(String(a.class_id)) && subjectIds.has(String(a.subject_id)));
+    }
 
     if (isTeacher) {
       assessments = assessments.filter(a => ctx.teacherId

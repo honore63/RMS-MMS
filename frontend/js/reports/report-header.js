@@ -11,7 +11,7 @@ const ReportHeader = {
     const showLogoLeft = opts.showLogoLeft !== false;
     const showLogoRight = opts.showLogoRight !== false;
     const ministryLogo = s.ministry_logo_url || 'public/logo.webp';
-    const schoolLogo = s.logo_url || 'public/logo.webp';
+    const schoolLogo = s.school_logo_url || s.logo_url || 'public/logo.webp';
     const schoolName = s.school_name || 'RUKARA MODEL SCHOOL';
     const schoolCode = s.school_code || '541023';
     const email = s.school_email || '';
@@ -61,7 +61,7 @@ const ReportHeader = {
     return `
       <div class="rms-report-footer">
         <div class="rms-footer-left">
-          <span>${Utils.escapeHtml(s.school_name || 'RMS-MIS')}</span>
+          <span>RMS-MIS | ${Utils.escapeHtml(s.school_name || 'RUKARA MODEL SCHOOL')}</span>
           <span>Marks Information System</span>
         </div>
         <div class="rms-footer-center">
@@ -73,6 +73,42 @@ const ReportHeader = {
           <span>Page <span class="rms-page-num"></span> of <span class="rms-total-pages"></span></span>
         </div>
       </div>`;
+  },
+
+  emptyState(message, options = {}) {
+    const msg = message || 'No data is currently available for the selected options.';
+    return `<div class="rms-empty-state">${options.icon ? `<i data-lucide="${options.icon}" style="width:22px;height:22px;opacity:.6"></i>` : ''}<div>${Utils.escapeHtml(msg)}</div></div>`;
+  },
+
+  warningBanner(message) {
+    return `<div class="rms-warn-banner"><i data-lucide="alert-triangle" style="width:14px;height:14px;flex:none"></i><span>${Utils.escapeHtml(message || '')}</span></div>`;
+  },
+
+  infoBanner(message) {
+    return `<div class="rms-info-banner"><i data-lucide="info" style="width:14px;height:14px;flex:none"></i><span>${Utils.escapeHtml(message || '')}</span></div>`;
+  },
+
+  applyPageNumbers(root) {
+    try {
+      const host = root || document;
+      const pages = host.querySelectorAll('.rms-a4-page-break');
+      const total = Math.max(pages.length + 1, 1);
+      host.querySelectorAll('.rms-page-num').forEach(el => { el.textContent = '1'; });
+      host.querySelectorAll('.rms-total-pages').forEach(el => { el.textContent = String(total); });
+    } catch (e) { /* printable preview only */ }
+  },
+
+  numberPagesInPrint(page) {
+    try {
+      const doc = page.document;
+      const markers = doc.querySelectorAll('.rms-page-break');
+      const total = Math.max(markers.length + 1, 1);
+      markers.forEach((m, i) => {
+        const num = i + 1;
+        m.querySelectorAll('.rms-page-num').forEach(el => { el.textContent = String(num); });
+      });
+      doc.querySelectorAll('.rms-total-pages').forEach(el => { el.textContent = String(total); });
+    } catch (e) { /* ignore */ }
   },
 
   getPageBreak() {
@@ -117,18 +153,13 @@ const ReportHeader = {
 
 function schoolReportHeader(title, opts = {}) {
   const settings = typeof getSchoolSettings === 'function' ? getSchoolSettings() : {};
-  const schoolName = settings.school_name || 'RUKARA MODEL SCHOOL';
-  const schoolCode = settings.school_code || '541023';
-  const email = settings.school_email || '';
-  const phone = settings.school_phone || '';
-  const ministryLogo = settings.ministry_logo_url || 'public/logo.webp';
-  const schoolLogo = settings.logo_url || 'public/logo.webp';
   const academicYear = opts.academicYear || '';
   const term = opts.term || '';
   const className = opts.className || '';
   const subject = opts.subject || '';
-
-  return `<div class="rms-report-header"><div class="rms-header-left"><img src="${Utils.escapeHtml(ministryLogo)}" class="rms-header-logo" alt="Ministry Logo"><div class="rms-header-text"><div style="font-weight:800;font-size:14px;color:#1e3a5f">${Utils.escapeHtml(schoolName)}</div><div style="font-size:10px;color:#666">School Code: ${schoolCode} | ${Utils.escapeHtml(email)} | ${Utils.escapeHtml(phone)}</div></div></div><div class="rms-header-center"><div style="font-weight:800;font-size:16px;color:#1e3a5f;text-transform:uppercase">${Utils.escapeHtml(title)}</div><div style="font-size:12px;color:#555;margin-top:4px">${Utils.escapeHtml(academicYear)} | ${Utils.escapeHtml(term)} | ${Utils.escapeHtml(className)} | ${Utils.escapeHtml(subject)}</div></div><div class="rms-header-right"><img src="${Utils.escapeHtml(schoolLogo)}" class="rms-header-logo" alt="School Logo"></div></div><div class="rms-header-divider"></div>`;
+  const subtitle = [academicYear, term, className, subject].filter(Boolean).join(' | ');
+  const levelLabel = opts.levelLabel || (opts.level ? String(opts.level).toUpperCase() : '');
+  return ReportHeader.getOfficialHeader({ settings, title, subtitle, levelLabel, showLogoLeft: true, showLogoRight: true });
 }
 
 function schoolSignatureSection(teacherName, dosName, headteacherName) {

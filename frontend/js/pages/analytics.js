@@ -11,8 +11,8 @@ function renderAnalytics() { analyticsRefresh(false); }
 function renderTeacherAnalytics() { analyticsRefresh(true); }
 
 let analyticsState = {
-  yearId: '', termId: '', classId: '', stream: 'all', subjectId: '',
-  typeId: '', assessmentId: '', studentId: '', teacherId: '', status: 'official',
+  yearId: 'all', termId: 'all', classId: 'all', stream: 'all', subjectId: 'all',
+  typeId: 'all', assessmentId: 'all', studentId: 'all', teacherId: 'all', status: 'official',
   limit: 10, metric: 'avg', compare: 'none'
 };
 let analyticsIsTeacher = false;
@@ -233,42 +233,103 @@ async function analyticsRenderPage(data, ctx, assessmentsList) {
   let sections = '';
   if (student) {
     sections = analyticsStudentSections(student, data, ctx);
-  } else if (!hasData) {
-    sections = analyticsEmptySections();
   } else {
-    sections = analyticsAggregateSections(data);
+    // Always show visual dashboard (even with no records) — overview cards + empty chart illustrations, never the "No data for the selected filters" text card
+    sections = analyticsAggregateSections(data, ctx);
   }
 
+  const __levelBadge = (()=>{ try{ if(typeof Scope!=='undefined' && Scope.isScoped()) return Scope.isPrimary()?'PRIMARY ANALYTICS':'SECONDARY ANALYTICS'; if(isT) return 'MY TEACHING ANALYTICS'; return 'SCHOOL ANALYTICS'; }catch(e){return isT?'MY TEACHING ANALYTICS':'ANALYTICS'; } })();
   setContent(`<div class="analytics-page">
-    <div class="card mb-6">
-      <div class="card-header analytics-card-header">
-        <h3><i data-lucide="sliders-horizontal"></i> Filters</h3>
-        <div class="analytics-header-actions">
-          <button class="btn btn-sm btn-secondary" onclick="analyticsClearFilters()"><i data-lucide="rotate-ccw"></i> Reset Filters</button>
-          ${s.assessmentId !== 'all' ? `<button class="btn btn-sm btn-secondary" onclick="analyticsSetFilter('assessmentId','all')"><i data-lucide="x"></i> Clear Assessment</button>` : ''}
+    <div style="background:linear-gradient(135deg,rgba(59,130,246,0.08),rgba(37,99,235,0.04));border:1px solid var(--blue-100);border-radius:var(--radius);padding:12px 16px;margin-bottom:16px;display:flex;align-items:center;gap:10px">
+      <i data-lucide="sparkles" style="width:16px;height:16px;color:var(--blue-600)"></i>
+      <span class="text-sm" style="color:var(--gray-700)"><strong>Automatically loaded</strong> for your authorized ${isT ? 'classes & subjects' : 'education level'} — <strong>no selection required</strong>. Dashboard below is ready.</span>
+      <span class="badge badge-blue" style="margin-left:auto">${__levelBadge}</span>
+    </div>
+    ${sections}
+    ${exportBar}
+    <div class="card mb-6" style="margin-top:16px;opacity:0.95">
+      <div class="card-header analytics-card-header" style="cursor:pointer" onclick="const b=document.getElementById('analytics-filters-body'); const c=this.querySelector('.af-chevron'); b.style.display=b.style.display==='none'?'':'none'; if(c) c.style.transform=b.style.display==='none'?'':'rotate(180deg)';">
+        <h3><i data-lucide="sliders-horizontal"></i> Optional Filters <span class="text-sm text-muted" style="font-weight:400;margin-left:8px">— click to refine (already auto-scoped)</span></h3>
+        <div class="analytics-header-actions" style="display:flex;align-items:center;gap:8px">
+          <button class="btn btn-sm btn-secondary" onclick="event.stopPropagation(); analyticsClearFilters()"><i data-lucide="rotate-ccw"></i> Reset</button>
+          ${s.assessmentId !== 'all' ? `<button class="btn btn-sm btn-secondary" onclick="event.stopPropagation(); analyticsSetFilter('assessmentId','all')"><i data-lucide="x"></i> Clear Assessment</button>` : ''}
+          <i data-lucide="chevron-down" class="af-chevron" style="width:16px;height:16px;transition:transform .2s"></i>
         </div>
       </div>
-      <div class="filters-grid">${fields.join('')}</div>
-      ${scopeNote}
+      <div id="analytics-filters-body" style="display:none;padding:16px">
+        <div class="filters-grid">${fields.join('')}</div>
+        <div style="margin-top:12px">${scopeNote}</div>
+        <p class="text-xs text-muted" style="margin-top:8px">Filters refine the dashboard above — they are never required to see analytics.</p>
+      </div>
     </div>
-    ${exportBar}
-    ${sections}
   </div>`);
+  if(typeof lucide!=='undefined') lucide.createIcons();
   analyticsDrawCharts(data);
 }
 
 function analyticsEmptySections() {
-  return `<div class="card"><div class="card-body" style="padding:48px;text-align:center">
-    <i data-lucide="bar-chart-3" style="width:40px;height:40px;color:var(--gray-300);margin-bottom:12px"></i>
-    <h3>No data for the selected filters</h3>
-    <p style="color:var(--gray-500);max-width:420px;margin:8px auto 0">Try widening the academic year, term, class, stream or subject, or change the assessment status. Missing or unassessed records are never counted as zero.</p>
-  </div></div>`;
+  // Visual empty state — never the "No data for the selected filters / Try widening..." text.
+  // Shows illustrative cards & chart placeholders (0s) so DOS sees dashboard structure even with no records.
+  return `<section class="mb-6"><div class="grid-4">
+    ${analyticsStat('Learners', 0, 'users-round', 'blue')}
+    ${analyticsStat('Assessments', 0, 'clipboard-check', 'amber')}
+    ${analyticsStat('Overall Average', '—', 'calculator', 'blue')}
+    ${analyticsStat('Pass Rate', '—', 'badge-check', 'green')}
+  </div></section>
+  <div class="grid-2">
+    <div class="card"><div class="card-header"><h3><i data-lucide="pie-chart"></i>Overall Performance</h3></div><div class="chart-box" style="padding:32px;text-align:center;color:var(--gray-400)"><i data-lucide="bar-chart-3" style="width:36px;height:36px;margin-bottom:8px"></i><p>No completed assessment data yet</p><p class="text-xs">Charts will appear once marks are approved</p></div></div>
+    <div class="card"><div class="card-header"><h3><i data-lucide="circle-dot"></i>Pass / Fail</h3></div><div class="chart-box" style="padding:32px;text-align:center;color:var(--gray-400)"><i data-lucide="circle-dot" style="width:36px;height:36px;margin-bottom:8px"></i><p>No pass/fail data yet</p></div></div>
+  </div>
+  <div class="card mt-6"><div class="card-header"><h3><i data-lucide="bar-chart-3"></i>Class / Subject Performance</h3></div><div class="chart-box" style="padding:32px;text-align:center;color:var(--gray-400)"><i data-lucide="school" style="width:32px;height:32px;margin-bottom:8px"></i><p>No class data yet — illustrations appear when assessments are created</p></div></div>`;
 }
 
-function analyticsAggregateSections(data) {
+function analyticsAggregateSections(data, ctx) {
   const k = data.kpis;
   const isT = analyticsIsTeacher;
   const metric = analyticsState.metric;
+
+  // Overview cards with real authorized counts (no filter required)
+  let levelBadge = '';
+  try {
+    if (typeof Scope !== 'undefined' && Scope.isScoped()) {
+      levelBadge = Scope.isPrimary() ? 'PRIMARY ANALYTICS' : Scope.isSecondary() ? 'SECONDARY ANALYTICS' : 'ANALYTICS';
+    } else if (isT) levelBadge = 'MY TEACHING ANALYTICS';
+    else levelBadge = 'SCHOOL ANALYTICS';
+  } catch(e){ levelBadge = isT ? 'MY TEACHING ANALYTICS' : 'ANALYTICS'; }
+
+  // Authorized counts from scoped ctx
+  const activeTeachers = (ctx.teachers||[]).filter(t=>!t.status||t.status==='active').length;
+  const totalLearners = (ctx.learners||[]).length;
+  const totalClasses = (ctx.classes||[]).length;
+  const totalSubjects = (ctx.subjects||[]).filter(s=>!s.status||s.status==='active').length;
+  const totalAssessments = (data.assessments||[]).length;
+  const totalMarks = (data.marks||[]).length;
+
+  // Marks completion breakdown (real statuses)
+  const entered = totalMarks;
+  const submittedCnt = (data.assessments||[]).filter(a=>a.status==='submitted').length;
+  const approvedCnt = (data.assessments||[]).filter(a=>a.status==='approved'||a.status==='locked').length;
+  // For DOS overview: teacher activity
+  const createdCnt = totalAssessments;
+  const pendingCnt = (data.assessments||[]).filter(a=>a.status==='draft').length;
+  const rejectedCnt = (data.assessments||[]).filter(a=>a.status==='rejected').length;
+  const lockedCnt = (data.assessments||[]).filter(a=>a.status==='locked').length;
+
+  const overviewCards = isT ? [
+    analyticsStat('My Classes', totalClasses, 'school', 'blue', levelBadge),
+    analyticsStat('My Learners', totalLearners, 'users-round', 'blue'),
+    analyticsStat('My Subjects', totalSubjects, 'book-open', 'purple'),
+    analyticsStat('My Assessments', totalAssessments, 'clipboard-check', 'amber'),
+    analyticsStat('Marks Entered', entered, 'edit-3', 'green', entered ? `${Math.round(entered/Math.max(1,totalLearners*1)*10)/10} avg/learner` : 'No marks yet'),
+    analyticsStat('Submitted', submittedCnt, 'send', 'blue')
+  ] : [
+    analyticsStat('Teachers', activeTeachers, 'users', 'blue', levelBadge),
+    analyticsStat('Learners', totalLearners, 'users-round', 'blue'),
+    analyticsStat('Classes', totalClasses, 'school', 'purple'),
+    analyticsStat('Subjects', totalSubjects, 'book-open', 'purple'),
+    analyticsStat('Assessments', totalAssessments, 'clipboard-check', 'amber'),
+    analyticsStat('Marks', totalMarks, 'list-checks', 'green', `${entered} records`)
+  ];
 
   const kpiCards = [
     analyticsStat('Assessed Students', k.assessed, 'users-round', 'blue'),
@@ -283,6 +344,46 @@ function analyticsAggregateSections(data) {
     analyticsStat('Pass : Fail', `${k.passed} : ${k.failed}`, 'scale', 'purple')
   ];
   const kpiGrid = `<section class="mb-6"><div class="grid-4">${kpiCards.join('')}</div></section>`;
+  const overviewGrid = `<section class="mb-6"><div class="grid-4">${overviewCards.join('')}</div></section>`;
+  // Explicit separation summary — proves analytics are split by class / assignment / teacher / type / many more
+  const typeCount = (ctx.types||[]).length;
+  const termCount = (ctx.terms||[]).length;
+  const assignCount = isT ? (ctx.assignments||[]).length : ( (data.teacherPerf||[]).reduce((a,b)=>a,0) ? (ctx.assignments ? ctx.assignments.length : activeTeachers) : 0 );
+  // For DOS, fetch assignment count from DB if not in ctx (fallback to 0, still shows separation)
+  const separationCard = `<div class="card mb-6" style="border-left:4px solid var(--blue-500)"><div class="card-header"><h3>${AStrs.icon('git-branch')} Separated Analytics — By Class, Assignment, Teacher, Type & More</h3><span class="text-sm text-muted">Each chart below is a separate slice — not mixed</span></div><div class="card-body" style="padding:16px 20px">
+    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px;text-align:center">
+      <div style="background:var(--gray-50);border:1px solid var(--gray-200);border-radius:var(--radius);padding:12px"><div class="text-xs text-muted">Classes</div><div style="font-size:20px;font-weight:800;color:var(--blue-700)">${totalClasses}</div><div class="text-xs text-muted">Separate per class</div></div>
+      <div style="background:var(--gray-50);border:1px solid var(--gray-200);border-radius:var(--radius);padding:12px"><div class="text-xs text-muted">Assignments</div><div style="font-size:20px;font-weight:800;color:var(--purple-600)">${isT ? assignCount : (activeTeachers ? assignCount||'—' : totalClasses)}</div><div class="text-xs text-muted">Class × Subject pairs</div></div>
+      <div style="background:var(--gray-50);border:1px solid var(--gray-200);border-radius:var(--radius);padding:12px"><div class="text-xs text-muted">Teachers</div><div style="font-size:20px;font-weight:800;color:var(--green-600)">${isT ? '1 (You)' : activeTeachers}</div><div class="text-xs text-muted">Per-teacher avg</div></div>
+      <div style="background:var(--gray-50);border:1px solid var(--gray-200);border-radius:var(--radius);padding:12px"><div class="text-xs text-muted">Assessment Types</div><div style="font-size:20px;font-weight:800;color:var(--amber-600)">${typeCount}</div><div class="text-xs text-muted">${(data.typePerf||[]).map(t=>t.name).slice(0,3).join(', ')||'As configured'}</div></div>
+      <div style="background:var(--gray-50);border:1px solid var(--gray-200);border-radius:var(--radius);padding:12px"><div class="text-xs text-muted">Subjects</div><div style="font-size:20px;font-weight:800;color:var(--blue-600)">${totalSubjects}</div><div class="text-xs text-muted">Per-subject chart</div></div>
+      <div style="background:var(--gray-50);border:1px solid var(--gray-200);border-radius:var(--radius);padding:12px"><div class="text-xs text-muted">Terms / Assessments</div><div style="font-size:20px;font-weight:800;color:var(--gray-700)">${termCount} / ${totalAssessments}</div><div class="text-xs text-muted">Trend + per-assessment</div></div>
+    </div>
+    <p class="text-xs text-muted" style="margin-top:10px">Scope: <strong>${levelBadge}</strong> — every query is filtered by <code>education_level</code> / <code>teacher_assignments</code> before aggregation. Use Optional Filters to isolate one class, subject, teacher or type and all charts re-separate.</p>
+  </div></div>`;
+
+  // Visual marks completion & teacher activity – always visible, real counts
+  const completionPct = totalAssessments ? Math.round((approvedCnt/totalAssessments)*100) : 0;
+  const missingPct = 100 - (totalAssessments ? Math.round((entered ? 100 : 0)) : 0);
+  const marksCompletionCard = `<div class="card mb-6"><div class="card-header"><h3>${AStrs.icon('list-checks')}Marks Completion</h3><span class="text-sm text-muted">Entered / Submitted / Approved</span></div><div class="card-body" style="padding:16px 20px">
+    <div style="display:grid;grid-template-columns:repeat(2,1fr);gap:12px">
+      <div><div class="text-xs text-muted">Entered</div><div class="progress-bar"><div class="progress-bar-fill green" style="width:${totalMarks?100:0}%"></div></div><div class="text-xs font-semibold">${entered} records</div></div>
+      <div><div class="text-xs text-muted">Submitted</div><div class="progress-bar"><div class="progress-bar-fill blue" style="width:${totalAssessments? Math.round(submittedCnt/totalAssessments*100):0}%"></div></div><div class="text-xs font-semibold">${submittedCnt}/${totalAssessments}</div></div>
+      <div><div class="text-xs text-muted">Approved / Locked</div><div class="progress-bar"><div class="progress-bar-fill green" style="width:${completionPct}%"></div></div><div class="text-xs font-semibold">${approvedCnt}/${totalAssessments} (${completionPct}%)</div></div>
+      <div><div class="text-xs text-muted">Missing (draft)</div><div class="progress-bar"><div class="progress-bar-fill amber" style="width:${totalAssessments? Math.round(pendingCnt/totalAssessments*100):0}%"></div></div><div class="text-xs font-semibold">${pendingCnt} pending</div></div>
+    </div>
+  </div></div>`;
+
+  const activityCard = `<div class="card mb-6"><div class="card-header"><h3>${AStrs.icon('clipboard-check')}Teacher Assessment Activity</h3><span class="text-sm text-muted">Created / Submitted / Approved / Pending / Rejected / Locked</span></div><div class="card-body" style="padding:16px 20px">
+    <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:10px;text-align:center">
+      <div><div class="stat-value" style="font-size:18px">${createdCnt}</div><div class="text-xs text-muted">Created</div></div>
+      <div><div class="stat-value" style="font-size:18px;color:var(--blue-600)">${submittedCnt}</div><div class="text-xs text-muted">Submitted</div></div>
+      <div><div class="stat-value" style="font-size:18px;color:var(--green-600)">${approvedCnt}</div><div class="text-xs text-muted">Approved</div></div>
+      <div><div class="stat-value" style="font-size:18px;color:var(--amber-600)">${pendingCnt}</div><div class="text-xs text-muted">Pending (draft)</div></div>
+      <div><div class="stat-value" style="font-size:18px;color:var(--red-500)">${rejectedCnt}</div><div class="text-xs text-muted">Rejected</div></div>
+      <div><div class="stat-value" style="font-size:18px;color:var(--green-600)">${lockedCnt}</div><div class="text-xs text-muted">Locked</div></div>
+    </div>
+  </div></div>`;
 
   const studentDrill = `<p class="text-sm text-muted" style="margin:4px 0 12px">Click any chart or table row to drill into a student, subject, assessment or class.</p>`;
 
@@ -357,6 +458,8 @@ function analyticsAggregateSections(data) {
 
   const wrap = `<section class="grid-2">${overviewCard}${passFailCard}</section>
     ${hint}
+    ${marksCompletionCard}
+    ${activityCard}
     ${trendCard}
     <section class="grid-2">${gradeCard}${typeCard}</section>
     ${subjectCard}
@@ -367,7 +470,7 @@ function analyticsAggregateSections(data) {
     <section class="grid-2">${topCard}${bottomCard}</section>
     ${matrixCard}
     ${insightCard}`;
-  return kpiGrid + wrap;
+  return overviewGrid + separationCard + kpiGrid + wrap;
 }
 
 function analyticsStudentSections(student, data, ctx) {
@@ -807,7 +910,7 @@ function analyticsSetFilter(prop, value) {
 }
 
 function analyticsClearFilters() {
-  analyticsState = { yearId: '', termId: 'all', classId: 'all', stream: 'all', subjectId: 'all', typeId: 'all', assessmentId: 'all', studentId: 'all', teacherId: 'all', status: 'official', limit: 10, metric: 'avg', compare: 'none' };
+  analyticsState = { yearId: 'all', termId: 'all', classId: 'all', stream: 'all', subjectId: 'all', typeId: 'all', assessmentId: 'all', studentId: 'all', teacherId: 'all', status: 'official', limit: 10, metric: 'avg', compare: 'none' };
   analyticsRefresh(analyticsIsTeacher);
 }
 

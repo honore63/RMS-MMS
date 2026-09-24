@@ -160,8 +160,14 @@ async function renderAssessmentList() {
         <button class="tab-btn ${listFilter === 'rejected' ? 'active' : ''}" onclick="listFilter='rejected';renderEnterMarks()">Rejected</button>
         <button class="tab-btn ${listFilter === 'locked' ? 'active' : ''}" onclick="listFilter='locked';renderEnterMarks()">Locked</button>
       </div>
-      <button class="btn btn-primary" onclick="openCreateAssessment()"><i data-lucide="plus"></i> Create Assessment</button>
-      <button class="btn btn-secondary" onclick="MarksImport.open()"><i data-lucide="file-up"></i> Import Marks</button>
+      <div class="flex gap-2" style="align-items:center">
+        <button class="btn btn-primary" onclick="openCreateAssessment()" style="padding:12px 22px;font-size:14px;font-weight:800;box-shadow:0 4px 12px rgba(37,99,235,.25)"><i data-lucide="plus-circle" style="width:18px;height:18px"></i> + Add Assessment</button>
+        <button class="btn btn-secondary" onclick="MarksImport.open()"><i data-lucide="file-up"></i> Import Marks</button>
+      </div>
+    </div>
+    <div style="margin-bottom:16px;background:linear-gradient(135deg,rgba(16,185,129,0.08),rgba(5,122,80,0.04));border:1px solid var(--green-200);border-radius:var(--radius);padding:12px 16px;display:flex;align-items:center;gap:10px">
+      <i data-lucide="sparkles" style="width:16px;height:16px;color:var(--green-600)"></i>
+      <span class="text-sm" style="color:var(--gray-700)">Assessments are scoped to your assigned classes & subjects. Use <strong>+ Add Assessment</strong> to create a new one — roster builds automatically.</span>
     </div>
     <div class="filter-bar">
       <div class="search-input-wrapper" style="flex:1;min-width:220px">
@@ -292,6 +298,164 @@ function casSuggestName() {
   }
 }
 
+// ===== 5-Step Wizard for Teachers (Information → Class/Subject → Configuration → Review → Create) =====
+let casWizardState = { step: 1, name: '', typeId: '', yearId: '', termId: '', classId: '', subjectId: '', unit: '', max: 30, date: '', weight: '', desc: '' };
+let casWizardData = { classes: [], subjects: [], types: [], years: [], terms: [] };
+
+const _origOpenCreateAssessment = openCreateAssessment;
+async function openCreateAssessment() {
+  // Intercept original single-modal and launch wizard instead (keeps old code as fallback)
+  const ok = await loadTeacherContext();
+  if (!ok) return Utils.toast('No teacher profile found', 'error');
+  if (!teacherAssignments.length) return Utils.toast('You have no class/subject assignments. Contact the DOS.', 'error');
+  const [classes, subjects, types, years, terms] = await Promise.all([DB.get('classes'), DB.get('subjects'), getAssessmentTypes(), DB.get('academic_years'), DB.get('terms')]);
+  casWizardData = { classes, subjects, types: types.filter(t=>t.status==='active'), years, terms };
+  const activeType = casWizardData.types[0];
+  casWizardState = {
+    step: 1,
+    name: '',
+    typeId: activeType ? activeType.id : '',
+    yearId: activeYear ? activeYear.id : (years.find(y=>y.status==='active')?.id || years[0]?.id || ''),
+    termId: activeTerm ? activeTerm.id : (terms.find(t=> String(t.academic_year_id)===String(activeYear?.id))?.id || ''),
+    classId: '',
+    subjectId: '',
+    unit: '',
+    max: activeType?.default_maximum_mark ?? 30,
+    date: new Date().toISOString().split('T')[0],
+    weight: '',
+    desc: ''
+  };
+  casAutoName = '';
+  casRenderWizard();
+}
+function casWizardProgress(){ const steps=['Information','Class & Subject','Configuration','Review','Create']; return '<div style="display:flex;gap:6px;margin-bottom:16px">'+steps.map((label,i)=>{const idx=i+1, active=casWizardState.step===idx, done=casWizardState.step>idx, bg=active?'var(--blue-600)':done?'var(--green-500)':'var(--gray-200)', color=active||done?'#fff':'var(--gray-600)'; return '<div style="flex:1;text-align:center;padding:8px 4px;border-radius:8px;background:'+bg+';color:'+color+';font-size:11px;font-weight:700">'+idx+'. '+label+'</div>';}).join('')+'</div>'; }
+function casWizardValidateStep(step){
+  if(step===1){
+    if(!casWizardState.name.trim()) return 'Assessment name is required';
+    if(!casWizardState.typeId) return 'Assessment type is required';
+    if(!casWizardState.yearId) return 'Academic year is required';
+    if(!casWizardState.termId) return 'Term is required';
+  }
+  if(step===2){
+    if(!casWizardState.subjectId) return 'Select a subject';
+    if(!casWizardState.classId) return 'Select a class';
+    const allowed = teacherAssignments.some(a=> a.subject_id===casWizardState.subjectId && a.class_id===casWizardState.classId);
+    if(!allowed) return 'You are not assigned to this class/subject combination';
+  }
+  if(step===3){
+    if(!casWizardState.max || isNaN(Number(casWizardState.max)) || Number(casWizardState.max) <=0) return 'Maximum marks must be a number greater than 0';
+    if(Number(casWizardState.max) > 1000) return 'Maximum marks seems too large';
+    if(!casWizardState.date) return 'Assessment date is required';
+  }
+  return null;
+}
+async function casWizardNext(){
+  const err = casWizardValidateStep(casWizardState.step);
+  if(err) return Utils.toast(err,'error');
+  if(casWizardState.step===3){
+    const dup = await casCheckDuplicateWizard();
+    casWizardState._dup = dup;
+  }
+  if(casWizardState.step < 5){ casWizardState.step++; casRenderWizard(); } else { await casWizardCreate(); }
+}
+function casWizardBack(){ if(casWizardState.step>1){ casWizardState.step--; casRenderWizard(); } }
+async function casCheckDuplicateWizard(){
+  try{
+    const q = { teacher_id: Auth.getTeacherId(), class_id: casWizardState.classId, subject_id: casWizardState.subjectId, assessment_type_id: casWizardState.typeId || undefined, term_id: casWizardState.termId || undefined, academic_year_id: casWizardState.yearId || undefined };
+    Object.keys(q).forEach(k=> q[k]===undefined && delete q[k]);
+    const existing = await DB.query('assessments','*', q);
+    const nameDup = existing.find(a=> a.name.trim().toLowerCase()===casWizardState.name.trim().toLowerCase() && String(a.unit||'').trim().toLowerCase()===String(casWizardState.unit||'').trim().toLowerCase());
+    return nameDup || (existing.length ? existing[0] : null);
+  }catch(e){ return null; }
+}
+function casSuggestNameWizard(){
+  const s = casWizardState, d = casWizardData;
+  const typ = d.types.find(t=> String(t.id)===String(s.typeId));
+  const typeName = typ ? typ.name : 'Assessment';
+  const auto = s.unit ? typeName + ' - ' + s.unit : '';
+  if(!s.name || s.name===casAutoName){
+    s.name = auto;
+    const el = document.getElementById('cas-w-name');
+    if(el) el.value = auto;
+    casAutoName = auto;
+  }
+}
+function casRenderWizard(){
+  const s = casWizardState, d = casWizardData;
+  const assignedSubjectIds = [...new Set(teacherAssignments.map(a=>a.subject_id))];
+  const subjectOptions = d.subjects.filter(x=> assignedSubjectIds.includes(x.id));
+  const classOptionsForSubject = s.subjectId ? d.classes.filter(c=> teacherAssignments.some(a=> a.subject_id===s.subjectId && a.class_id===c.id)) : [];
+  const yearOptions = d.years;
+  const termOptions = d.terms.filter(t=> !s.yearId || String(t.academic_year_id)===String(s.yearId));
+  let body = casWizardProgress();
+  if(s.step===1){
+    body += '<div class="form-group"><label>Assessment Name *</label><input id="cas-w-name" class="input-field" placeholder="e.g., CAT 1 – Fractions" value="'+Utils.escapeHtml(s.name)+'" oninput="casWizardState.name=this.value; casSuggestNameWizard()"></div>'
+      + '<div class="form-group"><label>Assessment Type *</label><select id="cas-w-type" class="select-field" onchange="casWizardState.typeId=this.value; const opt=this.selectedOptions[0]; if(opt && opt.dataset.defaultMax) casWizardState.max=opt.dataset.defaultMax; const me=document.getElementById(\'cas-w-max\'); if(me) me.value=casWizardState.max; casSuggestNameWizard()">'+d.types.map(t=> '<option value="'+t.id+'" data-default-max="'+(t.default_maximum_mark??'')+'" '+(String(t.id)===String(s.typeId)?'selected':'')+'>'+Utils.escapeHtml(t.name)+(t.weight!=null?' (w='+t.weight+')':'')+'</option>').join('')+'</select><p class="form-hint">Comes from configured assessment types</p></div>'
+      + '<div class="form-row"><div class="form-group"><label>Academic Year *</label><select id="cas-w-year" class="select-field" onchange="casWizardState.yearId=this.value; casRenderWizard()">'+yearOptions.map(y=> '<option value="'+y.id+'" '+(String(y.id)===String(s.yearId)?'selected':'')+'>'+Utils.escapeHtml(y.name)+(y.status==='active'?' (Active)':'')+'</option>').join('')+'</select></div><div class="form-group"><label>Term *</label><select id="cas-w-term" class="select-field" onchange="casWizardState.termId=this.value">'+termOptions.map(t=> '<option value="'+t.id+'" '+(String(t.id)===String(s.termId)?'selected':'')+'>'+Utils.escapeHtml(t.name)+'</option>').join('')+'</select></div></div><p class="form-hint">Term list is dynamic – only terms configured for the selected year appear.</p>';
+  } else if(s.step===2){
+    body += '<div class="form-group"><label>Subject *</label><select id="cas-w-subject" class="select-field" onchange="casWizardState.subjectId=this.value; casWizardState.classId=\'\'; casRenderWizard(); casSuggestNameWizard()"><option value="">Select subject</option>'+subjectOptions.map(x=> '<option value="'+x.id+'" '+(String(x.id)===String(s.subjectId)?'selected':'')+'>'+Utils.escapeHtml(x.name)+'</option>').join('')+'</select><p class="form-hint">Only subjects assigned to you are shown.</p></div>'
+      + '<div class="form-group"><label>Class *</label><select id="cas-w-class" class="select-field" onchange="casWizardState.classId=this.value; casSuggestNameWizard()"><option value="">Select class</option>'+classOptionsForSubject.map(c=> '<option value="'+c.id+'" '+(String(c.id)===String(s.classId)?'selected':'')+'>'+Utils.escapeHtml(c.name)+' ('+Utils.escapeHtml(EducationLevels.getCategory(c))+')</option>').join('')+'</select><p class="form-hint">Only classes assigned to you for the selected subject.</p></div>';
+  } else if(s.step===3){
+    body += '<div class="form-group"><label>Unit <span class="text-muted">(optional)</span></label><input id="cas-w-unit" class="input-field" placeholder="e.g., Unit 4 – Fractions" value="'+Utils.escapeHtml(s.unit)+'" oninput="casWizardState.unit=this.value; casSuggestNameWizard()"></div>'
+      + '<div class="form-row"><div class="form-group"><label>Maximum Marks *</label><input id="cas-w-max" type="number" min="1" max="1000" class="input-field" value="'+Utils.escapeHtml(String(s.max))+'" oninput="casWizardState.max=this.value"></div><div class="form-group"><label>Assessment Date *</label><input id="cas-w-date" type="date" class="input-field" value="'+Utils.escapeHtml(s.date)+'" onchange="casWizardState.date=this.value"></div></div>'
+      + '<div class="form-row"><div class="form-group"><label>Weight <span class="text-muted">(optional)</span></label><input id="cas-w-weight" type="number" step="any" min="0" class="input-field" placeholder="blank = type default" value="'+Utils.escapeHtml(s.weight)+'" oninput="casWizardState.weight=this.value"></div><div class="form-group"><label>Description</label><input id="cas-w-desc" class="input-field" placeholder="Optional notes" value="'+Utils.escapeHtml(s.desc)+'" oninput="casWizardState.desc=this.value"></div></div>';
+  } else if(s.step===4){
+    const dup = s._dup;
+    const cls = d.classes.find(c=> String(c.id)===String(s.classId));
+    const sub = d.subjects.find(x=> String(x.id)===String(s.subjectId));
+    const yr = d.years.find(y=> String(y.id)===String(s.yearId));
+    const tm = d.terms.find(t=> String(t.id)===String(s.termId));
+    const typ = d.types.find(t=> String(t.id)===String(s.typeId));
+    body += '<div style="background:var(--gray-50);border:1px solid var(--gray-200);border-radius:var(--radius);padding:16px;margin-bottom:12px"><h4 style="font-weight:800;margin-bottom:8px">Review</h4>'
+      + '<div class="flex justify-between mb-2"><span class="text-sm text-muted">Assessment</span><span class="text-sm font-semibold">'+Utils.escapeHtml(s.name)+(s.unit?' - '+Utils.escapeHtml(s.unit):'')+'</span></div>'
+      + '<div class="flex justify-between mb-2"><span class="text-sm text-muted">Type</span><span class="text-sm font-semibold">'+Utils.escapeHtml(typ?.name||'')+'</span></div>'
+      + '<div class="flex justify-between mb-2"><span class="text-sm text-muted">Class / Subject</span><span class="text-sm font-semibold">'+Utils.escapeHtml(cls?.name||'')+' / '+Utils.escapeHtml(sub?.name||'')+'</span></div>'
+      + '<div class="flex justify-between mb-2"><span class="text-sm text-muted">Year / Term</span><span class="text-sm font-semibold">'+Utils.escapeHtml(yr?.name||'')+' / '+Utils.escapeHtml(tm?.name||'')+'</span></div>'
+      + '<div class="flex justify-between mb-2"><span class="text-sm text-muted">Max / Date</span><span class="text-sm font-semibold">'+Utils.escapeHtml(String(s.max))+' / '+Utils.escapeHtml(s.date)+'</span></div>'
+      + (s.weight ? '<div class="flex justify-between mb-2"><span class="text-sm text-muted">Weight</span><span class="text-sm font-semibold">'+Utils.escapeHtml(s.weight)+'</span></div>' : '')
+      + (s.desc ? '<div class="flex justify-between"><span class="text-sm text-muted">Description</span><span class="text-sm font-semibold">'+Utils.escapeHtml(s.desc)+'</span></div>' : '')
+      + '</div>'
+      + (dup ? '<div class="alert alert-warning"><i data-lucide="alert-triangle"></i><div><strong>Possible duplicate</strong><br>An assessment with same class/subject/type/term/year already exists: <strong>'+Utils.escapeHtml(dup.name)+'</strong> ('+dup.status+')<br><button class="btn btn-sm btn-outline" style="margin-top:8px" onclick="Modal.close(); Router.go(\'teacher/enter-marks?assessment='+dup.id+'\')">View existing</button></div></div>' : '<div class="alert alert-success"><i data-lucide="check-circle-2"></i> No duplicate found – ready to create.</div>')
+      + '<p class="text-xs text-muted" style="margin-top:8px">Learner roster will be auto-built from the class ('+(cls?.name||'')+') – you won’t need to recreate it.</p>';
+  } else if(s.step===5){
+    body += '<div style="text-align:center;padding:20px"><i data-lucide="check-circle-2" style="width:48px;height:48px;color:var(--green-500);margin-bottom:12px"></i><h3>Ready to create</h3><p class="text-sm text-muted">Click Create to save. You’ll be taken to Enter Marks with the class roster pre-loaded.</p></div>';
+  }
+  const footer = '<button class="btn btn-secondary" onclick="Modal.close()">Cancel</button>'
+    + (s.step>1 ? '<button class="btn btn-secondary" onclick="casWizardBack()"><i data-lucide="arrow-left"></i> Back</button>' : '')
+    + (s.step<5 ? '<button class="btn btn-primary" onclick="casWizardNext()">Next <i data-lucide="arrow-right"></i></button>' : '<button class="btn btn-primary" onclick="casWizardCreate(this)"><i data-lucide="plus-circle"></i> Create Assessment</button>');
+  Modal.show(s.step===5 ? 'Create Assessment – Confirm' : 'Create Assessment – Step '+s.step+' of 5', body, footer, true);
+  if(typeof lucide!=='undefined') lucide.createIcons();
+}
+async function casWizardCreate(btn){
+  if(btn){ btn.disabled=true; const orig=btn.innerHTML; btn.innerHTML='Creating...'; btn.dataset.orig=orig; }
+  const s = casWizardState;
+  const err = casWizardValidateStep(3) || casWizardValidateStep(2) || casWizardValidateStep(1);
+  if(err){ if(btn){btn.disabled=false; btn.innerHTML=btn.dataset.orig; } return Utils.toast(err,'error'); }
+  const dup = await casCheckDuplicateWizard();
+  if(dup){ if(btn){btn.disabled=false; btn.innerHTML=btn.dataset.orig; } Utils.toast('Duplicate assessment exists – view existing instead','error'); return; }
+  const teacherId = Auth.getTeacherId();
+  const payload = { name: s.name.trim(), assessment_type_id: s.typeId || null, unit: s.unit || null, class_id: s.classId, subject_id: s.subjectId, teacher_id: teacherId, academic_year_id: s.yearId || null, term_id: s.termId || null, maximum_mark: parseInt(s.max) || 30, weight: s.weight==='' ? null : parseFloat(s.weight), assessment_date: s.date, description: s.desc || null, status: 'draft' };
+  try{
+    const { data: inserted, error } = await sbClient.from('assessments').insert(payload).select().single();
+    if(error) throw error;
+    // === SYNC EVERYWHERE: new assessment → dashboards/reports/analytics ===
+    DB.invalidate('assessments');
+    if (typeof AnalyticsEngine !== 'undefined') AnalyticsEngine.resetContext();
+    if (typeof ReportUtils !== 'undefined') ReportUtils.invalidate();
+    let learnerCount = 0;
+    try{ const { count } = await sbClient.from('learners').select('*',{count:'exact',head:true}).eq('class_id', s.classId).eq('status','active'); learnerCount = count||0; }catch(e){}
+    const clsName = (casWizardData.classes.find(c=> String(c.id)===String(s.classId))||{}).name || '';
+    const subName = (casWizardData.subjects.find(x=> String(x.id)===String(s.subjectId))||{}).name || '';
+    const termName = (casWizardData.terms.find(t=> String(t.id)===String(s.termId))||{}).name || '';
+    Utils.toast('Assessment created','success');
+    Modal.close();
+    Modal.show('Assessment Created Successfully', '<div style="background:var(--green-50);border:1px solid var(--green-200);border-radius:var(--radius);padding:16px;margin-bottom:16px;text-align:center"><i data-lucide="check-circle-2" style="width:36px;height:36px;color:var(--green-600);margin-bottom:8px"></i><h3 style="color:var(--green-800)">'+Utils.escapeHtml(subName)+' — '+Utils.escapeHtml(s.name)+'</h3><p class="text-sm text-muted">Class: '+Utils.escapeHtml(clsName)+' | Term: '+Utils.escapeHtml(termName)+' | Max: '+Utils.escapeHtml(String(s.max))+'</p><p class="text-sm" style="margin-top:8px"><strong>Learners: '+learnerCount+'</strong> — roster auto-built from class</p></div><p class="text-sm text-muted">You can now enter marks. The learner list is ready – no manual recreation needed.</p>', '<button class="btn btn-secondary" onclick="Modal.close(); renderEnterMarks()">Stay</button><button class="btn btn-primary" onclick="Modal.close(); Router.go(\'teacher/enter-marks?assessment='+inserted.id+'\')"><i data-lucide="pencil-line"></i> Enter Marks</button>', true);
+  }catch(e){
+    if(btn){ btn.disabled=false; btn.innerHTML=btn.dataset.orig; }
+    Utils.toast('Error: '+e.message,'error');
+  }
+}
+
 async function casSave(mode, btn) {
   if (btn) {
     btn.disabled = true;
@@ -324,6 +488,10 @@ async function casSave(mode, btn) {
   }
 
   const teacherId = Auth.getTeacherId();
+  if (!teacherId) {
+    if (btn) { btn.disabled = false; btn.innerHTML = btn.dataset.original; if (typeof lucide !== 'undefined') lucide.createIcons(); }
+    return Utils.toast('Your account is not linked to a teacher profile. Contact the DOS.', 'error');
+  }
   const data = {
     name: name || (unit ? typeName + ' - ' + unit : typeName),
     assessment_type_id: typeId || null,
@@ -343,7 +511,10 @@ async function casSave(mode, btn) {
   try {
     const { data: inserted, error } = await sbClient.from('assessments').insert(data).select().single();
     if (error) throw error;
-    Utils.toast('Assessment created', 'success');
+    DB.invalidate('assessments');
+    if (typeof AnalyticsEngine !== 'undefined') AnalyticsEngine.resetContext();
+    if (typeof ReportUtils !== 'undefined') ReportUtils.invalidate();
+    Utils.toast('Assessment created — synced', 'success');
     Modal.close();
     if (mode === 'enter') {
       Router.go('teacher/enter-marks?assessment=' + inserted.id);
@@ -363,6 +534,7 @@ async function renderMarksEntry(assessId) {
   const targetAssessment = await DB.getRelated('assessments', '*', { id: assessId });
   if (!targetAssessment.length) { setContent(Utils.empty('Assessment not found', 'file-x')); return; }
   markAssessment = targetAssessment[0];
+  const totalMax = Number(markAssessment.maximum_mark) || 0;
 
   const teacherId = Auth.getTeacherId();
   const allowed = teacherAssignments.length === 0 || teacherAssignments.some(a => a.class_id === markAssessment.class_id && a.subject_id === markAssessment.subject_id);
@@ -374,7 +546,7 @@ async function renderMarksEntry(assessId) {
 
   const [existingMarks, gradingData, settingsData, clsData, subData, types] = await Promise.all([
     DB.query('marks', '*', { assessment_id: assessId }),
-    getGrading(),
+    Utils.getGradingScale(),
     DB.query('school_settings', '*'),
     DB.getRelated('classes', '*', { id: markAssessment.class_id }),
     DB.getRelated('subjects', '*', { id: markAssessment.subject_id }),
@@ -447,7 +619,8 @@ async function renderMarksEntry(assessId) {
       <button class="btn btn-secondary" onclick="Router.go('teacher/enter-marks')"><i data-lucide="arrow-left"></i> Back to Assessments</button>
       <div class="flex gap-2" style="flex-wrap:wrap">
         <button class="btn btn-secondary" onclick="renderEnterMarks()"><i data-lucide="refresh-cw"></i> Refresh</button>
-        ${!isLocked && !isSubmitted ? `<button class="btn btn-primary" onclick="MarksImport.open({ assessmentId: '${markAssessment.id}' })"><i data-lucide="file-up"></i> Import Marks</button>` : ''}
+        <button class="btn btn-outline" onclick="downloadMarksTemplateForCurrentAssessment()" title="Download marks template"><i data-lucide="download"></i> Download</button>
+        ${!isLocked && !isSubmitted ? `<button class="btn btn-primary" onclick="MarksImport.open({ assessmentId: '${markAssessment.id}' })"><i data-lucide="file-up"></i> Import</button>` : ''}
         ${!isLocked && !isSubmitted ? `<button class="btn btn-secondary" onclick="saveMarks()"><i data-lucide="save"></i> Save Draft</button>` : ''}
       </div>
     </div>
@@ -621,7 +794,7 @@ function updateMark(index, value) {
   const pct = (value !== '' && value != null) ? Utils.pct(parseFloat(value), maxMark) : 0;
   e.pct = pct;
 
-  getGrading().then(scale => {
+  Utils.getGradingScale().then(scale => {
     e.grade = (value !== '' && value != null) ? Utils.grade(pct, scale) : '';
     e.remark = (value !== '' && value != null) ? Utils.remark(pct, scale) : '';
     e.pf = (value !== '' && value != null) ? Utils.passFail(pct, markSettings.pass_mark) : '';
@@ -714,11 +887,15 @@ async function saveMarks(isAuto = false) {
         e.markId = newMark.id;
       }
     }
+    // === SYNC EVERYWHERE: marks changed → invalidate caches so Analytics/Reports/DOS see fresh data ===
+    DB.invalidate('marks');
+    if (typeof AnalyticsEngine !== 'undefined') AnalyticsEngine.resetContext();
+    if (typeof ReportUtils !== 'undefined') ReportUtils.invalidate();
     if (isAuto) {
       showSaveStatus('saved');
       setTimeout(() => { const el = document.getElementById('save-status'); if (el) el.innerHTML = ''; }, 3000);
     } else {
-      Utils.toast('Marks saved', 'success');
+      Utils.toast('Marks saved — synced to Analytics, Reports & DOS', 'success');
       showSaveStatus('saved');
       setTimeout(() => { const el = document.getElementById('save-status'); if (el) el.innerHTML = ''; }, 2000);
     }
@@ -785,6 +962,9 @@ async function submitMarks() {
       DB.getRelated('subjects', 'name', { id: markAssessment.subject_id })
     ]);
     const sub = subData[0];
+    const className = clsData[0]?.name || 'Class';
+    const assessmentName = markAssessment.name || markAssessment.unit || 'Assessment';
+    const teacherName = Auth.currentUser?.full_name || 'Teacher';
     for (const e of markEntries) {
       if (!e.markId) {
         if (e.mark !== '' && e.mark != null) {
@@ -817,20 +997,39 @@ async function submitMarks() {
       timestamp: new Date().toISOString()
     });
 
-    const { data: dosUsers } = await sbClient.from('users').select('id').eq('role', 'dos');
-    const notifications = (dosUsers || []).map(dos => ({
-      user_id: dos.id,
-      title: 'Marks Submitted',
-      message: `${Auth.currentUser?.full_name} submitted marks for ${markAssessment.name || markAssessment.unit} (${Utils.escapeHtml(sub?.name || '')})`,
-      type: 'success',
-      read: false
-    }));
-    if (notifications.length) await sbClient.from('notifications').insert(notifications);
+    await notifyDosOnTeacherSubmission(
+      markAssessment.id,
+      teacherName,
+      assessmentName,
+      className,
+      sub?.name || 'Subject'
+    );
 
-    Utils.toast('Marks submitted for approval', 'success');
+    // === SYNC EVERYWHERE: assessment submitted → all dashboards/reports/analytics see it ===
+    DB.invalidate('marks');
+    DB.invalidate('assessments');
+    DB.invalidate('notifications');
+    DB.invalidate('audit_logs');
+    if (typeof AnalyticsEngine !== 'undefined') AnalyticsEngine.resetContext();
+    if (typeof ReportUtils !== 'undefined') ReportUtils.invalidate();
+
+    Utils.toast('Marks submitted — synced to DOS, Analytics & Reports', 'success');
     Router.go('teacher/enter-marks');
   } catch (e) {
     Utils.toast('Error: ' + e.message, 'error');
+  }
+}
+
+async function downloadMarksTemplateForCurrentAssessment(){
+  if (!markAssessment) return Utils.toast('No assessment selected','error');
+  try{
+    if (typeof MarksImport !== 'undefined' && MarksImport.downloadTemplate){
+      await MarksImport.downloadTemplate('excel');
+    } else {
+      Utils.toast('Import module not loaded','error');
+    }
+  }catch(e){
+    Utils.toast('Failed to generate template: '+e.message,'error');
   }
 }
 

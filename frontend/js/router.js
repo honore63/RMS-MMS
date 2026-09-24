@@ -13,7 +13,8 @@ const Router = {
   },
 
   async render() {
-    const route = this.current || window.location.hash.slice(1);
+    const fullRoute = this.current || window.location.hash.slice(1);
+    const route = fullRoute.split('?')[0];
     if (!route) return;
     this.current = route;
     const handler = this.routes[route];

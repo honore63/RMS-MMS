@@ -52,13 +52,46 @@ Realtime.route('teacher/analytics', ['assessments', 'assessment_types', 'marks',
 
   /* ---------- Targeted in-place updates ---------- */
 
+  /* Every marks/assessment change must invalidate all data caches
+      so Analytics, Reports, DOS dashboards and teacher views see fresh
+      marks immediately — no 5-minute stale DB cache. */
+  Realtime.on('marks', () => {
+    DB.invalidate('marks');
+    DB.invalidate('assessments');
+    if (typeof AnalyticsEngine !== 'undefined') AnalyticsEngine.resetContext();
+    if (typeof ReportUtils !== 'undefined') {
+      ReportUtils.invalidate(); // clear any report caches that used marks
+    }
+    // Force Utils grading cache refresh if needed
+    if (typeof Utils !== 'undefined' && Utils._gradingCache) Utils._gradingCache = null;
+  });
+  Realtime.on('assessments', () => {
+    DB.invalidate('assessments');
+    DB.invalidate('marks');
+    if (typeof AnalyticsEngine !== 'undefined') AnalyticsEngine.resetContext();
+    if (typeof ReportUtils !== 'undefined') ReportUtils.invalidate();
+  });
+  Realtime.on('learners', () => {
+    DB.invalidate('learners');
+    if (typeof AnalyticsEngine !== 'undefined') AnalyticsEngine.resetContext();
+  });
+  Realtime.on('classes', () => {
+    DB.invalidate('classes');
+    if (typeof AnalyticsEngine !== 'undefined') AnalyticsEngine.resetContext();
+  });
+
   /* School settings / grading scale changes invalidate report caches
-     so reports always regenerate from fresh Supabase data. */
+      so reports always regenerate from fresh Supabase data. */
   Realtime.on('school_settings', () => {
+    DB.invalidate('school_settings');
     if (typeof ReportUtils !== 'undefined') ReportUtils.invalidate('settings');
+    if (typeof AnalyticsEngine !== 'undefined') AnalyticsEngine.resetContext();
   });
   Realtime.on('grading_scales', () => {
+    DB.invalidate('grading_scales');
     if (typeof ReportUtils !== 'undefined') ReportUtils.invalidate('scale');
+    if (typeof Utils !== 'undefined') Utils._gradingCache = null;
+    if (typeof AnalyticsEngine !== 'undefined') AnalyticsEngine.resetContext();
   });
 
   /* Assessment type changes invalidate the shared types cache. */
@@ -91,8 +124,18 @@ Realtime.route('teacher/analytics', ['assessments', 'assessment_types', 'marks',
     }
   });
 
-  /* Keep the sidebar unread-notification badge live. */
-  Realtime.on('notifications', () => refreshNotificationBadge());
+  /* Keep the sidebar unread-notification badge live and surface new
+     notification rows as in-app toast alerts for the current user. */
+  Realtime.on('notifications', payload => {
+    refreshNotificationBadge();
+    const row = payload && payload.new ? payload.new : null;
+    if (!row || !Auth.currentUser?.id || row.user_id !== Auth.currentUser.id) return;
+    if (row.read) return;
+    if (typeof Utils !== 'undefined' && Utils.toast) {
+      const msg = row.title ? `${row.title} — ${row.message}` : row.message;
+      Utils.toast(msg, row.type || 'info');
+    }
+  });
 
   /* ---------- Initial badge load (after login) ---------- */
   if (typeof Auth !== 'undefined' && Auth.currentUser?.id) {

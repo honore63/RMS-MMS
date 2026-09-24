@@ -223,8 +223,11 @@ async function assessUpdateStatus(id, status, reason) {
 }
 
 function assessApprove(id) {
-  assessUpdateStatus(id, 'approved').then(() => {
-    notifyTeacher(id, 'Assessment Approved', 'Your assessment was approved by the DOS.', 'success');
+  assessUpdateStatus(id, 'approved').then(async () => {
+    const [a] = await DB.getRelated('assessments', '*', { id });
+    const [cls] = await DB.getRelated('classes', '*', { id: a?.class_id });
+    const [sub] = await DB.getRelated('subjects', '*', { id: a?.subject_id });
+    notifyTeacher(id, 'Assessment Approved', `${a?.name || 'Assessment'} for ${cls?.name || 'your class'} in ${sub?.name || 'the subject'} was approved by the DOS.`, 'success');
   });
 }
 
@@ -243,7 +246,10 @@ async function confirmReject(id) {
   const reason = document.getElementById('reject-reason').value.trim();
   if (!reason) return Utils.toast('Please enter a rejection reason', 'error');
   await assessUpdateStatus(id, 'rejected', reason);
-  notifyTeacher(id, 'Assessment Rejected', `Your assessment was rejected. Reason: ${reason}`, 'error');
+  const [a] = await DB.getRelated('assessments', '*', { id });
+  const [cls] = await DB.getRelated('classes', '*', { id: a?.class_id });
+  const [sub] = await DB.getRelated('subjects', '*', { id: a?.subject_id });
+  notifyTeacher(id, 'Assessment Rejected', `${a?.name || 'Assessment'} for ${cls?.name || 'your class'} in ${sub?.name || 'the subject'} was rejected by the DOS. Reason: ${reason}`, 'error');
 }
 
 function assessLock(id) { assessUpdateStatus(id, 'locked'); }
@@ -296,10 +302,34 @@ async function notifyTeacher(assessId, title, message, type) {
     if (!a) return;
     const [t] = await DB.getRelated('teachers', '*', { id: a.teacher_id });
     if (!t) return;
+    const [cls] = await DB.getRelated('classes', '*', { id: a.class_id });
+    const [sub] = await DB.getRelated('subjects', '*', { id: a.subject_id });
+    const finalMessage = message || `Assessment ${a.name || 'mark entry'} for ${cls?.name || 'your class'} in ${sub?.name || 'the subject'} has an update.`;
     if (t.user_id) {
       await DB.insert('notifications', {
-        user_id: t.user_id, title, message, type, read: false
+        user_id: t.user_id,
+        title,
+        message: finalMessage,
+        type: type || 'info',
+        read: false
       });
     }
   } catch (e) { console.error('Notify error:', e); }
+}
+
+async function notifyDosOnTeacherSubmission(assessmentId, teacherName, assessmentName, className, subjectName) {
+  try {
+    const { data: dosUsers } = await sbClient.from('users').select('id').eq('role', 'dos');
+    if (!dosUsers || !dosUsers.length) return;
+    const rows = dosUsers.map(dos => ({
+      user_id: dos.id,
+      title: 'Marks Submitted for Approval',
+      message: `${teacherName || 'A teacher'} submitted ${assessmentName || 'marks'} for ${className || 'a class'} / ${subjectName || 'subject'} and it is awaiting your approval.`,
+      type: 'info',
+      read: false
+    }));
+    if (rows.length) await sbClient.from('notifications').insert(rows);
+  } catch (e) {
+    console.error('DOS notify error:', e);
+  }
 }

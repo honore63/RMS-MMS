@@ -7,7 +7,12 @@ const DB = {
     let q = query;
     for (const [key, value] of Object.entries(filters)) {
       if (value === undefined || value === null || value === 'all') continue;
-      q = Array.isArray(value) ? q.in(key, value) : q.eq(key, value);
+      if (Array.isArray(value)) {
+        if (!value.length) continue;
+        q = q.in(key, value);
+      } else {
+        q = q.eq(key, value);
+      }
     }
     return q;
   },

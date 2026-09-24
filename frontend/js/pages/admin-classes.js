@@ -284,6 +284,7 @@ async function renderClasses() {
 async function classForm() {
   const years        = await DB.get('academic_years');
   const activeYearId = (typeof getActiveYearId === 'function' ? getActiveYearId(years) : null) || '';
+  const scopedCats   = (typeof Scope !== 'undefined' && Scope.isScoped()) ? Scope.categories() : null;
 
   Modal.show('📚 Add New Class (Cascading Education Level)', `
     <div style="background:linear-gradient(135deg,#eff6ff,#e0f2fe);border-radius:10px;

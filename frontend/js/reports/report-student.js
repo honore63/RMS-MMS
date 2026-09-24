@@ -31,18 +31,18 @@ const ReportStudent = {
 
   async fetchMarksByAssessments(assessIds, learnerIds = null) {
     if (!assessIds || !assessIds.length) return [];
+    const chunk = (arr, size) => {
+      const out = [];
+      for (let i = 0; i < arr.length; i += size) out.push(arr.slice(i, i + size));
+      return out;
+    };
+    const assessBatches = chunk(assessIds, 50);
+    const learnerBatches = learnerIds && learnerIds.length ? chunk(learnerIds, 100) : [null];
     let out = [];
-    for (let i = 0; i < assessIds.length; i += 50) {
-      const batch = assessIds.slice(i, i + 50);
-      let q = sbClient.from('marks').select('*').in('assessment_id', batch);
-      if (learnerIds && learnerIds.length) {
-        for (let j = 0; j < learnerIds.length; j += 50) {
-          const lb = learnerIds.slice(j, j + 50);
-          const { data, error } = await q.in('learner_id', lb);
-          if (error) throw error;
-          out = out.concat(data || []);
-        }
-      } else {
+    for (const aBatch of assessBatches) {
+      for (const lBatch of learnerBatches) {
+        let q = sbClient.from('marks').select('*').in('assessment_id', aBatch);
+        if (lBatch) q = q.in('learner_id', lBatch);
         const { data, error } = await q;
         if (error) throw error;
         out = out.concat(data || []);
@@ -80,13 +80,20 @@ const ReportStudent = {
     return { years, terms, classes, subjects, types, settings, scale, passMark, year, term, cls };
   },
 
-  async loadAssessments({ classId, yearId, termId, assessmentTypeId, subjectIds }) {
-    const filter = { class_id: classId, academic_year_id: yearId || undefined, term_id: termId || undefined };
+  async loadAssessments({ classId, yearId, termId, termIds, assessmentTypeId, subjectIds, assessmentIds }) {
+    const filter = { class_id: classId, academic_year_id: yearId || undefined };
+    if (termIds && termIds.length) filter.term_id = termIds;
+    else if (termId) filter.term_id = termId;
     if (assessmentTypeId) filter.assessment_type_id = assessmentTypeId;
+    if (assessmentIds && assessmentIds.length) filter.id = assessmentIds;
     let list = await DB.query('assessments', '*', filter, { column: 'assessment_date', asc: true });
     if (subjectIds && subjectIds.length) {
       const set = new Set(subjectIds.map(String));
       list = list.filter(a => set.has(String(a.subject_id)));
+    }
+    if (termIds && termIds.length) {
+      const tSet = new Set(termIds.map(String));
+      list = list.filter(a => !a.term_id || tSet.has(String(a.term_id)));
     }
     const official = list.filter(a => ['approved', 'locked'].includes(a.status));
     const pending = list.filter(a => a.status === 'submitted');
@@ -273,13 +280,24 @@ const ReportStudent = {
       settings, learner, cls, year, term, level, eduCat,
       subjRows, columns, columnMeta, columnTotals,
       totalSubjects: levelSubjects.length, withMarks,
-      passed, failed, totalObtained: totObt, totalMax,
+      passed, failed, totalObtained: Number(totObt || 0), totalMax: Number(totMax || 0),
       overallPct, overallGrade, overallPf, avg: overallPct,
       gradeDist, teacherName, teacherComment: teacherFinal, dosComment: dosFinal,
       decision, autoDecision, overallComment,
       scale, passMark, position: null, positionOutOf: null,
       hasMissing: subjRows.some(r => !r.hasMarks)
     };
+  },
+
+  normalizeCardTotals(card) {
+    if (!card) return card;
+    card.totalObtained = Number(card.totalObtained ?? 0);
+    card.totalMax = Number(card.totalMax ?? 0);
+    if (card.totalMax === 0 && Array.isArray(card.subjRows)) {
+      const sumMax = card.subjRows.reduce((s, r) => s + Number(r.maxMark || 0), 0);
+      card.totalMax = sumMax;
+    }
+    return card;
   },
 
   async computePositions(cards) {
@@ -296,16 +314,18 @@ const ReportStudent = {
 
   /* ---------- Public entry points ---------- */
 
-  async fetchCardData({ learnerId, classId, yearId, termId, subjectIds, assessmentTypeId, teacherComment, dosComment, decisionOverride }) {
+  async fetchCardData({ learnerId, classId, yearId, termId, termIds, subjectIds, assessmentIds, assessmentTypeId, teacherComment, dosComment, decisionOverride }) {
     const ctx = await this.loadContext({ classId, yearId, termId, assessmentTypeId });
     const { year, term, cls, subjects, types, settings, scale, passMark } = ctx;
     if (!cls) throw new Error('Select a valid class.');
     const learner = await DB.get('learners', { id: learnerId }).then(r => r[0]);
     if (!learner) throw new Error('Select a valid student.');
     this.validateSelection({ year, term, cls, learner });
-    const { official, approval } = await this.loadAssessments({ classId, yearId, termId, assessmentTypeId, subjectIds });
+    const effTermIds = termIds && termIds.length ? termIds : (termId ? [termId] : null);
+    const { official, approval } = await this.loadAssessments({ classId, yearId, termId, termIds: effTermIds, assessmentTypeId, subjectIds, assessmentIds });
     const allMarks = await this.fetchMarksByAssessments(official.map(a => a.id), [learnerId]);
     const card = await this.buildCard({ learner, cls, year, term, subjects, official, types, allMarks, settings, scale, passMark, subjectIds, teacherComment, dosComment, decisionOverride });
+    this.normalizeCardTotals(card);
     card.approval = approval;
     card.pendingCount = 0;
     await this.computePositions([card]);
@@ -339,19 +359,21 @@ const ReportStudent = {
     }).filter(Boolean);
   },
 
-  async fetchClassCards({ classId, yearId, termId, subjectIds, assessmentTypeId, teacherComment, dosComment, decisionOverride }) {
+  async fetchClassCards({ classId, yearId, termId, termIds, subjectIds, assessmentIds, assessmentTypeId, teacherComment, dosComment, decisionOverride }) {
     const ctx = await this.loadContext({ classId, yearId, termId, assessmentTypeId });
     const { year, term, cls, subjects, types, settings, scale, passMark } = ctx;
     if (!cls) throw new Error('Select a valid class.');
     this.validateSelection({ year, term, cls, learner: null });
     const learners = await ReportUtils.getLearners(classId);
     if (!learners.length) throw new Error('No active learners found in the selected class.');
-    const { official, approval } = await this.loadAssessments({ classId, yearId, termId, assessmentTypeId, subjectIds });
+    const effTermIds = termIds && termIds.length ? termIds : (termId ? [termId] : null);
+    const { official, approval } = await this.loadAssessments({ classId, yearId, termId, termIds: effTermIds, assessmentTypeId, subjectIds, assessmentIds });
     if (!official.length) throw new Error('No approved or locked assessments found for this class, year and term. This report cannot be finalized because marks are incomplete.');
     const allMarks = await this.fetchMarksByAssessments(official.map(a => a.id), learners.map(l => l.id));
     const cards = [];
     for (const learner of learners) {
       const card = await this.buildCard({ learner, cls, year, term, subjects, official, types, allMarks, settings, scale, passMark, subjectIds, teacherComment, dosComment, decisionOverride });
+      this.normalizeCardTotals(card);
       card.approval = approval;
       cards.push(card);
     }

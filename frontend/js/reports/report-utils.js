@@ -217,5 +217,75 @@ const ReportUtils = {
 
   esc(str) {
     return Utils.escapeHtml(str);
+  },
+
+  /* ---------- Print-safe inline SVG charts (no canvas, works in PDF/print) ---------- */
+
+  charts: {
+    svgBars({ labels = [], values = [], colors = [], height = 150, valueSuffix = '%', decimals = 0, showValues = true }) {
+      const data = labels.map((l, i) => ({
+        label: l,
+        value: Number(values[i] ?? 0),
+        color: colors[i] || '#1e3a5f'
+      }));
+      if (!data.some(d => d.value > 0)) return ReportHeader.emptyState('No numeric data available for the chart.');
+
+      const W = 680, H = height || 150;
+      const padL = 8, padR = 8, padT = 8, padB = 38;
+      const max = Math.max(...data.map(d => d.value), 5);
+      const slot = (W - padL - padR) / data.length;
+      const barW = Math.min(Math.max(slot * 0.58, 14), 84);
+      const usable = H - padT - padB - 16;
+
+      const bars = data.map((d, i) => {
+        const h = Math.max((d.value / max) * usable, 1.5);
+        const x = padL + i * slot + (slot - barW) / 2;
+        const y = padT + usable - h;
+        const label = String(d.label).length > 18 ? String(d.label).slice(0, 17) + '…' : String(d.label);
+        return `
+          <g>
+            <rect x="${x}" y="${y}" width="${barW}" height="${h}" rx="2" fill="${d.color}" opacity="0.92"></rect>
+            ${showValues ? `<text x="${x + barW / 2}" y="${y - 4}" text-anchor="middle" font-size="10" font-weight="700" fill="#111827">${Number(d.value).toFixed(decimals)}${valueSuffix}</text>` : ''}
+            <text x="${x + barW / 2}" y="${H - 14}" text-anchor="middle" font-size="8.5" fill="#334155" transform="rotate(0)">${Utils.escapeHtml(label)}</text>
+          </g>`;
+      }).join('');
+
+      return `<div class="rms-chart-card">
+        <svg class="rms-chart" viewBox="0 0 ${W} ${H}" preserveAspectRatio="xMidYMid meet" role="img" aria-label="Bar chart">
+          <line x1="${padL}" y1="${padT + usable}" x2="${W - padR}" y2="${padT + usable}" stroke="#1e3a5f" stroke-width="1"></line>
+          ${bars}
+        </svg>
+      </div>`;
+    },
+
+    svgDonut({ labels = [], values = [], colors = [], size = 150, centerLabel = '', centerValue = '' }) {
+      const data = labels.map((l, i) => ({ label: l, value: Number(values[i] ?? 0), color: colors[i] || '#1e3a5f' }));
+      const total = data.reduce((s, d) => s + d.value, 0);
+      if (!total) return ReportHeader.emptyState('No data available for the chart.');
+
+      const r = 62, cx = 84, cy = 84, sw = 24;
+      const C = 2 * Math.PI * r;
+      let offset = 0;
+      const arcs = data.map(d => {
+        const frac = d.value / total;
+        const len = frac * C;
+        const dash = `${len} ${C - len}`;
+        const seg = `<circle cx="${cx}" cy="${cy}" r="${r}" fill="none" stroke="${d.color}" stroke-width="${sw}" stroke-dasharray="${dash}" stroke-dashoffset="${-offset}" opacity="0.9"></circle>`;
+        offset += len;
+        return { seg, ...d };
+      });
+      const legend = data.map(d => `<span class="rms-chart-legend-item"><i style="background:${d.color}"></i><span>${Utils.escapeHtml(d.label)} <b>${d.value}</b></span></span>`).join('');
+
+      return `<div class="rms-chart-row">
+        <div class="rms-chart-card" style="min-width:210px">
+          <svg class="rms-chart" viewBox="0 0 168 168" preserveAspectRatio="xMidYMid meet" role="img" aria-label="Doughnut chart">
+            ${arcs.map(a => a.seg).join('')}
+            <text x="${cx}" y="${cy - 4}" text-anchor="middle" font-size="18" font-weight="800" fill="#111827">${Utils.escapeHtml(centerValue || total)}</text>
+            <text x="${cx}" y="${cy + 14}" text-anchor="middle" font-size="9" fill="#475569">${Utils.escapeHtml(centerLabel || 'Total')}</text>
+          </svg>
+        </div>
+        <div class="rms-chart-legend">${legend}</div>
+      </div>`;
+    }
   }
 };

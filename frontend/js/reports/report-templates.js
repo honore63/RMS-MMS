@@ -6,13 +6,15 @@ const ReportTemplates = {
   },
 
   studentCard(data) {
-    const { settings, learner, cls, year, term, subjRows, overallPct, overallGrade, overallPf, totalSubjects, passed, failed, avg, totalObtained, totalMax, scale } = data;
+    const { settings, learner, cls, year, term, subjRows, overallPct, overallGrade, overallPf, totalSubjects, passed, failed, avg } = data || {};
+    const totalObtained = Number(data?.totalObtained ?? 0);
+    const totalMax = Number(data?.totalMax ?? 0);
     const levelLbl = (cls?.level || '').toUpperCase().includes('PRIMARY') ? 'PRIMARY' : (cls?.level || '').toUpperCase().includes('S') ? (['S1','S2','S3'].includes(cls.level.toUpperCase()) ? 'LOWER SECONDARY' : 'UPPER SECONDARY') : 'SECONDARY';
-    const header = ReportHeader.getOfficialHeader({ settings, title: 'STUDENT REPORT CARD', subtitle: `${cls?.name || ''} – ${learner?.full_name || ''}`, levelLabel });
+    const header = ReportHeader.getOfficialHeader({ settings, title: 'STUDENT REPORT CARD', subtitle: `${cls?.name || ''} – ${learner?.full_name || ''}`, levelLabel: levelLbl });
 
     let tbody = '';
     subjRows.forEach((row, i) => {
-      tbody += `<tr><td class="text-center">${i + 1}</td><td>${Utils.escapeHtml(row.subject)}</td><td class="text-center">${ReportUtils.formatMark(row.obtained, row.maxMark)}</td><td class="text-center">${ReportUtils.formatPct(row.pct)}</td><td class="text-center font-bold">${row.grade}</td><td class="text-center"><span class="badge ${row.passFail === 'PASS' ? 'badge-success' : 'badge-danger'}">${row.passFail}</span></td><td class="text-center">${row.descriptor || '-'}</td></tr>`;
+      tbody += `<tr><td class="text-center">${i + 1}</td><td>${Utils.escapeHtml(row.subject?.name || row.subject)}</td><td class="text-center">${ReportUtils.formatMark(row.obtained, row.maxMark)}</td><td class="text-center">${ReportUtils.formatPct(row.pct)}</td><td class="text-center font-bold">${row.grade}</td><td class="text-center"><span class="badge ${row.passFail === 'PASS' ? 'badge-success' : 'badge-danger'}">${row.passFail}</span></td><td class="text-center">${row.descriptor || '-'}</td></tr>`;
     });
 
     const footer = ReportHeader.getFooter({ settings, academicYear: year.name || '', term: term.name || '' });
@@ -38,6 +40,7 @@ const ReportTemplates = {
         <div class="rms-stat"><span class="rms-stat-val" style="color:#dc2626">${failed}</span><span class="rms-stat-lbl">Failed</span></div>
         <div class="rms-stat"><span class="rms-stat-val">${ReportUtils.formatPct(avg)}</span><span class="rms-stat-lbl">Average</span></div>
         <div class="rms-stat"><span class="rms-stat-val font-bold">${overallGrade.grade}</span><span class="rms-stat-lbl">Overall Grade</span></div>
+        <div class="rms-stat"><span class="rms-stat-val">${totalObtained}/${totalMax || 0}</span><span class="rms-stat-lbl">Total Score</span></div>
       </div>
       ${footer}`;
   },

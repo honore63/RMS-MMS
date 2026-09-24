@@ -1,6 +1,6 @@
 -- ============================================================
 -- RMS-MIS: Configurable performance comments for report cards
--- Run this in Supabase SQL Editor (Dashboard → SQL Editor)
+-- Run this in Supabase SQL Editor (Dashboard -> SQL Editor)
 -- Deterministic mark-range remarks used by subject remarks,
 -- overall comments and teacher/DOS default comments.
 -- ============================================================
@@ -9,8 +9,8 @@ BEGIN;
 
 CREATE TABLE IF NOT EXISTS public.performance_comments (
   id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-  min_percentage NUMERIC NOT NULL,
-  max_percentage NUMERIC NOT NULL,
+  min_percentage NUMERIC NOT NULL CHECK (min_percentage >= 0 AND min_percentage <= 100),
+  max_percentage NUMERIC NOT NULL CHECK (max_percentage >= 0 AND max_percentage <= 100),
   comment TEXT NOT NULL,
   level TEXT NOT NULL DEFAULT 'All',
   active BOOLEAN NOT NULL DEFAULT TRUE,
@@ -23,6 +23,11 @@ ALTER TABLE public.performance_comments ENABLE ROW LEVEL SECURITY;
 DROP POLICY IF EXISTS rms_performance_comments_all ON public.performance_comments;
 CREATE POLICY rms_performance_comments_all ON public.performance_comments
   FOR ALL USING (true) WITH CHECK (true);
+
+GRANT SELECT ON public.performance_comments TO anon, authenticated;
+
+CREATE INDEX IF NOT EXISTS idx_performance_comments_active_range
+  ON public.performance_comments(active, min_percentage DESC);
 
 -- Seed official default bands (only when table is empty)
 INSERT INTO public.performance_comments (min_percentage, max_percentage, comment, level, active)

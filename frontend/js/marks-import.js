@@ -30,7 +30,8 @@ const MarksImport = (() => {
   const trim = v => String(v == null ? '' : v).trim();
   const low = v => trim(v).toLowerCase();
   const normHdr = v => low(v).replace(/[^a-z0-9]/g, '');
-  const normCode = v => trim(v).replace(/[\s-]+/g, '');
+  // Extract digits only – handles Excel leading apostrophe, spaces, dashes, etc.
+  const normCode = v => String(v == null ? '' : v).replace(/\D/g, '');
   const isCode11 = v => /^\d{11}$/.test(normCode(v));
 
   const codeAliases = ['studentcode', 'studentno', 'studentnumber', 'code', 'learnercode', 'studcode', 'admno', 'admissionno', 'admission', 'regno', 'indexno', 'registrationno', 'nationalid'];
@@ -162,12 +163,33 @@ const MarksImport = (() => {
   function analyzeGrid(grid) {
     const rows = (grid || []).filter(r => Array.isArray(r) && r.length);
     if (!rows.length) return null;
+
+    // Search for header row in first 8 rows — handles title rows or blank rows before header
     let headerIdx = -1;
-    const first = (rows[0] || []).map(h => normHdr(h));
-    let headHits = 0;
-    first.forEach(h => { if (h && aliasSet.indexOf(h) !== -1) headHits++; });
-    if (headHits >= 1) headerIdx = 0;
-    const data = headerIdx >= 0 ? rows.slice(1) : rows;
+    let headerMap = null;
+    for (let r = 0; r < Math.min(8, rows.length); r++) {
+      const hdr = (rows[r] || []).map(h => normHdr(h));
+      let hits = 0;
+      hdr.forEach(h => { if (h && aliasSet.indexOf(h) !== -1) hits++; });
+      // Also check alias-specific hits
+      const codeHits = hdr.filter(h => codeAliases.indexOf(h) !== -1).length;
+      const markHits = hdr.filter(h => markAliases.indexOf(h) !== -1).length;
+      if (hits >= 2 || (codeHits >= 1 && markHits >= 1) || hits >= 1 && hdr.filter(Boolean).length >= 2) {
+        headerIdx = r;
+        // Build direct column map from header aliases (most reliable)
+        const cIdx = hdr.findIndex(h => codeAliases.indexOf(h) !== -1);
+        const mIdx = hdr.findIndex(h => markAliases.indexOf(h) !== -1);
+        const nIdx = hdr.findIndex(h => nameAliases.indexOf(h) !== -1);
+        if (cIdx >= 0 && mIdx >= 0) headerMap = { codeIdx: cIdx, markIdx: mIdx, nameIdx: nIdx };
+        break;
+      }
+    }
+    // If header found with clear code/mark mapping, use it directly (works even when marks are empty)
+    if (headerMap && headerMap.codeIdx >= 0 && headerMap.markIdx >= 0) {
+      return { headerIdx: headerIdx, codeIdx: headerMap.codeIdx, nameIdx: headerMap.nameIdx, markIdx: headerMap.markIdx };
+    }
+
+    const data = headerIdx >= 0 ? rows.slice(headerIdx + 1) : rows;
     if (!data.length) return null;
     const stats = colStats(data);
     const max = Number(S.ctx.assessment ? S.ctx.assessment.maximum_mark : 200) || 200;
@@ -186,12 +208,23 @@ const MarksImport = (() => {
       if (within > markBest) { markBest = within; markIdx = i; }
       else if (within === markBest && within > 0 && i > markIdx) markIdx = i;
     });
+    // Fallback: if header exists but marks were empty, use header mark alias
+    if (markIdx < 0 && headerIdx >= 0) {
+      const hdr = (rows[headerIdx] || []).map(h => normHdr(h));
+      const mIdx = hdr.findIndex(h => markAliases.indexOf(h) !== -1);
+      if (mIdx >= 0) markIdx = mIdx;
+    }
 
     let nameIdx = -1, nameBest = 0;
     stats.forEach((s, i) => {
       if (i === codeIdx || i === markIdx) return;
       if (s.text > nameBest) { nameBest = s.text; nameIdx = i; }
     });
+    if (nameIdx < 0 && headerIdx >= 0) {
+      const hdr = (rows[headerIdx] || []).map(h => normHdr(h));
+      const nIdx = hdr.findIndex(h => nameAliases.indexOf(h) !== -1);
+      if (nIdx >= 0) nameIdx = nIdx;
+    }
     if (nameIdx < 0 && codeIdx >= 0 && codeIdx + 1 !== markIdx && stats[codeIdx + 1]) nameIdx = codeIdx + 1;
     if (codeIdx < 0 || markIdx < 0) return null;
     return { headerIdx: headerIdx, codeIdx: codeIdx, nameIdx: nameIdx, markIdx: markIdx };
@@ -1209,6 +1242,12 @@ const MarksImport = (() => {
         new_value: 'Imported ' + imported + ' marks (updated ' + updated + ', skipped ' + skipped + ') from ' + S.fileName,
         timestamp: new Date().toISOString()
       }).catch(() => {});
+      // === SYNC EVERYWHERE: bulk import → analytics/reports/DOS dashboards ===
+      DB.invalidate('marks');
+      DB.invalidate('assessments');
+      DB.invalidate('import_history');
+      if (typeof AnalyticsEngine !== 'undefined') AnalyticsEngine.resetContext();
+      if (typeof ReportUtils !== 'undefined') ReportUtils.invalidate();
     } catch (e) {
       console.error('[MarksImport] save error:', e);
       Utils.toast('Import failed: ' + e.message, 'error');
@@ -1285,20 +1324,58 @@ const MarksImport = (() => {
   // ------------------------------------------------------------
   const TEMPLATE_HEADERS = ['Student Code', 'Student Name', 'Mark'];
 
+  // Helper: ensure roster is loaded for template generation
+  async function ensureRosterForTemplate(){
+    if (S.roster && S.roster.length) return S.roster;
+    if (S.ctx && S.ctx.class){
+      try{
+        const list = await DB.query('learners', '*', { class_id: S.ctx.class.id, status: 'active' }, { column: 'full_name', asc: true });
+        S.roster = list || [];
+        S.rosterByCode = {};
+        S.roster.forEach(l=>{ S.rosterByCode[trim(l.learner_code)] = l; });
+        return S.roster;
+      }catch(e){ return []; }
+    }
+    // No context (e.g., called from generic import) – try to load from current marks entry if available
+    if (typeof markAssessment !== 'undefined' && markAssessment && markAssessment.class_id){
+      try{
+        const list = await DB.query('learners', '*', { class_id: markAssessment.class_id, status: 'active' }, { column: 'full_name', asc: true });
+        // Build a temporary roster for template without polluting S
+        return list || [];
+      }catch(e){ return []; }
+    }
+    return [];
+  }
+
   API.downloadTemplate = async (kind) => {
     try {
+      // If we have a roster context, populate template with Student Code + Name, empty Mark column
+      const rosterForTemplate = await ensureRosterForTemplate();
+      const hasRoster = rosterForTemplate && rosterForTemplate.length > 0;
+      const templateRows = hasRoster
+        ? [TEMPLATE_HEADERS].concat(rosterForTemplate.map(l=> [l.learner_code || '', l.full_name || '', '']))
+        : [TEMPLATE_HEADERS, ['', '', '']];
+      const templateFileBase = (S.ctx && S.ctx.assessment)
+        ? `marks-template-${(S.ctx.class? S.ctx.class.name : 'Class').replace(/[^a-zA-Z0-9]/g,'_')}-${S.ctx.assessment.name.replace(/[^a-zA-Z0-9]/g,'_')}`
+        : (typeof markAssessment !== 'undefined' && markAssessment ? `marks-template-${markAssessment.id.slice(0,8)}` : 'marks-template');
       if (kind === 'csv') {
-        const rows = [TEMPLATE_HEADERS, ['', '', '']];
-        const csv = rows.map(r => r.map(c => /[",\n]/.test(String(c)) ? '"' + String(c).replace(/"/g, '""') + '"' : String(c)).join(',')).join('\r\n');
-        downloadBlob('marks-template.csv', new Blob(['\ufeff' + csv], { type: 'text/csv;charset=utf-8' }));
-        Utils.toast('CSV template downloaded', 'success');
+        const csv = templateRows.map(r => r.map(c => /[",\n]/.test(String(c)) ? '"' + String(c).replace(/"/g, '""') + '"' : String(c)).join(',')).join('\r\n');
+        downloadBlob(templateFileBase + '.csv', new Blob(['\ufeff' + csv], { type: 'text/csv;charset=utf-8' }));
+        Utils.toast(hasRoster ? `CSV template downloaded (${rosterForTemplate.length} students)` : 'CSV template downloaded', 'success');
         return;
       }
       if (kind === 'excel') {
         await ensureSpreadsheetLib();
         const wb = XLSX.utils.book_new();
-        const ws = XLSX.utils.aoa_to_sheet([TEMPLATE_HEADERS, ['', '', '']]);
+        const ws = XLSX.utils.aoa_to_sheet(templateRows);
         ws['!cols'] = [{ wch: 18 }, { wch: 28 }, { wch: 10 }];
+        // Make Mark column editable, Code/Name not modified on import (matched by ID only)
+        if (hasRoster){
+          // Add data validation hint and freeze header
+          ws['!autofilter'] = { ref: `A1:C${templateRows.length}` };
+          // Highlight header
+          const headerStyle = { font: { bold: true }, fill: { fgColor: { rgb: "0F172A" } } };
+        }
         XLSX.utils.book_append_sheet(wb, ws, 'Marks');
         const info = XLSX.utils.aoa_to_sheet([
           ['MARKS SHEET TEMPLATE'],
@@ -1313,8 +1390,8 @@ const MarksImport = (() => {
         info['!cols'] = [{ wch: 90 }];
         XLSX.utils.book_append_sheet(wb, info, 'Instructions');
         const data = XLSX.write(wb, { bookType: 'xlsx', type: 'array' });
-        downloadBlob('marks-template.xlsx', new Blob([data], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' }));
-        Utils.toast('Excel template downloaded', 'success');
+        downloadBlob(templateFileBase + '.xlsx', new Blob([data], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' }));
+        Utils.toast(hasRoster ? `Excel template downloaded (${rosterForTemplate.length} students)` : 'Excel template downloaded', 'success');
         return;
       }
       if (kind === 'word') {
@@ -1331,12 +1408,20 @@ const MarksImport = (() => {
 <Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
   <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="word/document.xml"/>
 </Relationships>`);
-        const numRows = 8;
         let bodyRows = '';
-        for (let i = 0; i < numRows; i++) {
-          bodyRows += '<w:tr><w:tc><w:tcPr><w:tcW w:w="2200" w:type="dxa"/></w:tcPr><w:p/></w:tc>' +
-            '<w:tc><w:tcPr><w:tcW w:w="5200" w:type="dxa"/></w:tcPr><w:p/></w:tc>' +
-            '<w:tc><w:tcPr><w:tcW w:w="1400" w:type="dxa"/></w:tcPr><w:p/></w:tc></w:tr>';
+        const escXml = s => String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+        if (hasRoster){
+          for (const l of rosterForTemplate){
+            bodyRows += '<w:tr><w:tc><w:tcPr><w:tcW w:w="2200" w:type="dxa"/></w:tcPr><w:p><w:r><w:t>'+escXml(l.learner_code)+'</w:t></w:r></w:p></w:tc>'
+              + '<w:tc><w:tcPr><w:tcW w:w="5200" w:type="dxa"/></w:tcPr><w:p><w:r><w:t>'+escXml(l.full_name)+'</w:t></w:r></w:p></w:tc>'
+              + '<w:tc><w:tcPr><w:tcW w:w="1400" w:type="dxa"/></w:tcPr><w:p/></w:tc></w:tr>';
+          }
+        } else {
+          for (let i = 0; i < 8; i++) {
+            bodyRows += '<w:tr><w:tc><w:tcPr><w:tcW w:w="2200" w:type="dxa"/></w:tcPr><w:p/></w:tc>' +
+              '<w:tc><w:tcPr><w:tcW w:w="5200" w:type="dxa"/></w:tcPr><w:p/></w:tc>' +
+              '<w:tc><w:tcPr><w:tcW w:w="1400" w:type="dxa"/></w:tcPr><w:p/></w:tc></w:tr>';
+          }
         }
         zip.file('word/document.xml', `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
@@ -1356,8 +1441,8 @@ const MarksImport = (() => {
   </w:body>
 </w:document>`);
         const blob = await zip.generateAsync({ type: 'blob', mimeType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' });
-        downloadBlob('marks-template.docx', blob);
-        Utils.toast('Word template downloaded', 'success');
+        downloadBlob(templateFileBase + '.docx', blob);
+        Utils.toast(hasRoster ? `Word template downloaded (${rosterForTemplate.length} students)` : 'Word template downloaded', 'success');
         return;
       }
       if (kind === 'pdf') {
@@ -1376,12 +1461,28 @@ const MarksImport = (() => {
         doc.text('Student Code', 20, 48);
         doc.text('Student Name', 70, 48);
         doc.text('Mark', 170, 48);
-        doc.setFont(undefined, 'normal');
-        for (let i = 0; i < 20; i++) {
-          doc.line(20, 52 + i * 14, 190, 52 + i * 14);
+        if (hasRoster){
+          doc.setFontSize(8);
+          doc.setFont(undefined, 'normal');
+          let y = 56;
+          for (let i = 0; i < rosterForTemplate.length; i++){
+            if (y > 280){ doc.addPage(); y = 20; doc.setFontSize(11); doc.setFont(undefined,'bold'); doc.text('Student Code', 20, 14); doc.text('Student Name', 70, 14); doc.text('Mark', 170, 14); doc.setFont(undefined,'normal'); doc.setFontSize(8); y = 20; }
+            const l = rosterForTemplate[i];
+            doc.text(String(l.learner_code||''), 20, y);
+            // Truncate name if too long
+            const name = String(l.full_name||'');
+            doc.text(name.length>42 ? name.slice(0,42)+'...' : name, 70, y);
+            doc.line(20, y+2, 190, y+2);
+            y += 10;
+          }
+        } else {
+          doc.setFont(undefined, 'normal');
+          for (let i = 0; i < 20; i++) {
+            doc.line(20, 52 + i * 14, 190, 52 + i * 14);
+          }
         }
-        downloadBlob('marks-template.pdf', doc.output('blob'));
-        Utils.toast('PDF template downloaded', 'success');
+        downloadBlob(templateFileBase + '.pdf', doc.output('blob'));
+        Utils.toast(hasRoster ? `PDF template downloaded (${rosterForTemplate.length} students)` : 'PDF template downloaded', 'success');
         return;
       }
       throw new Error('Unknown template kind: ' + kind);

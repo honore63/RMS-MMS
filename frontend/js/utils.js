@@ -191,6 +191,10 @@ const Utils = {
   }
 };
 
+window.getGrading = function getGrading() {
+  return Utils.getGradingScale();
+};
+
 async function getSchoolSettings() {
   try {
     const res = await DB.query('school_settings', '*');

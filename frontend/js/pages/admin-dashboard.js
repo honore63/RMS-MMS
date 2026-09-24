@@ -5,11 +5,10 @@ async function renderAdminDashboard() {
   setContent(`<div class="grid-4"><div class="card card-in"><div class="spinner" style="margin:0 auto;width:28px;height:28px"></div></div><div class="card card-in"></div><div class="card card-in"></div><div class="card card-in"></div></div>`);
 
   try {
-    const [allLearners, teachers, allClasses, allAssessments] = await Promise.all([
-      DB.get('learners'),
+    const [teachers, allClasses, allAssessments] = await Promise.all([
       DB.count('teachers'),
       DB.get('classes'),
-      DB.get('assessments')
+      DB.get('assessments', {}, { select: 'id,class_id,subject_id,teacher_id,status,created_at' })
     ]);
 
     // Apply Education Level Filter (scoped DOS is locked to its level)
@@ -20,36 +19,43 @@ async function renderAdminDashboard() {
     } else if (adminDashboardEduLevel !== 'all') {
       classes = allClasses.filter(c => EducationLevels.getCategory(c) === adminDashboardEduLevel);
     }
-    const classIds = new Set(classes.map(c => c.id));
-    
-    // Filter learners and assessments based on filtered classes
-    const learners = (!scoped && adminDashboardEduLevel === 'all') 
-      ? allLearners 
-      : allLearners.filter(l => classIds.has(l.class_id));
+    const classIds = classes.map(c => c.id);
 
+    // Filter assessments based on filtered classes
     const assessments = (allAssessments || []).filter(a => {
       if (!scoped && adminDashboardEduLevel === 'all') return true;
-      return classIds.has(a.class_id);
+      return classIds.includes(a.class_id);
     });
+
+    // Learner count only, never load full table
+    const learners = (!scoped && adminDashboardEduLevel === 'all')
+      ? await DB.count('learners')
+      : classIds.length ? await DB.count('learners', { class_id: classIds }) : 0;
 
     const completed = assessments.filter(a => ['approved','locked'].includes(a.status)).length;
     const pending = assessments.filter(a => a.status === 'draft').length;
     const submitted = assessments.filter(a => a.status === 'submitted').length;
     const approved = assessments.filter(a => a.status === 'approved' || a.status === 'locked').length;
 
-    const recent = assessments.slice(0, 8);
+    const recent = [...assessments].sort((x, y) => String(y.created_at||'').localeCompare(String(x.created_at||''))).slice(0, 8);
+    const recentSubjectIds = [...new Set(recent.map(a => a.subject_id).filter(Boolean))];
+    const recentTeacherIds = [...new Set(recent.map(a => a.teacher_id).filter(Boolean))];
+    const [subjects, teachersList] = await Promise.all([
+      recentSubjectIds.length ? DB.get('subjects', { id: recentSubjectIds }, { select: 'id,name' }) : [],
+      recentTeacherIds.length ? DB.get('teachers', { id: recentTeacherIds }, { select: 'id,full_name' }) : []
+    ]);
+    const subjMap = new Map(subjects.map(s => [s.id, s]));
+    const teachMap = new Map(teachersList.map(t => [t.id, t]));
     let recentRows = '';
     for (const a of recent) {
       const cls = allClasses.find(c => c.id === a.class_id);
-      const [subj, teach] = await Promise.all([
-        a.subject_id ? DB.getRelated('subjects','name',{id:a.subject_id}) : [],
-        a.teacher_id ? DB.getRelated('teachers','full_name',{id:a.teacher_id}) : []
-      ]);
+      const subj = subjMap.get(a.subject_id);
+      const teach = teachMap.get(a.teacher_id);
       const cat = Utils.escapeHtml(EducationLevels.getCategory(cls));
       recentRows += `<tr>
-        <td class="col-name">${Utils.escapeHtml(teach[0]?.full_name||'-')}</td>
+        <td class="col-name">${Utils.escapeHtml(teach?.full_name||'-')}</td>
         <td><span style="font-size:10px;font-weight:700;color:var(--gray-500);text-transform:uppercase;display:block;margin-bottom:2px">${cat}</span>${Utils.escapeHtml(cls?.name||'-')}</td>
-        <td>${Utils.escapeHtml(subj[0]?.name||'-')}</td>
+        <td>${Utils.escapeHtml(subj?.name||'-')}</td>
         <td><span class="badge ${Utils.statusColor(a.status)}"><i data-lucide="${Utils.statusIcon(a.status)}"></i> ${a.status}</span></td>
       </tr>`;
     }
@@ -99,7 +105,7 @@ async function renderAdminDashboard() {
       <div class="grid-4 card-in-stagger mb-6">
         <div class="stat-card">
           <div class="stat-icon" style="background:var(--blue-50);color:var(--blue-600)"><i data-lucide="users"></i></div>
-          <div class="stat-value">${learners.length}</div>
+          <div class="stat-value">${learners}</div>
           <div class="stat-label">Total Learners</div>
           <div class="stat-desc"><i data-lucide="users"></i> Enrolled across filtered classes</div>
         </div>

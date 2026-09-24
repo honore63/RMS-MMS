@@ -670,13 +670,127 @@ function renderCombinedReportModal(data) {
   const footerHtml = `
     <button class="btn btn-outline" onclick="exportCombinedCSV()"><i data-lucide="file-text"></i> Export CSV</button>
     <button class="btn btn-secondary" onclick="exportCombinedExcel()"><i data-lucide="file-spreadsheet"></i> Export Excel (.xlsx)</button>
-    <button class="btn btn-primary" onclick="printCombinedReport()"><i data-lucide="printer"></i> Print / PDF Report</button>`;
+    <button class="btn btn-secondary" onclick="exportCombinedWord()"><i data-lucide="file-type-2"></i> Export Word (.doc)</button>
+    <button class="btn btn-primary" onclick="exportCombinedPdf()"><i data-lucide="file-down"></i> Export PDF</button>`;
 
   Modal.show('Official Consolidated Assessment Report Preview', modalHtml, footerHtml, true);
 }
 
 function printCombinedReport() {
   window.print();
+}
+
+function buildCombinedReportExportHtml(d) {
+  return `<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="utf-8">
+    <title>${Utils.escapeHtml((d.settings?.school_name || 'RMS-MIS') + ' — Combined Assessment Report')}</title>
+    <style>
+      body { font-family: Arial, Helvetica, sans-serif; color: #0f172a; margin: 20px; }
+      h1, h2, h3, h4, p { margin: 0 0 10px; }
+      .school-title { text-align: center; font-size: 24px; font-weight: 700; }
+      .motto { text-align: center; font-style: italic; font-size: 12px; color: #475569; }
+      .subhead { text-align: center; font-size: 18px; font-weight: 700; margin-bottom: 8px; }
+      .meta { width: 100%; border-collapse: collapse; margin: 12px 0 16px; }
+      .meta td { border: 1px solid #cbd5e1; padding: 8px 10px; font-size: 12px; }
+      table { border-collapse: collapse; width: 100%; margin-top: 12px; }
+      th { background: #0f172a; color: #ffffff; border: 1px solid #334155; padding: 8px; font-size: 11px; text-align: center; }
+      td { border: 1px solid #cbd5e1; padding: 7px; font-size: 11px; vertical-align: middle; }
+      .center { text-align: center; }
+      .bold { font-weight: 700; }
+      .pass { background: #dcfce7; color: #166534; font-weight: 700; }
+      .fail { background: #fee2e2; color: #991b1b; font-weight: 700; }
+      .signature { width: 100%; border-collapse: collapse; margin-top: 20px; }
+      .signature td { border: 1px solid #cbd5e1; padding: 10px; font-size: 12px; }
+    </style>
+  </head>
+  <body>
+    <div class="school-title">${Utils.escapeHtml(d.settings?.school_name || 'Rukara Model School')}</div>
+    ${d.settings?.school_motto ? `<div class="motto">${Utils.escapeHtml(d.settings.school_motto)}</div>` : ''}
+    <div class="subhead">COMBINED ASSESSMENT PERFORMANCE REPORT</div>
+    <table class="meta">
+      <tr>
+        <td><strong>Class:</strong> ${Utils.escapeHtml(d.cls?.name || '')}</td>
+        <td><strong>Subject:</strong> ${Utils.escapeHtml(d.sub?.name || '')}</td>
+      </tr>
+      <tr>
+        <td><strong>Academic Year:</strong> ${Utils.escapeHtml(d.year?.name || '')}</td>
+        <td><strong>Term:</strong> ${Utils.escapeHtml(d.term?.name || '')}</td>
+      </tr>
+      <tr>
+        <td><strong>Teacher:</strong> ${Utils.escapeHtml(d.teacher || '')}</td>
+        <td><strong>Report Status:</strong> ${d.isOfficial ? 'OFFICIAL / APPROVED' : 'DRAFT / WORKING'}</td>
+      </tr>
+    </table>
+    <table>
+      <thead>
+        <tr>
+          <th>No.</th>
+          <th>Student Number</th>
+          <th>Learner Name</th>
+          <th>Gender</th>
+          ${d.assessments.map(a => `<th>${Utils.escapeHtml(a.unit || a.name)} (${a.maximum_mark})</th>`).join('')}
+          <th>Total Marks</th>
+          <th>Maximum Marks</th>
+          <th>${d.weighted ? 'Weighted %' : 'Average %'}</th>
+          <th>Grade</th>
+          <th>Result</th>
+          <th>Rank</th>
+        </tr>
+      </thead>
+      <tbody>
+        ${d.rows.map((r, idx) => `
+          <tr>
+            <td class="center">${idx + 1}</td>
+            <td class="center">${Utils.escapeHtml(r.learnerCode)}</td>
+            <td>${Utils.escapeHtml(r.name)}</td>
+            <td class="center">${Utils.escapeHtml(r.gender)}</td>
+            ${d.assessments.map((a, j) => `<td class="center">${r.units[j].hasMark ? r.units[j].mark : 'N/R'}</td>`).join('')}
+            <td class="center bold">${r.pct == null ? 'N/R' : r.obtained}</td>
+            <td class="center bold">${r.pct == null ? 'N/R' : r.denominator}</td>
+            <td class="center bold">${r.pct == null ? 'N/R' : r.pct + '%'}</td>
+            <td class="center bold">${r.grade}</td>
+            <td class="center ${r.pf === 'PASS' ? 'pass' : 'fail'}">${r.pf}</td>
+            <td class="center bold">${r.position}</td>
+          </tr>
+        `).join('')}
+      </tbody>
+    </table>
+    <table class="signature">
+      <tr>
+        <td><strong>Prepared by:</strong> ${Utils.escapeHtml(d.teacher || '')}</td>
+        <td><strong>Reviewed by:</strong> ${Utils.escapeHtml(d.settings?.dos_name || '')}</td>
+        <td><strong>Approved by:</strong> ${Utils.escapeHtml(d.settings?.headteacher_name || '')}</td>
+      </tr>
+    </table>
+  </body>
+</html>`;
+}
+
+function openCombinedReportPrintWindow(html, title) {
+  const printWindow = window.open('', '_blank', 'width=1200,height=900');
+  if (!printWindow) {
+    Utils.toast('Pop-up blocked. Please allow pop-ups to print or export PDF.', 'error');
+    return null;
+  }
+
+  printWindow.document.open();
+  printWindow.document.write(`<!DOCTYPE html><html><head><meta charset="utf-8"><title>${Utils.escapeHtml(title || 'RMS-MIS Report')}</title><style>@page { size: A4 portrait; margin: 12mm; } body { margin: 0; background: #fff; font-family: Arial, Helvetica, sans-serif; -webkit-print-color-adjust: exact; print-color-adjust: exact; } * { box-sizing: border-box; } </style></head><body>${html}</body></html>`);
+  printWindow.document.close();
+  printWindow.focus();
+  return printWindow;
+}
+
+function printCombinedReport() {
+  if (!lastCombinedReportData) return Utils.toast('No report data available', 'error');
+  const html = buildCombinedReportExportHtml(lastCombinedReportData);
+  const printWindow = openCombinedReportPrintWindow(html, 'Combined Assessment Report');
+  if (!printWindow) return;
+  setTimeout(() => {
+    printWindow.print();
+    printWindow.onafterprint = () => printWindow.close();
+  }, 500);
 }
 
 function buildReportFilename(ext) {
@@ -720,6 +834,35 @@ function exportCombinedCSV() {
 
   const filename = buildReportFilename('csv');
   downloadCSVFile(filename, csv.join('\n'));
+}
+
+function exportCombinedWord() {
+  if (!lastCombinedReportData) return Utils.toast('No report data available', 'error');
+  const d = lastCombinedReportData;
+  const html = buildCombinedReportExportHtml(d);
+  const blob = new Blob([html], { type: 'application/msword;charset=utf-8' });
+  const link = document.createElement('a');
+  const url = URL.createObjectURL(blob);
+  link.href = url;
+  link.download = buildReportFilename('doc');
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
+  setTimeout(() => URL.revokeObjectURL(url), 1500);
+  Utils.toast('Word export downloaded', 'success');
+}
+
+function exportCombinedPdf() {
+  if (!lastCombinedReportData) return Utils.toast('No report data available', 'error');
+  const d = lastCombinedReportData;
+  const html = buildCombinedReportExportHtml(d);
+  const printWindow = openCombinedReportPrintWindow(html, 'Combined Assessment Report');
+  if (!printWindow) return;
+  Utils.toast('Print dialog opened — choose Save as PDF', 'info');
+  setTimeout(() => {
+    printWindow.print();
+    printWindow.onafterprint = () => printWindow.close();
+  }, 500);
 }
 
 function exportCombinedExcel() {

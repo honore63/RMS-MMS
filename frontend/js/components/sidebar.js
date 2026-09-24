@@ -118,15 +118,21 @@ const Sidebar = {
           <a class="nav-link nav-sub-link" data-route="admin/reports/cards" onclick="Router.go('admin/reports/cards')">
             <i data-lucide="file-badge"></i> Student Report Cards</a>
           <a class="nav-link nav-sub-link" data-route="admin/reports/class" onclick="Router.go('admin/reports/class')">
-            <i data-lucide="school"></i> Class Performance</a>
+            <i data-lucide="school"></i> Class Report</a>
           <a class="nav-link nav-sub-link" data-route="admin/reports/subject" onclick="Router.go('admin/reports/subject')">
-            <i data-lucide="book-open"></i> Subject Performance</a>
-          <a class="nav-link nav-sub-link" data-route="admin/reports/student" onclick="Router.go('admin/reports/student')">
-            <i data-lucide="user"></i> Student Performance</a>
+            <i data-lucide="book-open"></i> Subject Report</a>
           <a class="nav-link nav-sub-link" data-route="admin/reports/assessment" onclick="Router.go('admin/reports/assessment')">
             <i data-lucide="clipboard-check"></i> Assessment Report</a>
+          <a class="nav-link nav-sub-link" data-route="admin/reports/marks" onclick="Router.go('admin/reports/marks')">
+            <i data-lucide="list-checks"></i> Marks Report</a>
+          <a class="nav-link nav-sub-link" data-route="admin/reports/teacher" onclick="Router.go('admin/reports/teacher')">
+            <i data-lucide="users"></i> Teacher Report</a>
           <a class="nav-link nav-sub-link" data-route="admin/reports/school" onclick="Router.go('admin/reports/school')">
-            <i data-lucide="building-2"></i> School Report</a>
+            <i data-lucide="building-2"></i> Performance Report</a>
+          <a class="nav-link nav-sub-link" data-route="admin/reports/grades" onclick="Router.go('admin/reports/grades')">
+            <i data-lucide="pie-chart"></i> Grade Distribution</a>
+          <a class="nav-link nav-sub-link" data-route="admin/reports/student" onclick="Router.go('admin/reports/student')">
+            <i data-lucide="user"></i> Student Performance</a>
         </div>
       </div>
       <div class="sidebar-section">
@@ -160,12 +166,26 @@ const Sidebar = {
         <a class="nav-link nav-parent" data-navgroup="teacher-reports" onclick="Sidebar.toggleGroup('teacher-reports')">
           <i data-lucide="bar-chart-3"></i> Reports <i data-lucide="chevron-down" class="nav-chevron"></i></a>
         <div class="nav-sub" id="nav-sub-teacher-reports">
+          <a class="nav-link nav-sub-link" data-route="teacher/reports" onclick="Router.go('teacher/reports')">
+            <i data-lucide="layout-grid"></i> All Reports</a>
           <a class="nav-link nav-sub-link" data-route="teacher/reports/cards" onclick="Router.go('teacher/reports/cards')">
             <i data-lucide="file-badge"></i> Student Report Cards</a>
           <a class="nav-link nav-sub-link" data-route="teacher/reports/class" onclick="Router.go('teacher/reports/class')">
-            <i data-lucide="school"></i> Class Performance</a>
+            <i data-lucide="school"></i> Class Report</a>
           <a class="nav-link nav-sub-link" data-route="teacher/reports/subject" onclick="Router.go('teacher/reports/subject')">
-            <i data-lucide="book-open"></i> Subject Performance</a>
+            <i data-lucide="book-open"></i> Subject Report</a>
+          <a class="nav-link nav-sub-link" data-route="teacher/reports/assessment" onclick="Router.go('teacher/reports/assessment')">
+            <i data-lucide="clipboard-check"></i> Assessment Report</a>
+          <a class="nav-link nav-sub-link" data-route="teacher/reports/marks" onclick="Router.go('teacher/reports/marks')">
+            <i data-lucide="list-checks"></i> Marks Report</a>
+          <a class="nav-link nav-sub-link" data-route="teacher/reports/teacher" onclick="Router.go('teacher/reports/teacher')">
+            <i data-lucide="users"></i> Teacher Report</a>
+          <a class="nav-link nav-sub-link" data-route="teacher/reports/school" onclick="Router.go('teacher/reports/school')">
+            <i data-lucide="building-2"></i> Performance Report</a>
+          <a class="nav-link nav-sub-link" data-route="teacher/reports/grades" onclick="Router.go('teacher/reports/grades')">
+            <i data-lucide="pie-chart"></i> Grade Distribution</a>
+          <a class="nav-link nav-sub-link" data-route="teacher/reports/student" onclick="Router.go('teacher/reports/student')">
+            <i data-lucide="user"></i> Student Performance</a>
         </div>
       </div>
       <a class="nav-link" data-route="teacher/analytics" onclick="Router.go('teacher/analytics')">

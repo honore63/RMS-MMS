@@ -27,8 +27,8 @@ function teacherMatchesScope(classRecord) {
 function teacherSummaryProfile(t, teacherMeta = {}) {
   const photoURL = t.profile_photo_url || t.photo_url || t.avatar_url || '';
   const avatar = photoURL
-    ? `<img src="${Utils.escapeHtml(photoURL)}" alt="${Utils.escapeHtml(t.full_name || 'Teacher photo')}" style="width:100%;height:100%;object-fit:cover;border-radius:50%">`
-    : `<div style="width:100%;height:100%;display:flex;align-items:center;justify-content:center;background:linear-gradient(135deg,var(--blue-600),var(--blue-800));color:#fff;font-size:18px;font-weight:700;border-radius:50%">${Utils.escapeHtml((t.full_name || 'T').split(' ').map(s => s[0]).slice(0, 2).join('').toUpperCase() || 'T')}</div>`;
+    ? `<img src="${Utils.escapeHtml(photoURL)}" alt="${Utils.escapeHtml(t.full_name || 'Teacher photo')}">`
+    : `<div class="teacher-avatar-placeholder">${Utils.escapeHtml((t.full_name || 'T').split(' ').map(s => s[0]).slice(0, 2).join('').toUpperCase() || 'T')}</div>`;
 
   const classTags = (teacherMeta.classNames || []).length
     ? teacherMeta.classNames.map(name => `<span class="teacher-chip">${Utils.escapeHtml(name)}</span>`).join('')
@@ -57,15 +57,6 @@ function teacherSummaryProfile(t, teacherMeta = {}) {
       </div>
 
       <div class="teacher-card-body">
-        <div class="teacher-info-list">
-          <div><span class="teacher-label"><i data-lucide="phone"></i>Phone</span><span>${Utils.escapeHtml(t.phone || 'Not provided')}</span></div>
-          <div><span class="teacher-label"><i data-lucide="mail"></i>Email</span><span>${Utils.escapeHtml(t.email || 'Not provided')}</span></div>
-          <div><span class="teacher-label"><i data-lucide="user"></i>Gender</span><span>${Utils.escapeHtml(t.gender || '—')}</span></div>
-          <div><span class="teacher-label"><i data-lucide="graduation-cap"></i>Qualification</span><span>${Utils.escapeHtml(t.qualification || 'Not provided')}</span></div>
-          <div><span class="teacher-label"><i data-lucide="briefcase"></i>Department</span><span>${Utils.escapeHtml(t.department || 'Not provided')}</span></div>
-          <div><span class="teacher-label"><i data-lucide="shield-check"></i>Role</span><span>${Utils.escapeHtml(t.role || 'Teacher')}</span></div>
-        </div>
-
         <div class="teacher-academic-box">
           <div class="teacher-section-header">
             <span>Education Level</span>
@@ -85,7 +76,7 @@ function teacherSummaryProfile(t, teacherMeta = {}) {
       </div>
 
       <div class="teacher-card-actions">
-        <button class="btn btn-sm btn-secondary" data-action="teacher-view" data-id="${Utils.escapeHtml(String(t.id))}"><i data-lucide="eye"></i> View Full Profile</button>
+        <button class="btn btn-sm btn-secondary teacher-view-btn" data-action="teacher-view" data-id="${Utils.escapeHtml(String(t.id))}" title="View more teacher details" aria-label="View more teacher details"><i data-lucide="eye"></i> View more</button>
         <button class="btn btn-sm btn-outline" data-action="teacher-edit" data-id="${Utils.escapeHtml(String(t.id))}"><i data-lucide="pencil"></i> Edit</button>
         <button class="btn btn-sm btn-secondary" data-action="teacher-assignments" data-id="${Utils.escapeHtml(String(t.id))}"><i data-lucide="link"></i> Manage Assignments</button>
       </div>
@@ -172,25 +163,28 @@ async function renderTeachers() {
       .teacher-search-wrap .search-icon { position: absolute; left: 12px; color: var(--gray-500); }
       .teacher-search-wrap input { padding-left: 38px; }
       .teacher-filters { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; }
-      .teacher-card-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 18px; }
-      .teacher-card { background: #fff; border: 1px solid var(--gray-200); border-radius: 18px; box-shadow: 0 8px 18px rgba(15,23,42,.04); padding: 18px; display: flex; flex-direction: column; gap: 16px; min-width: 0; }
-      .teacher-card-header { display: flex; align-items: center; gap: 14px; padding-bottom: 14px; border-bottom: 1px solid var(--gray-100); }
-      .teacher-avatar-wrap { width: 72px; height: 72px; border-radius: 50%; overflow: hidden; border: 3px solid rgba(59,130,246,.15); background: var(--gray-100); flex-shrink: 0; }
+      .teacher-card-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(290px, 1fr)); gap: 18px; align-items: stretch; }
+      .teacher-card { background: #fff; border: 1px solid var(--gray-200); border-radius: 14px; box-shadow: 0 8px 18px rgba(15,23,42,.04); padding: 14px; display: flex; flex-direction: column; gap: 14px; min-width: 0; height: 100%; overflow: hidden; }
+      .teacher-card-header { display: flex; flex-direction: column; gap: 12px; padding-bottom: 14px; border-bottom: 1px solid var(--gray-100); min-width: 0; }
+      .teacher-avatar-wrap { width: 100%; height: auto; aspect-ratio: 4 / 3; border-radius: 10px; overflow: hidden; border: 1px solid var(--gray-200); background: var(--gray-100); flex-shrink: 0; }
+      .teacher-avatar-wrap img { display: block; width: 100%; height: 100%; object-fit: cover; object-position: center 35%; }
+      .teacher-avatar-placeholder { width: 100%; height: 100%; display: flex; align-items: center; justify-content: center; background: linear-gradient(135deg,var(--blue-600),var(--blue-800)); color:#fff; font-size:28px; font-weight:700; }
       .teacher-meta { min-width: 0; flex: 1; }
-      .teacher-meta h3 { margin: 0; font-size: 1.05rem; color: var(--gray-900); font-weight: 700; word-break: break-word; }
-      .teacher-code { margin-top: 4px; font-size: 12px; color: var(--gray-500); letter-spacing: 0.06em; word-break: break-word; }
+      .teacher-meta h3 { margin: 0; font-size: 1.05rem; line-height: 1.35; color: var(--gray-900); font-weight: 700; overflow-wrap:anywhere; }
+      .teacher-code { margin-top: 4px; font-size: 12px; color: var(--gray-500); letter-spacing: 0.06em; overflow-wrap:anywhere; }
       .teacher-status { display: inline-flex; align-items: center; gap: 6px; padding: 5px 10px; border-radius: 999px; font-size: 11px; font-weight: 700; margin-top: 8px; }
       .teacher-status.success { background: rgba(34,197,94,.1); color: var(--green-700); }
       .teacher-status.secondary { background: rgba(107,114,128,.08); color: var(--gray-700); }
       .teacher-card-body { display: flex; flex-direction: column; gap: 14px; }
       .teacher-info-list { display: grid; gap: 8px; }
-      .teacher-info-list div { display: grid; grid-template-columns: 100px 1fr; gap: 8px; align-items: start; font-size: 12.5px; color: var(--gray-700); }
+      .teacher-info-list div { display: grid; grid-template-columns: 92px minmax(0,1fr); gap: 8px; align-items: start; font-size: 12.5px; color: var(--gray-700); min-width: 0; }
+      .teacher-info-list div > span:last-child { min-width: 0; overflow-wrap:anywhere; word-break:break-word; }
       .teacher-label { color: var(--gray-500); font-weight: 600; display: inline-flex; align-items: center; gap: 6px; }
       .teacher-label i { width: 14px; height: 14px; }
-      .teacher-academic-box { background: var(--gray-50); border: 1px solid var(--gray-200); border-radius: 12px; padding: 12px; display: flex; flex-direction: column; gap: 10px; }
+      .teacher-academic-box { background: var(--gray-50); border: 1px solid var(--gray-200); border-radius: 10px; padding: 12px; display: flex; flex-direction: column; gap: 10px; min-width: 0; }
       .teacher-section-header { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.08em; color: var(--gray-500); }
       .teacher-badges, .teacher-tags { display: flex; flex-wrap: wrap; gap: 6px; }
-      .teacher-badge, .teacher-chip { display: inline-flex; align-items: center; justify-content: center; padding: 6px 10px; border-radius: 999px; font-size: 11px; font-weight: 600; border: 1px solid transparent; }
+      .teacher-badge, .teacher-chip { display: inline-flex; align-items: center; justify-content: center; max-width:100%; padding: 6px 10px; border-radius: 999px; font-size: 11px; font-weight: 600; border: 1px solid transparent; overflow-wrap:anywhere; word-break:break-word; }
       .teacher-badge.success { background: rgba(34,197,94,.12); color: var(--green-700); border-color: rgba(34,197,94,.15); }
       .teacher-badge.info { background: rgba(59,130,246,.1); color: var(--blue-700); border-color: rgba(59,130,246,.15); }
       .teacher-badge.neutral { background: var(--gray-100); color: var(--gray-700); }
@@ -198,7 +192,7 @@ async function renderTeachers() {
       .teacher-chip.accent { background: rgba(139,92,246,.08); color: var(--violet-700); border-color: rgba(139,92,246,.12); }
       .teacher-chip.muted { background: var(--gray-100); color: var(--gray-600); border-color: var(--gray-200); }
       .teacher-card-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: auto; }
-      .teacher-card-actions .btn { flex: 1 1 120px; }
+      .teacher-card-actions .btn { flex: 1 1 120px; min-width:0; justify-content:center; }
       @media (max-width: 640px) {
         .teacher-toolbar { align-items: stretch; }
         .teacher-filters { width: 100%; }
