@@ -1267,6 +1267,132 @@ td {
   display: flex;
   gap: 6px;
 }
+.assign-line {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  padding: 2px 0;
+}
+.assign-class {
+  flex-shrink: 0;
+  min-width: 64px;
+  font-weight: 700;
+  color: var(--gray-900);
+}
+.assign-subjects {
+  color: var(--gray-600);
+  font-size: 12.5px;
+  word-wrap: break-word;
+}
+
+/* ---------- Assignment teacher cards ---------- */
+.assign-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+  gap: 16px;
+}
+.assign-card {
+  background: var(--white, #fff);
+  border: 1px solid var(--gray-200);
+  border-radius: 14px;
+  box-shadow: 0 1px 3px rgba(15, 23, 42, 0.06);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  transition: box-shadow 0.15s ease, transform 0.15s ease;
+}
+.assign-card:hover {
+  box-shadow: 0 8px 22px rgba(15, 23, 42, 0.12);
+  transform: translateY(-2px);
+}
+.assign-card-header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 16px 16px 12px;
+  border-bottom: 1px solid var(--gray-100);
+  background: linear-gradient(135deg, rgba(37, 99, 235, 0.06), rgba(255, 255, 255, 0));
+}
+.assign-avatar {
+  width: 44px;
+  height: 44px;
+  border-radius: 12px;
+  background: linear-gradient(135deg, var(--blue-600, #2563eb), var(--blue-400, #60a5fa));
+  color: #fff;
+  font-weight: 800;
+  font-size: 15px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  letter-spacing: 0.5px;
+}
+.assign-card-meta {
+  min-width: 0;
+}
+.assign-card-meta h3 {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--gray-900);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.assign-code {
+  font-size: 11.5px;
+  font-weight: 600;
+  color: var(--gray-500);
+  margin-top: 1px;
+}
+.assign-status {
+  margin-top: 4px;
+}
+.assign-card-body {
+  padding: 12px 16px;
+  flex: 1;
+}
+.assign-summary {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--gray-600);
+  margin-bottom: 8px;
+}
+.assign-summary i {
+  width: 8px;
+  height: 8px;
+  color: var(--gray-300);
+}
+.assign-year {
+  font-size: 10.5px;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--blue-700, #1d4ed8);
+  margin: 6px 0 2px;
+}
+.assign-year:first-child {
+  margin-top: 0;
+}
+.assign-card-actions {
+  display: flex;
+  gap: 8px;
+  padding: 12px 16px;
+  border-top: 1px solid var(--gray-100);
+  background: var(--gray-50, #f8fafc);
+}
+.assign-card-empty .assign-card-body {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 20px 16px;
+}
+.assign-card-empty .assign-card-actions {
+  justify-content: center;
+}
 .table-footer {
   padding: 12px 16px;
   border-top: 1px solid var(--gray-200);

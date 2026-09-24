@@ -15,14 +15,38 @@ function renderAssignmentClassSubjects() {
 
   const existing = assignmentQueue.find(item => item.class_id === classId);
   const checked = new Set(existing ? existing.subject_ids : []);
-  const html = (assignmentSubjects || []).map(s => `
+  const list = (assignmentSubjects || []).map(s => `
     <label style="display:flex;align-items:center;gap:8px;padding:4px 0">
-      <input type="checkbox" name="af-subject" value="${s.id}" ${checked.has(s.id) ? 'checked' : ''}> 
+      <input type="checkbox" name="af-subject" value="${s.id}" ${checked.has(s.id) ? 'checked' : ''} onchange="renderAssignmentSubjectCount()"> 
       ${Utils.escapeHtml(s.name)}
     </label>
   `).join('') || '<div class="text-sm text-muted">No active subjects available for this class.</div>';
 
-  panel.innerHTML = html;
+  panel.innerHTML = `
+    <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;margin-bottom:4px;padding-bottom:4px;border-bottom:1px solid var(--gray-200)">
+      <span class="text-xs text-muted" id="af-subject-count" style="font-weight:600">${checked.size ? checked.size + ' subject(s) selected' : 'Select one or more subjects'}</span>
+      <span style="display:inline-flex;gap:6px">
+        <button type="button" class="btn btn-xs btn-outline" onclick="assignSelectAllSubjects()">Select all</button>
+        <button type="button" class="btn btn-xs btn-outline" onclick="assignClearSubjects()">Clear</button>
+      </span>
+    </div>
+    ${list}`;
+}
+
+function renderAssignmentSubjectCount() {
+  const count = document.querySelectorAll('input[name="af-subject"]:checked').length;
+  const el = document.getElementById('af-subject-count');
+  if (el) el.textContent = count ? count + ' subject(s) selected' : 'Select one or more subjects';
+}
+
+function assignSelectAllSubjects() {
+  document.querySelectorAll('input[name="af-subject"]').forEach(cb => cb.checked = true);
+  renderAssignmentSubjectCount();
+}
+
+function assignClearSubjects() {
+  document.querySelectorAll('input[name="af-subject"]').forEach(cb => cb.checked = false);
+  renderAssignmentSubjectCount();
 }
 
 function renderAssignmentQueue() {
@@ -81,7 +105,8 @@ function assignAddClassToQueue() {
 
   const existing = assignmentQueue.find(item => item.class_id === classId);
   if (existing) {
-    existing.subject_ids = [...new Set(selectedSubjects)];
+    // MERGE, never replace — a teacher can hold several subjects in one class.
+    existing.subject_ids = [...new Set([...(existing.subject_ids || []), ...selectedSubjects])];
   } else {
     assignmentQueue.push({ class_id: classId, subject_ids: [...new Set(selectedSubjects)] });
   }
@@ -105,56 +130,78 @@ async function renderAssignments() {
   
   const filtered = assignFilter === 'all' ? assignments : assignments.filter(a => a.teacher_id === assignFilter);
   
-  // Group assignments by teacher_id and academic_year_id to form a matrix
-  const matrix = {};
+  // teacher_id -> year_id -> class_id -> Set(subject_ids)
+  const byTeacher = {};
   filtered.forEach(a => {
-    const key = `${a.teacher_id}_${a.academic_year_id || 'unassigned'}`;
-    if (!matrix[key]) {
-      matrix[key] = {
-        teacher_id: a.teacher_id,
-        year_id: a.academic_year_id,
-        classes: new Set(),
-        subjects: new Set(),
-        groupCount: 0
-      };
-    }
-    matrix[key].classes.add(a.class_id);
-    matrix[key].subjects.add(a.subject_id);
-    matrix[key].groupCount++;
+    const yearKey = a.academic_year_id || 'unassigned';
+    if (!byTeacher[a.teacher_id]) byTeacher[a.teacher_id] = {};
+    if (!byTeacher[a.teacher_id][yearKey]) byTeacher[a.teacher_id][yearKey] = {};
+    const yearMap = byTeacher[a.teacher_id][yearKey];
+    if (!yearMap[a.class_id]) yearMap[a.class_id] = new Set();
+    yearMap[a.class_id].add(a.subject_id);
   });
 
-  const rows = Object.values(matrix).map(group => {
-    const t = teachers.find(t => t.id === group.teacher_id);
-    const y = years.find(y => y.id === group.year_id);
-    
-    const classNames = Array.from(group.classes).map(cid => classes.find(c => c.id === cid)?.name || 'Unknown').join(', ');
-    const subjectNames = Array.from(group.subjects).map(sid => subjects.find(s => s.id === sid)?.name || 'Unknown').join(', ');
-    
-    return `<tr>
-      <td class="col-name">${Utils.escapeHtml(t?.full_name || 'Unknown')}<br><span class="text-xs text-muted">${Utils.escapeHtml(t?.teacher_code || '')}</span></td>
-      <td style="max-width:200px;word-wrap:break-word">${Utils.escapeHtml(classNames)}</td>
-      <td style="max-width:200px;word-wrap:break-word">${Utils.escapeHtml(subjectNames)}</td>
-      <td>${Utils.escapeHtml(y?.name || '-')}</td>
-      <td><span class="badge ${t?.status === 'active' ? 'badge-info' : 'badge-danger'}">${t?.status || 'Unknown'}</span></td>
-      <td class="col-actions">
-        <button class="btn btn-sm btn-outline" onclick="assignEditGroup('${group.teacher_id}', '${group.year_id}')"><i data-lucide="pencil"></i> Edit</button>
-        <button class="btn btn-sm btn-danger" onclick="assignDeleteGroup('${group.teacher_id}', '${group.year_id}')"><i data-lucide="trash-2"></i> Remove (${group.groupCount})</button>
-      </td>
-    </tr>`;
+  const className = id => classes.find(c => String(c.id) === String(id))?.name || 'Unknown class';
+  const subjectName = id => subjects.find(s => String(s.id) === String(id))?.name || 'Unknown subject';
+  const initialsOf = name => (name || 'T').split(/\s+/).filter(Boolean).slice(0, 2).map(p => p[0]).join('').toUpperCase();
+
+  const cards = (teachers || []).map(t => {
+    const yearGroups = byTeacher[t.id] || {};
+    const hasAssignments = Object.keys(yearGroups).length > 0;
+    const firstYearKey = Object.keys(yearGroups).find(k => k !== 'unassigned') || 'null';
+
+    let classCount = 0;
+    let subjectCount = 0;
+    const lines = Object.entries(yearGroups).map(([yearKey, classMap]) => {
+      const y = yearKey !== 'unassigned' ? years.find(yr => String(yr.id) === String(yearKey)) : null;
+      const yearLabel = y ? y.name : null;
+      const yearLines = Object.entries(classMap).map(([cid, subjSet]) => {
+        classCount++;
+        subjectCount += subjSet.size;
+        const subs = Array.from(subjSet).map(subjectName).join(', ');
+        return `<div class="assign-line"><span class="assign-class">${Utils.escapeHtml(className(cid))}</span><span class="assign-subjects">${Utils.escapeHtml(subs)}</span></div>`;
+      }).join('');
+      return (yearLabel ? `<div class="assign-year">${Utils.escapeHtml(yearLabel)}</div>` : '') + yearLines;
+    }).join('');
+
+    const status = (t.status || 'active') === 'active'
+      ? '<span class="badge badge-success"><i data-lucide="check-circle" style="width:12px;height:12px"></i> Active</span>'
+      : '<span class="badge badge-danger">Inactive</span>';
+
+    return `
+      <div class="assign-card${hasAssignments ? '' : ' assign-card-empty'}">
+        <div class="assign-card-header">
+          <div class="assign-avatar">${Utils.escapeHtml(initialsOf(t.full_name))}</div>
+          <div class="assign-card-meta">
+            <h3>${Utils.escapeHtml(t.full_name || 'Unknown Teacher')}</h3>
+            <div class="assign-code">${Utils.escapeHtml(t.teacher_code || '—')}</div>
+            <div class="assign-status">${status}</div>
+          </div>
+        </div>
+        <div class="assign-card-body">
+          ${hasAssignments
+            ? `<div class="assign-summary"><span>${classCount} class(es)</span><i data-lucide="dot"></i><span>${subjectCount} subject(s)</span></div>${lines}`
+            : '<p class="text-sm text-muted">No classes or subjects assigned yet.</p>'}
+        </div>
+        <div class="assign-card-actions">
+          ${hasAssignments
+            ? `<button class="btn btn-sm btn-outline" onclick="assignEditGroup('${t.id}', '${firstYearKey}')"><i data-lucide="pencil"></i> Edit</button>
+               <button class="btn btn-sm btn-danger" onclick="assignDeleteGroup('${t.id}', '${firstYearKey}')"><i data-lucide="trash-2"></i> Remove</button>`
+            : `<button class="btn btn-sm btn-primary" onclick="assignForm()"><i data-lucide="plus"></i> Assign Now</button>`}
+        </div>
+      </div>`;
   }).join('');
 
   setContent(`
     <div class="flex justify-between items-center mb-6" style="flex-wrap:wrap;gap:12px">
       <select class="select-field" style="width:250px" onchange="assignFilter=this.value;renderAssignments()">
         <option value="all">All Teachers</option>
-        ${teachers.map(t => `<option value="${t.id}" ${assignFilter === t.id ? 'selected' : ''}>${t.full_name}</option>`).join('')}
+        ${(teachers || []).map(t => `<option value="${t.id}" ${assignFilter === t.id ? 'selected' : ''}>${Utils.escapeHtml(t.full_name)}</option>`).join('')}
       </select>
       <button class="btn btn-primary" onclick="assignForm()"><i data-lucide="plus"></i> New Assignment Array</button>
     </div>
-    <div class="card"><div class="table-container"><table class="data-table">
-      <thead><tr><th>Teacher</th><th>Classes</th><th>Subjects</th><th>Academic Year</th><th>Status</th><th>Actions</th></tr></thead>
-      <tbody>${rows || `<tr><td colspan="6">${Utils.empty('No assignments found', 'link')}</td></tr>`}</tbody>
-    </table></div></div>`);
+    ${cards ? `<div class="assign-grid">${cards}</div>` : `<div class="card"><div class="table-container">${Utils.empty('No teachers found', 'user-x')}</div></div>`}`);
+  if (typeof lucide !== 'undefined') lucide.createIcons();
 }
 
 async function buildAssignmentModal(title, preSelectedTeacher = null, preSelectedYear = null, selectedClassSubjects = {}) {
@@ -222,7 +269,9 @@ async function assignForm() {
 }
 
 async function assignEditGroup(teacherId, yearId) {
-  const assignments = await DB.query('teacher_assignments', '*', { teacher_id: teacherId, academic_year_id: yearId });
+  const filters = { teacher_id: teacherId };
+  if (yearId && yearId !== 'null' && yearId !== 'unassigned') filters.academic_year_id = yearId;
+  const assignments = await DB.query('teacher_assignments', '*', filters, null, null, { cache: false });
   const selectedClassSubjects = {};
   assignments.forEach(a => {
     if (!selectedClassSubjects[a.class_id]) selectedClassSubjects[a.class_id] = [];
@@ -261,7 +310,7 @@ async function assignSaveMultiple(btn) {
     const existing = await DB.query('teacher_assignments', 'teacher_id,class_id,subject_id,academic_year_id', {
       teacher_id,
       academic_year_id: year_id
-    });
+    }, null, null, { cache: false });
     const existingKeys = new Set((existing || []).map(a => `${a.teacher_id}|${a.class_id}|${a.subject_id}|${a.academic_year_id}`));
     const newPayload = payLoad.filter(a => !existingKeys.has(`${a.teacher_id}|${a.class_id}|${a.subject_id}|${a.academic_year_id}`));
     if (!newPayload.length) {
@@ -270,6 +319,7 @@ async function assignSaveMultiple(btn) {
     }
     const { error } = await sbClient.from('teacher_assignments').insert(newPayload);
     if (error) throw error;
+    DB.invalidate('teacher_assignments');
     Modal.close();
     Utils.toast(`Created ${newPayload.length} assignment(s)`, 'success');
     renderAssignments();
@@ -317,6 +367,7 @@ async function assignUpdateMultiple(teacherId, yearId, btn) {
       if (insErr) throw insErr;
     }
 
+    DB.invalidate('teacher_assignments');
     Modal.close();
     Utils.toast(`Synced to ${payLoad.length} assignment(s)`, 'success');
     renderAssignments();
@@ -343,6 +394,7 @@ async function confirmAssignDeleteGroup(teacherId, yearId) {
     const { error } = await q;
     if (error) throw error;
     
+    DB.invalidate('teacher_assignments');
     Modal.close();
     Utils.toast('Assignment group completely removed', 'success');
     renderAssignments();
