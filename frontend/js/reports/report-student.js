@@ -422,34 +422,34 @@ const ReportStudent = {
     if (!items.length) return '<div class="src-chart-title">Grade Distribution</div><p class="text-sm text-muted">No grade data</p>';
     const colors = ['#4ade80', '#60a5fa', '#f59e0b', '#f97316', '#ef4444', '#a855f7'];
     const max = Math.max(...items.map(g => g.count));
-    const W = 220, H = 110, padB = 18, padT = 14;
+    const W = 180, H = 78, padB = 14, padT = 11;
     const slot = W / items.length;
-    const bw = Math.min(30, slot * 0.55);
+    const bw = Math.min(22, slot * 0.55);
     let bars = '';
     items.forEach((g, i) => {
       const h = max > 0 ? Math.max(2, ((H - padB - padT) * g.count) / max) : 0;
       const x = slot * i + (slot - bw) / 2;
       const y = H - padB - h;
       const col = colors[i % colors.length];
-      bars += `<rect x="${x.toFixed(1)}" y="${y.toFixed(1)}" width="${bw.toFixed(1)}" height="${h.toFixed(1)}" fill="${col}" rx="2"><title>${Utils.escapeHtml(g.grade)}: ${g.count}</title></rect>`;
-      bars += `<text x="${(x + bw / 2).toFixed(1)}" y="${(y - 3).toFixed(1)}" text-anchor="middle" font-size="9" font-weight="700" fill="#1e293b">${g.count}</text>`;
-      bars += `<text x="${(x + bw / 2).toFixed(1)}" y="${H - 5}" text-anchor="middle" font-size="9" font-weight="600" fill="#1e293b">${Utils.escapeHtml(g.grade)}</text>`;
+      bars += `<rect x="${x.toFixed(1)}" y="${y.toFixed(1)}" width="${bw.toFixed(1)}" height="${h.toFixed(1)}" fill="${col}" rx="1.5"><title>${Utils.escapeHtml(g.grade)}: ${g.count}</title></rect>`;
+      bars += `<text x="${(x + bw / 2).toFixed(1)}" y="${(y - 2).toFixed(1)}" text-anchor="middle" font-size="8" font-weight="700" fill="#1e293b">${g.count}</text>`;
+      bars += `<text x="${(x + bw / 2).toFixed(1)}" y="${H - 4}" text-anchor="middle" font-size="8" font-weight="600" fill="#1e293b">${Utils.escapeHtml(g.grade)}</text>`;
     });
-    return `<div class="src-chart-title">Grade Distribution</div><svg viewBox="0 0 ${W} ${H}" width="100%" role="img" aria-label="Grade distribution">${bars}</svg>`;
+    return `<div class="src-chart-title">Grade Distribution</div><svg viewBox="0 0 ${W} ${H}" width="100%" height="${H}" preserveAspectRatio="xMidYMid meet" role="img" aria-label="Grade distribution">${bars}</svg>`;
   },
 
   passDonut(passed, failed) {
     const total = passed + failed;
     if (!total) return '<div class="src-chart-title">Pass/Fail Summary</div><p class="text-sm text-muted">No data</p>';
     const rate = Math.round((passed / total) * 100);
-    const size = 120, stroke = 16, r = (size - stroke) / 2, c = size / 2;
+    const size = 86, stroke = 12, r = (size - stroke) / 2, c = size / 2;
     const C = 2 * Math.PI * r;
     const passLen = (C * passed) / total;
     return `<div class="src-chart-title">Pass/Fail Summary</div>
       <svg viewBox="0 0 ${size} ${size}" width="${size}" height="${size}" role="img" aria-label="Pass fail summary">
         <circle cx="${c}" cy="${c}" r="${r}" fill="none" stroke="#ef4444" stroke-width="${stroke}" />
         <circle cx="${c}" cy="${c}" r="${r}" fill="none" stroke="#10b981" stroke-width="${stroke}" stroke-dasharray="${passLen.toFixed(1)} ${(C - passLen).toFixed(1)}" transform="rotate(-90 ${c} ${c})" />
-        <text x="${c}" y="${c + 5}" text-anchor="middle" font-size="15" font-weight="800" fill="#0d47a1">${rate}%</text>
+        <text x="${c}" y="${c + 4}" text-anchor="middle" font-size="13" font-weight="800" fill="#0d47a1">${rate}%</text>
       </svg>
       <div class="src-legend"><span><span class="src-dot" style="background:#10b981"></span>Passed&nbsp;${passed}</span><span><span class="src-dot" style="background:#ef4444"></span>Failed&nbsp;${failed}</span></div>`;
   },
@@ -457,9 +457,11 @@ const ReportStudent = {
   renderCardInner(card) {
     const { settings, learner, cls, year, term, level, subjRows } = card;
     const cols = card.columnMeta && card.columnMeta.length ? card.columnMeta : (card.columns || []);
-    const densityClass = subjRows.length > 12 || cols.length > 6
+    // Density is driven by how WIDE the table is (number of mark columns).
+    // A long subject list with few columns must stay readable, not get squeezed.
+    const densityClass = cols.length > 6 || subjRows.length > 22
       ? 'src-sheet-ultra'
-      : subjRows.length > 8 || cols.length > 4
+      : cols.length > 3 || subjRows.length > 16
         ? 'src-sheet-compact'
         : '';
     const totals = card.columnTotals || [];
@@ -528,6 +530,13 @@ const ReportStudent = {
         </div>
       </div>
       <table class="src-table">
+        <colgroup>
+          <col class="src-col-subject">
+          ${cols.map(() => '<col class="src-col-comp">').join('')}
+          <col class="src-col-total">
+          <col class="src-col-pct">
+          <col class="src-col-grade">
+        </colgroup>
         <thead>
           <tr><th rowspan="2" style="text-align:left">Subject</th><th colspan="${cols.length || 1}">Assessment Components</th><th rowspan="2">Total</th><th rowspan="2">Percentage<br><span style="font-size:8px;font-weight:400">(%)</span></th><th rowspan="2">Grade</th></tr>
           <tr>${compHeaders}</tr>

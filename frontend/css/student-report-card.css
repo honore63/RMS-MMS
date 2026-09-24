@@ -115,12 +115,19 @@
 }
 .src-table th:first-child,
 .src-table td:first-child { width: 30%; }
+.src-col-subject { width: 30%; }
+.src-col-comp { width: auto; }
+.src-col-total { width: 9%; }
+.src-col-pct { width: 11%; }
+.src-col-grade { width: 8%; }
 .src-table th, .src-table td {
   border: 1px solid #64b5f6;
-  padding: 4px 5px;
+  padding: 4px 6px;
   word-wrap: break-word;
   overflow-wrap: break-word;
+  vertical-align: middle;
 }
+.src-table tbody td.src-subject { text-align: left; font-weight: 500; padding-left: 7px; }
 .src-table thead th {
   background: #1565c0;
   color: #fff;
@@ -161,23 +168,30 @@
   font-size: 11px;
   padding: 4px 8px;
 }
-.src-panel-body { padding: 6px 8px; }
-.src-summary { flex: 0 0 30%; }
+.src-panel-body { padding: 5px 6px; }
+.src-summary { flex: 0 0 28%; }
 .src-performance { flex: 1; }
-.src-kv { display: flex; justify-content: space-between; padding: 3px 0; border-bottom: 1px dotted #90caf9; font-size: 10.5px; color: #1e293b; }
+.src-kv { display: flex; justify-content: space-between; padding: 2px 0; border-bottom: 1px dotted #90caf9; font-size: 10px; color: #1e293b; }
 .src-kv:last-child { border-bottom: none; }
 .src-kv b { font-weight: 800; color: #0d47a1; }
-.src-charts { display: flex; gap: 8px; }
+.src-charts { display: flex; gap: 6px; align-items: stretch; }
 .src-chart-box {
   flex: 1;
   border: 1px solid #90caf9;
   border-radius: 4px;
-  padding: 4px;
+  padding: 3px 3px 2px;
   text-align: center;
+  min-width: 0;
+  page-break-inside: avoid;
+  break-inside: avoid;
 }
-.src-chart-title { font-size: 9.5px; font-weight: 800; color: #0d47a1; margin-bottom: 2px; }
-.src-legend { font-size: 9px; display: flex; gap: 10px; justify-content: center; margin-top: 2px; }
-.src-dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 3px; vertical-align: baseline; }
+.src-chart-box svg { display: block; margin: 0 auto; max-height: 78px; }
+.src-panels { page-break-inside: avoid; break-inside: avoid; }
+.src-signatures { page-break-inside: avoid; break-inside: avoid; margin-top: 14px; }
+.src-footer { page-break-inside: avoid; break-inside: avoid; }
+.src-chart-title { font-size: 9px; font-weight: 800; color: #0d47a1; margin-bottom: 1px; }
+.src-legend { font-size: 8.5px; display: flex; gap: 8px; justify-content: center; margin-top: 1px; }
+.src-dot { display: inline-block; width: 7px; height: 7px; border-radius: 50%; margin-right: 2px; vertical-align: baseline; }
 
 /* ---------- Comments ---------- */
 .src-comments {
@@ -187,6 +201,8 @@
   background: #f0f7ff;
   margin-bottom: 8px;
   overflow: hidden;
+  page-break-inside: avoid;
+  break-inside: avoid;
 }
 .src-comment { flex: 1; padding: 6px 10px; font-size: 10px; }
 .src-comment + .src-comment { border-left: 1.5px solid #1976d2; }
