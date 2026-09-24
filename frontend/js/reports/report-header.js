@@ -34,8 +34,6 @@ const ReportHeader = {
             <div class="rms-header-province">${Utils.escapeHtml(province)}</div>
             <div class="rms-header-district">${Utils.escapeHtml(district)}</div>
             <div class="rms-header-sector">${Utils.escapeHtml(sector)}</div>
-            ${dosPrimary ? `<div class="rms-header-dos">Primary DOS: ${Utils.escapeHtml(dosPrimary)}</div>` : ''}
-            ${dosSecondary ? `<div class="rms-header-dos">Secondary DOS: ${Utils.escapeHtml(dosSecondary)}</div>` : ''}
             <div class="rms-header-school">${Utils.escapeHtml(schoolName)}</div>
             <div class="rms-header-code">School Code: ${schoolCode}</div>
             ${email ? `<div class="rms-header-email">Email: ${Utils.escapeHtml(email)}</div>` : ''}
@@ -172,12 +170,12 @@ function schoolReportHeader(title, opts = {}) {
 
 function schoolSignatureSection(teacherName, dosName, headteacherName) {
   const d = typeof getSchoolSettings === 'function' ? getSchoolSettings() : {};
-  const dosPrimary = d.dos_primary_name || d.dos_name || dosName || '-';
-  const dosSecondary = d.dos_secondary_name || '';
-  return `<div style="display:flex;justify-content:space-between;margin-top:40px;font-size:12px">
+const dosPrimary = d.dos_primary_name || d.dos_name || dosName || '';
+    const dosSecondary = d.dos_secondary_name || '';
+    return `<div style="display:flex;justify-content:space-between;margin-top:40px;font-size:12px">
     <div><strong>Class Teacher:</strong> ${Utils.escapeHtml(teacherName || '-')}<br><br>Signature: ______________________</div>
-    <div><strong>Primary DOS:</strong> ${Utils.escapeHtml(dosPrimary)}<br><br>Signature: ______________________</div>
-    <div><strong>Secondary DOS:</strong> ${Utils.escapeHtml(dosSecondary)}<br><br>Signature: ______________________</div>
+    <div><strong>Primary DOS's Signature:</strong><br><br>Signature: ______________________</div>
+    <div><strong>Secondary DOS's Signature:</strong><br><br>Signature: ______________________</div>
     <div><strong>Headteacher:</strong> ${Utils.escapeHtml(headteacherName || d.headteacher_name || '-')}<br><br>Signature: ______________________</div>
   </div>`;
 }

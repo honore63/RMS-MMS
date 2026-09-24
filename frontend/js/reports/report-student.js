@@ -581,9 +581,9 @@ const ReportStudent = {
         </div>
         <div class="src-sig">
           <h5>DOS Signature</h5>
-          <div class="sig-name">${Utils.escapeHtml(s.dos_name || '')}</div>
-          <div>Date:&nbsp; ${Utils.escapeHtml(Utils.dateStr(now))}</div>
-          <div style="margin-top:8px;font-family:cursive;font-size:16px;color:#0d47a1;height:24px;display:flex;align-items:flex-end">${Utils.escapeHtml(s.dos_name ? s.dos_name.split(' ')[0] : 'Signature')}</div>
+          <div class="sig-name">&nbsp;</div>
+          <div>Date:&nbsp; __________________</div>
+          <div class="sig-line"></div>
         </div>
         <div class="src-sig">
           <h5>Parent/Guardian Signature</h5>
