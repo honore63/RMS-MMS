@@ -329,10 +329,16 @@ async function renderMyAssessments() {
     DB.get('terms'),
     getAssessmentTypes()
   ]);
+  const scoped = typeof Scope !== 'undefined' && Scope.isScoped();
+  const filteredAssessments = scoped ? assessments.filter(a => {
+    const cls = classes.find(c => String(c.id) === String(a.class_id));
+    const subj = subjects.find(s => String(s.id) === String(a.subject_id));
+    return cls && subj && Scope.matchesClass(cls) && Scope.matchesSubject(subj);
+  }) : assessments;
 
-  currentTeacherAssessments = assessments;
+  currentTeacherAssessments = filteredAssessments;
 
-  const rows = assessments.map((a) => {
+  const rows = filteredAssessments.map((a) => {
     const cls = classes.find(c => c.id === a.class_id);
     const sub = subjects.find(s => s.id === a.subject_id);
 

@@ -388,10 +388,10 @@ function registerRoutes() {
   Router.register('admin/assessments', renderAssessments);
   Router.register('admin/assessment-types', renderAssessmentTypes);
   Router.register('admin/marks', renderAdminMarks);
-  Router.register('admin/import-history', renderImportHistory);
   Router.register('admin/reports', (typeof renderReportCenter !== 'undefined' ? renderReportCenter : () => { setHeader('Report Center', 'Reporting System'); setContent('<div class="card"><div class="card-body"><p>Report Center loading...</p></div></div>'); }));
   Router.register('admin/reports/cards', () => ReportCenter.open('student-card'));
   Router.register('admin/reports/class', () => ReportCenter.open('class-performance'));
+  Router.register('admin/reports/class-ranking', () => ReportCenter.open('class-ranking'));
   Router.register('admin/reports/subject', () => ReportCenter.open('subject-performance'));
   Router.register('admin/reports/student', () => ReportCenter.open('student-performance'));
   Router.register('admin/reports/assessment', () => ReportCenter.open('exam-class-summary'));
@@ -401,7 +401,6 @@ function registerRoutes() {
   Router.register('admin/reports/grades', () => ReportCenter.open('grade-distribution'));
   Router.register('admin/analytics', renderAnalytics);
   Router.register('admin/audit-logs', renderAuditLogs);
-  Router.register('admin/documents', renderDocuments);
   Router.register('admin/settings', (typeof renderSettings !== 'undefined' ? renderSettings : () => { setHeader('School Settings', 'Configure school settings'); setContent('<div class="card"><div class="card-body"><p>Settings module under development.</p></div></div>'); }));
 
   Router.register('teacher/dashboard', renderTeacherDashboard);
@@ -411,15 +410,6 @@ function registerRoutes() {
   Router.register('teacher/import-marks', () => { setHeader('Import Marks', 'Bulk import learner marks from Excel, CSV, Word or PDF'); MarksImport.open(); });
   Router.register('teacher/submitted-marks', renderSubmittedMarks);
   Router.register('teacher/reports', (typeof renderReportCenter !== 'undefined' ? renderReportCenter : () => ReportCenter.render()));
-  Router.register('teacher/reports/cards', () => ReportCenter.open('student-card'));
-  Router.register('teacher/reports/class', () => ReportCenter.open('class-performance'));
-  Router.register('teacher/reports/subject', () => ReportCenter.open('subject-performance'));
-  Router.register('teacher/reports/assessment', () => ReportCenter.open('exam-class-summary'));
-  Router.register('teacher/reports/marks', () => ReportCenter.open('missing-marks'));
-  Router.register('teacher/reports/teacher', () => ReportCenter.open('teacher-performance'));
-  Router.register('teacher/reports/school', () => ReportCenter.open('school-performance'));
-  Router.register('teacher/reports/grades', () => ReportCenter.open('grade-distribution'));
-  Router.register('teacher/reports/student', () => ReportCenter.open('student-performance'));
   Router.register('teacher/analytics', renderTeacherAnalytics);
   Router.register('teacher/notifications', renderNotifications);
   Router.register('teacher/account', renderTeacherAccount);

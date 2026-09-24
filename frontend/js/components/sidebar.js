@@ -105,8 +105,6 @@ const Sidebar = {
           <i data-lucide="tags"></i> Assessment Types</a>
         <a class="nav-link" data-route="admin/marks" onclick="Router.go('admin/marks')">
           <i data-lucide="list-checks"></i> Marks</a>
-<a class="nav-link" data-route="admin/import-history" onclick="Router.go('admin/import-history')">
-           <i data-lucide="archive"></i> Import History</a>
       </div>
       <div class="sidebar-section">
         <div class="sidebar-section-title">Reports</div>
@@ -119,6 +117,8 @@ const Sidebar = {
             <i data-lucide="file-badge"></i> Student Report Cards</a>
           <a class="nav-link nav-sub-link" data-route="admin/reports/class" onclick="Router.go('admin/reports/class')">
             <i data-lucide="school"></i> Class Report</a>
+          <a class="nav-link nav-sub-link" data-route="admin/reports/class-ranking" onclick="Router.go('admin/reports/class-ranking')">
+            <i data-lucide="trophy"></i> Top Performance</a>
           <a class="nav-link nav-sub-link" data-route="admin/reports/subject" onclick="Router.go('admin/reports/subject')">
             <i data-lucide="book-open"></i> Subject Report</a>
           <a class="nav-link nav-sub-link" data-route="admin/reports/assessment" onclick="Router.go('admin/reports/assessment')">
@@ -141,8 +141,6 @@ const Sidebar = {
           <i data-lucide="trending-up"></i> Analytics</a>
         <a class="nav-link" data-route="admin/audit-logs" onclick="Router.go('admin/audit-logs')">
           <i data-lucide="history"></i> Audit Logs</a>
-        <a class="nav-link" data-route="admin/documents" onclick="Router.go('admin/documents')">
-          <i data-lucide="folder-open"></i> Documents</a>
       </div>`;
   },
 
@@ -168,24 +166,6 @@ const Sidebar = {
         <div class="nav-sub" id="nav-sub-teacher-reports">
           <a class="nav-link nav-sub-link" data-route="teacher/reports" onclick="Router.go('teacher/reports')">
             <i data-lucide="layout-grid"></i> All Reports</a>
-          <a class="nav-link nav-sub-link" data-route="teacher/reports/cards" onclick="Router.go('teacher/reports/cards')">
-            <i data-lucide="file-badge"></i> Student Report Cards</a>
-          <a class="nav-link nav-sub-link" data-route="teacher/reports/class" onclick="Router.go('teacher/reports/class')">
-            <i data-lucide="school"></i> Class Report</a>
-          <a class="nav-link nav-sub-link" data-route="teacher/reports/subject" onclick="Router.go('teacher/reports/subject')">
-            <i data-lucide="book-open"></i> Subject Report</a>
-          <a class="nav-link nav-sub-link" data-route="teacher/reports/assessment" onclick="Router.go('teacher/reports/assessment')">
-            <i data-lucide="clipboard-check"></i> Assessment Report</a>
-          <a class="nav-link nav-sub-link" data-route="teacher/reports/marks" onclick="Router.go('teacher/reports/marks')">
-            <i data-lucide="list-checks"></i> Marks Report</a>
-          <a class="nav-link nav-sub-link" data-route="teacher/reports/teacher" onclick="Router.go('teacher/reports/teacher')">
-            <i data-lucide="users"></i> Teacher Report</a>
-          <a class="nav-link nav-sub-link" data-route="teacher/reports/school" onclick="Router.go('teacher/reports/school')">
-            <i data-lucide="building-2"></i> Performance Report</a>
-          <a class="nav-link nav-sub-link" data-route="teacher/reports/grades" onclick="Router.go('teacher/reports/grades')">
-            <i data-lucide="pie-chart"></i> Grade Distribution</a>
-          <a class="nav-link nav-sub-link" data-route="teacher/reports/student" onclick="Router.go('teacher/reports/student')">
-            <i data-lucide="user"></i> Student Performance</a>
         </div>
       </div>
       <a class="nav-link" data-route="teacher/analytics" onclick="Router.go('teacher/analytics')">
@@ -265,9 +245,10 @@ highlight() {
       document.getElementById('app-layout').classList.toggle('sb-mobile-open', willOpen);
     } else {
       const layout = document.getElementById('app-layout');
-      layout.classList.remove('sidebar-hidden');
+      const hidden = !layout.classList.contains('sidebar-hidden');
+      layout.classList.toggle('sidebar-hidden', hidden);
       try {
-        localStorage.setItem(this.STORAGE_KEY, 'expanded');
+        localStorage.setItem(this.STORAGE_KEY, hidden ? 'hidden' : 'expanded');
       } catch (err) { /* storage unavailable */ }
     }
     this.updateToggleBtn();
@@ -286,7 +267,9 @@ highlight() {
     layout.classList.remove('sidebar-hidden');
     if (!this.isSmall()) {
       try {
-        localStorage.setItem(this.STORAGE_KEY, 'expanded');
+        if (localStorage.getItem(this.STORAGE_KEY) === 'hidden') {
+          layout.classList.add('sidebar-hidden');
+        }
       } catch (err) { /* storage unavailable */ }
     }
     this.updateToggleBtn();

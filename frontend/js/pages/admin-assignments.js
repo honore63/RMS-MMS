@@ -1,4 +1,96 @@
 let assignFilter = 'all';
+let assignmentQueue = [];
+let assignmentSubjects = [];
+let assignmentClassLookup = {};
+
+function renderAssignmentClassSubjects() {
+  const classId = document.getElementById('af-class-picker')?.value || '';
+  const panel = document.getElementById('af-subject-panel');
+  if (!panel) return;
+
+  if (!classId) {
+    panel.innerHTML = '<div class="text-sm text-muted">Select a class first to choose the subjects taught in that class.</div>';
+    return;
+  }
+
+  const existing = assignmentQueue.find(item => item.class_id === classId);
+  const checked = new Set(existing ? existing.subject_ids : []);
+  const html = (assignmentSubjects || []).map(s => `
+    <label style="display:flex;align-items:center;gap:8px;padding:4px 0">
+      <input type="checkbox" name="af-subject" value="${s.id}" ${checked.has(s.id) ? 'checked' : ''}> 
+      ${Utils.escapeHtml(s.name)}
+    </label>
+  `).join('') || '<div class="text-sm text-muted">No active subjects available for this class.</div>';
+
+  panel.innerHTML = html;
+}
+
+function renderAssignmentQueue() {
+  const queue = document.getElementById('af-class-subject-queue');
+  if (!queue) return;
+
+  if (!assignmentQueue.length) {
+    queue.innerHTML = '<div class="text-sm text-muted">No class assigned yet. Select one class and its subjects, then add it below.</div>';
+    return;
+  }
+
+  const totalClasses = assignmentQueue.length;
+  const totalSubjects = assignmentQueue.reduce((sum, item) => sum + (item.subject_ids || []).length, 0);
+
+  const summary = `
+    <div style="padding:10px 12px;border:1px solid rgba(37,99,235,.18);border-radius:8px;background:rgba(37,99,235,.05);margin-bottom:10px;">
+      <div style="font-size:12px;color:var(--gray-600);text-transform:uppercase;letter-spacing:.08em;font-weight:700;margin-bottom:4px">Summary</div>
+      <div style="font-weight:700;color:var(--gray-900)">${totalClasses} class(es) • ${totalSubjects} subject(s)</div>
+    </div>
+  `;
+
+  queue.innerHTML = summary + assignmentQueue.map(item => {
+    const className = assignmentClassLookup[item.class_id] || 'Unknown class';
+    const subjectNames = (item.subject_ids || [])
+      .map(sid => (assignmentSubjects.find(s => s.id === sid)?.name) || 'Unknown subject')
+      .join(', ');
+    return `
+      <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:12px;padding:10px 12px;border:1px solid var(--gray-200);border-radius:8px;margin-bottom:8px;background:var(--gray-50)">
+        <div style="flex:1">
+          <div style="font-weight:700;color:var(--gray-900)">${Utils.escapeHtml(className)}</div>
+          <div style="font-size:12px;color:var(--gray-600);margin-top:2px;font-weight:600">${(item.subject_ids || []).length} subject(s)</div>
+          <div class="text-sm text-muted" style="margin-top:4px">${Utils.escapeHtml(subjectNames || 'No subjects')}</div>
+        </div>
+        <button type="button" class="btn btn-sm btn-danger" onclick="assignRemoveClassFromQueue('${item.class_id}')">Remove</button>
+      </div>
+    `;
+  }).join('');
+}
+
+function assignRemoveClassFromQueue(classId) {
+  assignmentQueue = assignmentQueue.filter(item => item.class_id !== classId);
+  renderAssignmentQueue();
+  const picker = document.getElementById('af-class-picker');
+  if (picker && picker.value === classId) {
+    picker.value = '';
+    renderAssignmentClassSubjects();
+  }
+}
+
+function assignAddClassToQueue() {
+  const classId = document.getElementById('af-class-picker')?.value || '';
+  const selectedSubjects = [...document.querySelectorAll('input[name="af-subject"]:checked')].map(el => el.value);
+
+  if (!classId) return Utils.toast('Select a class first', 'error');
+  if (!selectedSubjects.length) return Utils.toast('Select at least one subject for this class', 'error');
+
+  const existing = assignmentQueue.find(item => item.class_id === classId);
+  if (existing) {
+    existing.subject_ids = [...new Set(selectedSubjects)];
+  } else {
+    assignmentQueue.push({ class_id: classId, subject_ids: [...new Set(selectedSubjects)] });
+  }
+
+  renderAssignmentQueue();
+  const picker = document.getElementById('af-class-picker');
+  if (picker) picker.value = '';
+  renderAssignmentClassSubjects();
+}
 
 async function renderAssignments() {
   setHeader('Teacher Assignments', 'Manage teaching schedules and matrix');
@@ -65,7 +157,7 @@ async function renderAssignments() {
     </table></div></div>`);
 }
 
-async function buildAssignmentModal(title, preSelectedTeacher = null, preSelectedYear = null, selectedClasses = new Set(), selectedSubjects = new Set()) {
+async function buildAssignmentModal(title, preSelectedTeacher = null, preSelectedYear = null, selectedClassSubjects = {}) {
   const [teachers, classes, subjects, years] = await Promise.all([
     DB.query('teachers', '*', { status: 'active' }),
     DB.get('classes'),
@@ -74,20 +166,17 @@ async function buildAssignmentModal(title, preSelectedTeacher = null, preSelecte
   ]);
   const scopedClasses = typeof Scope !== 'undefined' && Scope.isScoped() ? Scope.filterClasses(classes) : classes;
   const scopedSubjects = typeof Scope !== 'undefined' && Scope.isScoped() ? Scope.filterSubjects(subjects) : subjects;
+  assignmentSubjects = scopedSubjects || [];
+  assignmentClassLookup = Object.fromEntries((scopedClasses || []).map(c => [c.id, c.name]));
+  assignmentQueue = Object.entries(selectedClassSubjects || {}).map(([class_id, subject_ids]) => ({
+    class_id,
+    subject_ids: Array.isArray(subject_ids) ? subject_ids : [...new Set((subject_ids || []).map(s => s))]
+  }));
 
   const teacherOpts = teachers.map(t => `<option value="${t.id}" ${preSelectedTeacher === t.id ? 'selected' : ''}>${t.full_name} (${t.teacher_code})</option>`).join('');
   const defYear = preSelectedYear || (typeof getActiveYearId === 'function' ? getActiveYearId(years) : null) || '';
   const yearOpts = years.map(y => `<option value="${y.id}" ${defYear === y.id ? 'selected' : ''}>${y.name}</option>`).join('');
-
-  const classCheckboxes = (scopedClasses || []).map(c => `
-    <label style="display:flex;align-items:center;gap:8px;padding:4px">
-      <input type="checkbox" name="af-class" value="${c.id}" ${selectedClasses.has(c.id) ? 'checked' : ''}> ${Utils.escapeHtml(c.name)}
-    </label>`).join('');
-
-  const subjectCheckboxes = (scopedSubjects || []).map(s => `
-    <label style="display:flex;align-items:center;gap:8px;padding:4px">
-      <input type="checkbox" name="af-subject" value="${s.id}" ${selectedSubjects.has(s.id) ? 'checked' : ''}> ${Utils.escapeHtml(s.name)}
-    </label>`).join('');
+  const classOpts = (scopedClasses || []).map(c => `<option value="${c.id}">${Utils.escapeHtml(c.name)}</option>`).join('');
 
   return `
     ${typeof Scope !== 'undefined' && Scope.isScoped() ? `<div class="alert alert-info" style="margin-bottom:14px"><i data-lucide="shield-check"></i> Showing only ${Utils.escapeHtml(Scope.label())} classes and subjects authorized for this DOS.</div>` : ''}
@@ -99,18 +188,28 @@ async function buildAssignmentModal(title, preSelectedTeacher = null, preSelecte
         <select id="af-year" class="select-field" ${preSelectedYear ? 'disabled' : ''}><option value="">Select</option>${yearOpts}</select>
       </div>
     </div>
-    <div class="form-row">
-      <div class="form-group" style="flex:1">
-        <label>Classes <span class="required">*</span></label>
-        <div style="max-height:200px;overflow-y:auto;border:1px solid var(--gray-200);border-radius:var(--radius);padding:8px">
-          ${classCheckboxes}
-        </div>
+    <div class="form-group">
+      <label>1. Select a class <span class="required">*</span></label>
+      <select id="af-class-picker" class="select-field" onchange="renderAssignmentClassSubjects()">
+        <option value="">Select class</option>
+        ${classOpts}
+      </select>
+    </div>
+    <div class="form-group">
+      <label>2. Subjects taught in this class <span class="required">*</span></label>
+      <div id="af-subject-panel" style="max-height:200px;overflow-y:auto;border:1px solid var(--gray-200);border-radius:var(--radius);padding:8px">
+        <div class="text-sm text-muted">Select a class first to choose the subjects taught in that class.</div>
       </div>
-      <div class="form-group" style="flex:1">
-        <label>Subjects <span class="required">*</span></label>
-        <div style="max-height:200px;overflow-y:auto;border:1px solid var(--gray-200);border-radius:var(--radius);padding:8px">
-          ${subjectCheckboxes}
-        </div>
+    </div>
+    <div class="form-group" style="margin-bottom:10px">
+      <button type="button" class="btn btn-sm btn-outline" onclick="assignAddClassToQueue()">
+        <i data-lucide="plus"></i> Add class + selected subjects
+      </button>
+    </div>
+    <div class="form-group">
+      <label>3. Class-by-class assignment queue</label>
+      <div id="af-class-subject-queue" style="max-height:220px;overflow-y:auto">
+        <div class="text-sm text-muted">No class assigned yet. Select one class and its subjects, then add it below.</div>
       </div>
     </div>`;
 }
@@ -124,10 +223,13 @@ async function assignForm() {
 
 async function assignEditGroup(teacherId, yearId) {
   const assignments = await DB.query('teacher_assignments', '*', { teacher_id: teacherId, academic_year_id: yearId });
-  const selectedClasses = new Set(assignments.map(a => a.class_id));
-  const selectedSubjects = new Set(assignments.map(a => a.subject_id));
-  
-  const content = await buildAssignmentModal('Edit Assignment Array', teacherId, yearId, selectedClasses, selectedSubjects);
+  const selectedClassSubjects = {};
+  assignments.forEach(a => {
+    if (!selectedClassSubjects[a.class_id]) selectedClassSubjects[a.class_id] = [];
+    if (!selectedClassSubjects[a.class_id].includes(a.subject_id)) selectedClassSubjects[a.class_id].push(a.subject_id);
+  });
+
+  const content = await buildAssignmentModal('Edit Assignment Array', teacherId, yearId, selectedClassSubjects);
   Modal.show('Edit Teacher Assignments', content,
     `<button class="btn btn-secondary" onclick="Modal.close()">Cancel</button>
      <button class="btn btn-primary" onclick="assignUpdateMultiple('${teacherId}', '${yearId}', this)"><i data-lucide="save"></i> Update Assignments</button>`);
@@ -136,22 +238,24 @@ async function assignEditGroup(teacherId, yearId) {
 async function assignSaveMultiple(btn) {
   const teacher_id = document.getElementById('af-teacher').value;
   const year_id = document.getElementById('af-year').value;
-  const classBoxes = document.querySelectorAll('input[name="af-class"]:checked');
-  const subjectBoxes = document.querySelectorAll('input[name="af-subject"]:checked');
 
   if (!teacher_id) return Utils.toast('Select a teacher', 'error');
   if (!year_id) return Utils.toast('Select an academic year', 'error');
-  if (classBoxes.length === 0) return Utils.toast('Select at least one class', 'error');
-  if (subjectBoxes.length === 0) return Utils.toast('Select at least one subject', 'error');
+  if (!assignmentQueue.length) return Utils.toast('Add at least one class with subjects before saving', 'error');
 
   if (btn) { btn.disabled = true; btn.innerHTML = 'Assigning...'; }
 
   const payLoad = [];
-  classBoxes.forEach(c => {
-    subjectBoxes.forEach(s => {
-      payLoad.push({ teacher_id, class_id: c.value, subject_id: s.value, academic_year_id: year_id });
+  assignmentQueue.forEach(item => {
+    (item.subject_ids || []).forEach(subject_id => {
+      payLoad.push({ teacher_id, class_id: item.class_id, subject_id, academic_year_id: year_id });
     });
   });
+
+  if (!payLoad.length) {
+    if (btn) { btn.disabled = false; btn.innerHTML = '<i data-lucide="check"></i> Create Assignments'; }
+    return Utils.toast('Each added class must include at least one subject', 'error');
+  }
 
   try {
     const existing = await DB.query('teacher_assignments', 'teacher_id,class_id,subject_id,academic_year_id', {
@@ -176,20 +280,21 @@ async function assignSaveMultiple(btn) {
 }
 
 async function assignUpdateMultiple(teacherId, yearId, btn) {
-  const classBoxes = document.querySelectorAll('input[name="af-class"]:checked');
-  const subjectBoxes = document.querySelectorAll('input[name="af-subject"]:checked');
-
-  if (classBoxes.length === 0) return Utils.toast('Select at least one class', 'error');
-  if (subjectBoxes.length === 0) return Utils.toast('Select at least one subject', 'error');
+  if (!assignmentQueue.length) return Utils.toast('Add at least one class with subjects before saving', 'error');
 
   if (btn) { btn.disabled = true; btn.innerHTML = 'Updating...'; }
 
   const payLoad = [];
-  classBoxes.forEach(c => {
-    subjectBoxes.forEach(s => {
-      payLoad.push({ teacher_id: teacherId, class_id: c.value, subject_id: s.value, academic_year_id: yearId === 'null' ? null : yearId });
+  assignmentQueue.forEach(item => {
+    (item.subject_ids || []).forEach(subject_id => {
+      payLoad.push({ teacher_id: teacherId, class_id: item.class_id, subject_id, academic_year_id: yearId === 'null' ? null : yearId });
     });
   });
+
+  if (!payLoad.length) {
+    if (btn) { btn.disabled = false; btn.innerHTML = '<i data-lucide="save"></i> Update Assignments'; }
+    return Utils.toast('Each added class must include at least one subject', 'error');
+  }
 
   try {
     let existingQuery = sbClient.from('teacher_assignments').select('id,teacher_id,class_id,subject_id,academic_year_id').eq('teacher_id', teacherId);

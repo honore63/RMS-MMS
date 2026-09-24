@@ -94,7 +94,7 @@ async function renderTeachers() {
   let subjects;
   try {
     [teachers, assignments, classes, subjects] = await Promise.all([
-      DB.query('teachers', '*', {}, { column: 'full_name' }),
+      DB.query('teachers', '*', {}, { column: 'full_name' }, null, { cache: false }),
       DB.query('teacher_assignments', '*'),
       DB.get('classes'),
       DB.get('subjects')
@@ -157,42 +157,47 @@ async function renderTeachers() {
 
   setContent(`
     <style>
-      .teacher-directory { display: flex; flex-direction: column; gap: 18px; }
-      .teacher-toolbar { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; justify-content: space-between; }
+      .teacher-directory { display: flex; flex-direction: column; gap: 20px; }
+      .teacher-toolbar { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; justify-content: space-between; background:#fff; border:1px solid var(--gray-200); border-radius:12px; padding:12px 14px; box-shadow:0 1px 8px rgba(15,23,42,.05); }
       .teacher-search-wrap { position: relative; display: flex; align-items: center; min-width: 220px; flex: 1 1 280px; max-width: 420px; }
       .teacher-search-wrap .search-icon { position: absolute; left: 12px; color: var(--gray-500); }
-      .teacher-search-wrap input { padding-left: 38px; }
+      .teacher-search-wrap input { padding-left: 38px; border-radius:10px; }
       .teacher-filters { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; }
-      .teacher-card-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(290px, 1fr)); gap: 18px; align-items: stretch; }
-      .teacher-card { background: #fff; border: 1px solid var(--gray-200); border-radius: 14px; box-shadow: 0 8px 18px rgba(15,23,42,.04); padding: 14px; display: flex; flex-direction: column; gap: 14px; min-width: 0; height: 100%; overflow: hidden; }
-      .teacher-card-header { display: flex; flex-direction: column; gap: 12px; padding-bottom: 14px; border-bottom: 1px solid var(--gray-100); min-width: 0; }
-      .teacher-avatar-wrap { width: 100%; height: auto; aspect-ratio: 4 / 3; border-radius: 10px; overflow: hidden; border: 1px solid var(--gray-200); background: var(--gray-100); flex-shrink: 0; }
-      .teacher-avatar-wrap img { display: block; width: 100%; height: 100%; object-fit: cover; object-position: center 35%; }
-      .teacher-avatar-placeholder { width: 100%; height: 100%; display: flex; align-items: center; justify-content: center; background: linear-gradient(135deg,var(--blue-600),var(--blue-800)); color:#fff; font-size:28px; font-weight:700; }
-      .teacher-meta { min-width: 0; flex: 1; }
-      .teacher-meta h3 { margin: 0; font-size: 1.05rem; line-height: 1.35; color: var(--gray-900); font-weight: 700; overflow-wrap:anywhere; }
-      .teacher-code { margin-top: 4px; font-size: 12px; color: var(--gray-500); letter-spacing: 0.06em; overflow-wrap:anywhere; }
-      .teacher-status { display: inline-flex; align-items: center; gap: 6px; padding: 5px 10px; border-radius: 999px; font-size: 11px; font-weight: 700; margin-top: 8px; }
-      .teacher-status.success { background: rgba(34,197,94,.1); color: var(--green-700); }
-      .teacher-status.secondary { background: rgba(107,114,128,.08); color: var(--gray-700); }
-      .teacher-card-body { display: flex; flex-direction: column; gap: 14px; }
+      .teacher-filters .select-field { border-radius:10px; }
+      .teacher-card-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(310px, 1fr)); gap: 20px; align-items: stretch; }
+      .teacher-card { background: #fff; border: 1px solid #e5e7eb; border-radius: 16px; box-shadow: 0 4px 16px rgba(15,23,42,.06), 0 1px 3px rgba(15,23,42,.04); padding: 0; display: flex; flex-direction: column; gap: 0; min-width: 0; height: 100%; overflow: hidden; transition: transform .18s ease, box-shadow .18s ease, border-color .18s ease; }
+      .teacher-card:hover { transform: translateY(-3px); box-shadow: 0 10px 28px rgba(15,23,42,.10), 0 2px 8px rgba(15,23,42,.06); border-color: #dbeafe; }
+      .teacher-card-header { display: flex; flex-direction: column; gap: 0; padding: 0; border-bottom: none; min-width: 0; }
+      .teacher-avatar-wrap { width: 100%; height: auto; aspect-ratio: 16 / 9; border-radius: 0; overflow: hidden; border: none; border-bottom:1px solid #eef2f7; background: linear-gradient(180deg,#f8fafc 0%, #eef2ff 100%); flex-shrink: 0; position:relative; }
+      .teacher-avatar-wrap img { display: block; width: 100%; height: 100%; object-fit: cover; object-position: center 30%; }
+      .teacher-avatar-placeholder { width: 100%; height: 100%; display: flex; align-items: center; justify-content: center; background: linear-gradient(135deg,#1e3a5f 0%, #2563eb 55%, #3b82f6 100%); color:#fff; font-size:32px; font-weight:800; letter-spacing:.04em; }
+      .teacher-avatar-wrap::after { content:""; position:absolute; inset:0; background:linear-gradient(180deg, transparent 55%, rgba(15,23,42,.06) 100%); pointer-events:none; }
+      .teacher-meta { min-width: 0; flex: 1; padding:14px 16px 12px; background:#fff; }
+      .teacher-meta h3 { margin: 0; font-size: 16px; line-height: 1.35; color: #0f172a; font-weight: 800; overflow-wrap:anywhere; letter-spacing:-.01em; }
+      .teacher-code { margin-top: 5px; font-size: 11px; color: #64748b; letter-spacing: 0.08em; font-weight:700; overflow-wrap:anywhere; text-transform:uppercase; }
+      .teacher-code::before { content:"ID • "; color:#94a3b8; letter-spacing:.08em; }
+      .teacher-status { display: inline-flex; align-items: center; gap: 6px; padding: 4px 10px; border-radius: 999px; font-size: 11px; font-weight: 800; margin-top: 10px; border:1px solid transparent; letter-spacing:.03em; }
+      .teacher-status.success { background: #ecfdf5; color: #047857; border-color:#a7f3d0; }
+      .teacher-status.secondary { background: #f1f5f9; color: #475569; border-color:#e2e8f0; }
+      .teacher-card-body { display: flex; flex-direction: column; gap: 12px; padding:14px 16px; background:#f8fafc; border-top:1px solid #f1f5f9; }
       .teacher-info-list { display: grid; gap: 8px; }
       .teacher-info-list div { display: grid; grid-template-columns: 92px minmax(0,1fr); gap: 8px; align-items: start; font-size: 12.5px; color: var(--gray-700); min-width: 0; }
       .teacher-info-list div > span:last-child { min-width: 0; overflow-wrap:anywhere; word-break:break-word; }
       .teacher-label { color: var(--gray-500); font-weight: 600; display: inline-flex; align-items: center; gap: 6px; }
       .teacher-label i { width: 14px; height: 14px; }
-      .teacher-academic-box { background: var(--gray-50); border: 1px solid var(--gray-200); border-radius: 10px; padding: 12px; display: flex; flex-direction: column; gap: 10px; min-width: 0; }
-      .teacher-section-header { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.08em; color: var(--gray-500); }
+      .teacher-academic-box { background: #fff; border: 1px solid #e2e8f0; border-radius: 12px; padding: 12px; display: flex; flex-direction: column; gap: 10px; min-width: 0; box-shadow:0 1px 6px rgba(15,23,42,.04) inset; }
+      .teacher-section-header { font-size: 10.5px; font-weight: 800; text-transform: uppercase; letter-spacing: 0.09em; color: #64748b; display:flex; align-items:center; gap:6px; }
+      .teacher-section-header::after { content:""; flex:1; height:1px; background:#eef2f7; margin-left:8px; }
       .teacher-badges, .teacher-tags { display: flex; flex-wrap: wrap; gap: 6px; }
-      .teacher-badge, .teacher-chip { display: inline-flex; align-items: center; justify-content: center; max-width:100%; padding: 6px 10px; border-radius: 999px; font-size: 11px; font-weight: 600; border: 1px solid transparent; overflow-wrap:anywhere; word-break:break-word; }
-      .teacher-badge.success { background: rgba(34,197,94,.12); color: var(--green-700); border-color: rgba(34,197,94,.15); }
-      .teacher-badge.info { background: rgba(59,130,246,.1); color: var(--blue-700); border-color: rgba(59,130,246,.15); }
-      .teacher-badge.neutral { background: var(--gray-100); color: var(--gray-700); }
-      .teacher-chip { background: rgba(37,99,235,.06); color: var(--blue-700); border-color: rgba(37,99,235,.15); }
-      .teacher-chip.accent { background: rgba(139,92,246,.08); color: var(--violet-700); border-color: rgba(139,92,246,.12); }
-      .teacher-chip.muted { background: var(--gray-100); color: var(--gray-600); border-color: var(--gray-200); }
-      .teacher-card-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: auto; }
-      .teacher-card-actions .btn { flex: 1 1 120px; min-width:0; justify-content:center; }
+      .teacher-badge, .teacher-chip { display: inline-flex; align-items: center; justify-content: center; max-width:100%; padding: 5px 11px; border-radius: 999px; font-size: 11px; font-weight: 700; border: 1px solid transparent; overflow-wrap:anywhere; word-break:break-word; line-height:1.2; }
+      .teacher-badge.success { background: #ecfdf5; color: #065f46; border-color: #a7f3d0; }
+      .teacher-badge.info { background: #eff6ff; color: #1e40af; border-color: #bfdbfe; }
+      .teacher-badge.neutral { background: #f1f5f9; color: #475569; border-color:#e2e8f0; }
+      .teacher-chip { background: #eff6ff; color: #1e40af; border-color: #dbeafe; }
+      .teacher-chip.accent { background: #f5f3ff; color: #5b21b6; border-color: #ddd6fe; }
+      .teacher-chip.muted { background: #f8fafc; color: #64748b; border-color: #e2e8f0; border-style:dashed; }
+      .teacher-card-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: auto; padding:12px 14px 14px; background:#fff; border-top:1px solid #f1f5f9; }
+      .teacher-card-actions .btn { flex: 1 1 112px; min-width:0; justify-content:center; border-radius:10px; font-weight:700; font-size:12px; padding:8px 10px; }
       @media (max-width: 640px) {
         .teacher-toolbar { align-items: stretch; }
         .teacher-filters { width: 100%; }
@@ -375,7 +380,7 @@ function teacherForm() {
     <div class="form-group"><label>Teacher Code (11 Digits) <span class="required">*</span></label><input id="tf-code" class="input-field" placeholder="e.g., 54102325012" maxlength="11"></div>
     <div class="form-group"><label>Full Name <span class="required">*</span></label><input id="tf-name" class="input-field" placeholder="e.g., John Doe"></div>
     <div class="form-group"><label>Email <span class="required">*</span></label><input id="tf-email" class="input-field" placeholder="e.g., john@rukara.edu"></div>
-    <div class="form-group"><label>Password <span class="required">*</span></label><input id="tf-pass" class="input-field" type="password" placeholder="At least 8 characters" autocomplete="new-password"></div>
+    <div class="form-group"><label>Password <span class="required">*</span></label><input id="tf-pass" class="input-field" type="password" value="teacher123" placeholder="teacher123" autocomplete="new-password"><p class="form-hint">Default password: teacher123. The teacher should change it after signing in.</p></div>
     <div class="form-group"><label>Phone</label><input id="tf-phone" class="input-field" placeholder="e.g., +250788123456"></div>
     <div class="alert alert-info" style="margin-bottom:0"><i data-lucide="info"></i> After registration, open Assignments to link this teacher to authorized classes and subjects.</div>`,
     `<button class="btn btn-secondary" data-modal-close="true">Cancel</button>
@@ -389,8 +394,8 @@ async function teacherSave() {
   const code = document.getElementById('tf-code')?.value?.trim();
   const name = document.getElementById('tf-name')?.value?.trim();
   const email = document.getElementById('tf-email')?.value?.trim();
-  const pass = document.getElementById('tf-pass')?.value;
-  const phone = document.getElementById('tf-phone')?.value?.trim();
+  const pass = document.getElementById('tf-pass')?.value || 'teacher123';
+  const phone = document.getElementById('tf-phone')?.value?.trim() || null;
 
   if (!code || !name || !email || !pass) return Utils.toast('Fill all required fields', 'error');
   if (!/^\d{11}$/.test(code)) return Utils.toast('Teacher code must be exactly 11 digits', 'error');
@@ -411,15 +416,22 @@ async function teacherSave() {
     if (error) throw error;
     if (!authData?.user?.id) throw new Error('Teacher account could not be created');
 
-    if (adminSession && authData.session?.user?.id === authData.user.id) {
-      const { error: restoreError } = await sbClient.auth.setSession({
-        access_token: adminSession.access_token,
-        refresh_token: adminSession.refresh_token
-      });
-      if (restoreError) throw restoreError;
+    if (adminSession) {
+      const { data: activeSessionData } = await sbClient.auth.getSession();
+      const activeUserId = activeSessionData?.session?.user?.id || null;
+      if (activeUserId !== adminSession.user?.id) {
+        const { error: restoreError } = await sbClient.auth.setSession({
+          access_token: adminSession.access_token,
+          refresh_token: adminSession.refresh_token
+        });
+        if (restoreError) throw restoreError;
+      }
     }
+    const creatorId = (typeof Auth !== 'undefined' && Auth.currentUser?.id) ? Auth.currentUser.id : (adminSession?.user?.id || null);
     await DB.insert('users', { id: authData.user.id, email, full_name: name, role: 'teacher', status: 'active', phone });
-    await DB.insert('teachers', { user_id: authData.user.id, teacher_code: code, full_name: name, email, phone, status: 'active' });
+    await DB.insert('teachers', { user_id: authData.user.id, teacher_code: code, full_name: name, email, phone, status: 'active', created_by: creatorId });
+    DB.invalidate('teachers');
+    DB.invalidate('users');
     Modal.close();
     Utils.toast('Teacher created', 'success');
     await renderTeachers();

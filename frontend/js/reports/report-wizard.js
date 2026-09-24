@@ -20,6 +20,16 @@ const ReportWizard = {
       desc: 'Detailed learner performance and ranking report',
       steps: ['period','class','students','subjects','assessments','terms','preview']
     },
+    'teacher-student-performance': {
+      id: 'teacher-student-performance', label: 'Student Performance & Analysis', icon: 'user-round-check',
+      desc: 'Individual learner performance and intervention analysis',
+      steps: ['period','class','subjects','assessments','terms','preview']
+    },
+    'teacher-assessment-class': {
+      id: 'teacher-assessment-class', label: 'Assessment & Class Analysis', icon: 'bar-chart-3',
+      desc: 'Assessment comparison, trends and class performance',
+      steps: ['period','class','subjects','assessments','terms','preview']
+    },
     'subject-performance': {
       id: 'subject-performance', label: 'Subject Report', icon: 'book-open',
       desc: 'Subject performance across learners',
@@ -49,6 +59,61 @@ const ReportWizard = {
       id: 'grade-distribution', label: 'Grade Distribution', icon: 'bar-chart-3',
       desc: 'Grade buckets across selected scope',
       steps: ['period','classes','subjects','assessments','terms','preview']
+    },
+    'student-marks': {
+      id: 'student-marks', label: 'Student Marks Report', icon: 'list-checks',
+      desc: 'Every assessment mark for one student with totals',
+      steps: ['period','class','students','subjects','assessments','terms','preview']
+    },
+    'class-marks-sheet': {
+      id: 'class-marks-sheet', label: 'Class Marks Sheet', icon: 'table-2',
+      desc: 'Full learner x assessment marks grid per class',
+      steps: ['period','class','students','subjects','assessments','terms','preview']
+    },
+    'subject-marks-sheet': {
+      id: 'subject-marks-sheet', label: 'Subject Marks Sheet', icon: 'table-2',
+      desc: 'Learner x assessment marks grid for one subject',
+      steps: ['period','class','subjects','assessments','terms','students','preview']
+    },
+    'class-ranking': {
+      id: 'class-ranking', label: 'Class Ranking Report', icon: 'trophy',
+      desc: 'Ranked class leaderboard with grade distribution',
+      steps: ['period','class','students','subjects','assessments','terms','preview']
+    },
+    'subject-grade-distribution': {
+      id: 'subject-grade-distribution', label: 'Subject Grade Distribution', icon: 'pie-chart',
+      desc: 'Grade buckets for a single subject',
+      steps: ['period','classes','subjects','assessments','terms','preview']
+    },
+    'subject-assessment-comparison': {
+      id: 'subject-assessment-comparison', label: 'Subject Assessment Comparison', icon: 'git-compare',
+      desc: 'Compare every assessment of a subject side by side',
+      steps: ['period','class','subjects','assessments','students','terms','preview']
+    },
+    'assessment-summary': {
+      id: 'assessment-summary', label: 'Assessment Summary', icon: 'clipboard-list',
+      desc: 'Statistics for many assessments across classes',
+      steps: ['period','classes','subjects','assessments','terms','preview']
+    },
+    'assessment-completion': {
+      id: 'assessment-completion', label: 'Assessment Completion Report', icon: 'check-check',
+      desc: 'Completion %, missing marks and status per assessment',
+      steps: ['period','classes','subjects','assessments','terms','preview']
+    },
+    'teacher-assessment-submission': {
+      id: 'teacher-assessment-submission', label: 'Teacher Submission Report', icon: 'send',
+      desc: 'Teacher assessment submission and approval status',
+      steps: ['period','teachers','classes','subjects','assessments','terms','preview']
+    },
+    'term-performance-summary': {
+      id: 'term-performance-summary', label: 'Term Performance Summary', icon: 'calendar-range',
+      desc: 'Per-class performance summary for one term',
+      steps: ['period','classes','subjects','assessments','terms','metrics','preview']
+    },
+    'academic-year-performance': {
+      id: 'academic-year-performance', label: 'Academic Year Performance', icon: 'calendar',
+      desc: 'Annual performance across all terms of the year',
+      steps: ['period','classes','subjects','assessments','terms','metrics','preview']
     }
   },
 
@@ -71,10 +136,12 @@ const ReportWizard = {
     reportType: 'student-card',
     stepIndex: 0,
     academicYearId: '',
+    stream: 'all',
     classIds: [],
     studentIds: [],
     subjectIds: [],
     assessmentIds: [],
+    assessmentTypeId: 'all',
     termIds: [],
     teacherIds: [],
     metrics: [],
@@ -154,9 +221,9 @@ const ReportWizard = {
         const all = await DB.get('classes')||[];
         s.cache.allClasses = all;
         let scoped = this._scopedClasses(all);
-        if (typeof Auth!=='undefined' && Auth.isTeacher && Auth.isTeacher()){
+        const teacherId = typeof Auth !== 'undefined' && typeof Auth.getTeacherId === 'function' ? Auth.getTeacherId() : null;
+        if (teacherId){
           try{
-            const teacherId = Auth.getTeacherId();
             const assigns = await DB.query('teacher_assignments','*',{teacher_id: teacherId});
             const allowed = new Set((assigns||[]).map(a=> String(a.class_id)));
             scoped = scoped.filter(c=> allowed.has(String(c.id)));
@@ -237,6 +304,8 @@ const ReportWizard = {
             <div class="rw-actions" style="flex-wrap:wrap">
               <button class="btn btn-secondary" onclick="ReportWizard.preview()"><i data-lucide="eye"></i> Preview</button>
               <button class="btn btn-primary" onclick="ReportWizard.preview()"><i data-lucide="printer"></i> Generate Report</button>
+              <button class="btn btn-outline" onclick="ReportWizard.resetFilters()"><i data-lucide="rotate-ccw"></i> Reset Filters</button>
+              <button class="btn btn-outline" onclick="ReportWizard.refresh()"><i data-lucide="refresh-cw"></i> Refresh</button>
               <button class="btn btn-outline" onclick="ReportWizard.print()"><i data-lucide="printer"></i> Print</button>
               <button class="btn btn-outline" onclick="ReportWizard.downloadPDF()"><i data-lucide="file-down"></i> PDF</button>
               <button class="btn btn-outline" onclick="ReportWizard.exportExcel()"><i data-lucide="file-spreadsheet"></i> Excel</button>
@@ -253,6 +322,25 @@ const ReportWizard = {
     this.state.options.cardMode = mode==='whole' ? 'whole' : 'individual';
     if (mode==='whole') { this.state.studentIds = []; }
     this.renderSinglePage();
+  },
+
+  resetFilters(){
+    const reportType = this.state.reportType;
+    this.state.stepIndex = 0;
+    this.state.academicYearId = '';
+    this.state.stream = 'all';
+    this.state.classIds = [];
+    this.state.studentIds = [];
+    this.state.subjectIds = [];
+    this.state.assessmentIds = [];
+    this.state.assessmentTypeId = 'all';
+    this.state.termIds = [];
+    this.state.cache = { years:[], terms:[], classes:[], subjects:[], students:[], assessments:[], teachers:[] };
+    this.open(reportType);
+  },
+
+  refresh(){
+    this.render();
   },
 
   go(idx){
@@ -345,7 +433,7 @@ const ReportWizard = {
     const needClass = !['school-performance','teacher-performance'].includes(s.reportType) || (s.reportType==='school-performance' && !s.classIds.length);
     // For school-performance, classes can be empty meaning all scoped
     // For class/assessment/subject reports need class
-    const typeNeedsClass = ['class-performance','subject-performance','exam-class-summary','missing-marks'].includes(s.reportType);
+    const typeNeedsClass = ['class-performance','subject-performance','teacher-student-performance','teacher-assessment-class','exam-class-summary','missing-marks'].includes(s.reportType);
     if (typeNeedsClass && !s.classIds.length) throw new Error('Select at least one class.');
     if (s.reportType==='teacher-performance' && !s.teacherIds.length){
       // allow fallback to current teacher if signed as teacher, but for DOS require selection
@@ -471,6 +559,8 @@ const ReportWizard = {
     const classes = s.cache.classes||[];
     const q = (document.getElementById('rw-class-q')? document.getElementById('rw-class-q').value : '')||'';
     let list = classes;
+    const streams = [...new Set(classes.map(c => c.stream).filter(Boolean))].sort();
+    if (s.stream && s.stream !== 'all') list = list.filter(c => String(c.stream || '') === String(s.stream));
     if (q) list = list.filter(c=> c.name.toLowerCase().includes(q.toLowerCase()));
     // grouping by education level
     const primary = list.filter(c=> EducationLevels.getCategory(c)==='Primary');
@@ -508,6 +598,7 @@ const ReportWizard = {
       + '  </div>'
       + '</div>'
       + '<div class="rw-card-bd">'
+      + ((typeof Auth!=='undefined' && Auth.isTeacher && Auth.isTeacher() && streams.length) ? '<div class="form-group" style="max-width:280px"><label>Stream</label><select class="select-field" onchange="ReportWizard.setStream(this.value)"><option value="all">All Streams</option>'+streams.map(x=>'<option value="'+Utils.escapeHtml(x)+'" '+(String(s.stream)===String(x)?'selected':'')+'>Stream '+Utils.escapeHtml(x)+'</option>').join('')+'</select></div>' : '')
       + '  <div class="rw-search"><i data-lucide="search"></i><input id="rw-class-q" placeholder="Search classes..." value="'+Utils.escapeHtml(q)+'" oninput="ReportWizard.renderStep()"></div>'
       + '  <div class="rw-list">'+classesInner+'</div>'
       + '  <div style="margin-top:10px" class="rw-badge">'+s.classIds.length+' selected</div>'
@@ -518,6 +609,22 @@ const ReportWizard = {
     this.state[key]=[id];
     if (key==='classIds'){ this.state.studentIds=[]; this.state.cache.students=[]; this.state.cache.assessments=[]; }
     this.renderStep(); this.renderNav();
+  },
+  setStream(value){
+    this.state.stream = value || 'all';
+    this.state.classIds = [];
+    this.state.studentIds = [];
+    this.state.subjectIds = [];
+    this.state.assessmentIds = [];
+    this.state.cache.students = [];
+    this.state.cache.assessments = [];
+    this.renderSinglePage();
+  },
+  setAssessmentType(value){
+    this.state.assessmentTypeId = value || 'all';
+    this.state.assessmentIds = [];
+    this.state.cache.assessments = [];
+    this.renderSinglePage();
   },
   selectAll(key, ids){ this.state[key]=[...ids]; this.renderStep(); this.renderNav(); },
   clear(key){ this.state[key]=[]; if(key==='classIds'){ this.state.studentIds=[]; this.state.cache.students=[]; } this.renderStep(); this.renderNav(); },
@@ -573,14 +680,19 @@ const ReportWizard = {
     const sampleCls = s.cache.classes.find(c=> String(c.id)===String(s.classIds[0]));
     subjects = this._scopedSubjects(subjects, sampleCls);
     subjects = subjects.filter(x=> !x.status || x.status==='active');
-    // teacher: only subjects assigned to teacher for selected class(es)
-    if (typeof Auth!=='undefined' && Auth.isTeacher && Auth.isTeacher() && s.classIds.length){
+    // Teacher reports must only expose subjects assigned to the logged-in teacher.
+    const teacherId = typeof Auth !== 'undefined' && typeof Auth.getTeacherId === 'function' ? Auth.getTeacherId() : null;
+    if (teacherId){
       try{
-        const teacherId = Auth.getTeacherId();
-        const assigns = await DB.query('teacher_assignments','*',{teacher_id: teacherId, class_id: s.classIds});
-        const allowed = new Set((assigns||[]).map(a=> String(a.subject_id)));
-        if (allowed.size) subjects = subjects.filter(s=> allowed.has(String(s.id)));
-      }catch(e){ /* ignore */ }
+        const assigns = await DB.query('teacher_assignments','*',{teacher_id: teacherId});
+        const classIds = new Set(s.classIds.map(String));
+        const allowed = new Set((assigns || [])
+          .filter(a => !classIds.size || classIds.has(String(a.class_id)))
+          .map(a => String(a.subject_id)));
+        subjects = subjects.filter(subject => allowed.has(String(subject.id)));
+      }catch(e){
+        subjects = [];
+      }
     }
     subjects.sort((a,b)=> String(a.name).localeCompare(String(b.name)));
     s.cache.subjects = subjects;
@@ -619,8 +731,9 @@ const ReportWizard = {
     // status approved/locked/submitted ?? show all?
     filter.status = ['approved','locked','submitted','draft','pending','rejected'];
     // Teacher: only own assessments (assigned classes already filtered, but also restrict by teacher_id)
-    if (typeof Auth!=='undefined' && Auth.isTeacher && Auth.isTeacher()){
-      try { filter.teacher_id = Auth.getTeacherId(); } catch(e){ /* ignore */ }
+    const teacherId = typeof Auth !== 'undefined' && typeof Auth.getTeacherId === 'function' ? Auth.getTeacherId() : null;
+    if (teacherId){
+      filter.teacher_id = teacherId;
     }
     let assessments=[];
     try { assessments = await DB.query('assessments','id,name,unit,subject_id,class_id,term_id,assessment_type_id,status,maximum_mark,assessment_date', filter, {column:'assessment_date', asc:false}); } catch(e){ assessments=[]; }
@@ -637,6 +750,10 @@ const ReportWizard = {
     // group by assessment_type or subject
     const types = s.cache.assessmentTypes || await (async()=>{ try{ const t=await ReportUtils.getAssessmentTypes(); s.cache.assessmentTypes=t; return t;}catch(e){return [];} })();
     const typeMap=new Map(types.map(t=>[String(t.id), t.name]));
+    if (s.assessmentTypeId && s.assessmentTypeId !== 'all') {
+      assessments = assessments.filter(a => String(a.assessment_type_id) === String(s.assessmentTypeId));
+    }
+    s.cache.assessments = assessments;
     const q=(document.getElementById('rw-assess-q')?document.getElementById('rw-assess-q').value:'').toLowerCase();
     let list=assessments;
     if (q) list=list.filter(a=> (a.name+a.unit+(typeMap.get(String(a.assessment_type_id))||'')).toLowerCase().includes(q));
@@ -649,6 +766,7 @@ const ReportWizard = {
       </div>
       <div class="rw-card-bd">
         <p class="rw-help" style="margin-bottom:8px">Filtered by class ${s.classIds.length? s.classIds.join(','):''}${s.subjectIds.length?' + subjects':''}. Select one, multiple, or all.</p>
+        <div class="form-group" style="max-width:300px"><label>Assessment Type</label><select class="select-field" onchange="ReportWizard.setAssessmentType(this.value)"><option value="all">All Assessment Types</option>${types.map(t=>`<option value="${t.id}" ${String(s.assessmentTypeId)===String(t.id)?'selected':''}>${Utils.escapeHtml(t.name)}</option>`).join('')}</select></div>
         <div class="rw-search"><i data-lucide="search"></i><input id="rw-assess-q" placeholder="Search assessments..." oninput="ReportWizard.renderStep()"></div>
         <div class="rw-list">
           ${list.length? list.map(a=>{
@@ -801,7 +919,7 @@ const ReportWizard = {
       studentId: s.studentIds[0] || undefined,
       studentIds: s.studentIds.length? s.studentIds : undefined,
       termIds: s.termIds.length? s.termIds : undefined,
-      assessmentTypeId: undefined,
+      assessmentTypeId: s.assessmentTypeId && s.assessmentTypeId !== 'all' ? s.assessmentTypeId : undefined,
       teacherComment: s.options.teacherComment||'',
       dosComment: s.options.dosComment||'',
       decisionOverride: s.options.decisionOverride||'',
@@ -859,25 +977,25 @@ const ReportWizard = {
           }
           if (!cards.length) throw new Error('No active learners found in the selected class(es).');
           cards.sort((a,b)=> (a.position||9999)-(b.position||9999));
-          bodyHtml = cards.map(renderStudentCard).join(ReportHeader.getPageBreak());
+          bodyHtml = cards.map(card => ReportHeader.getA4Container(renderStudentCard(card), 'portrait')).join(ReportHeader.getPageBreak());
           orientation = (orientation==='auto' || !orientation) ? 'portrait' : orientation;
         } else if (cfg.reportType === 'student-card') {
           // Specific student selection (1+): per-student via engine + rich card layout
           const parts=[];
           for (const sid of targetIds){
             const one = await ReportEngine.generate({...cfg, studentId:sid, studentIds:[sid]});
-            parts.push(renderStudentCard(one));
+            parts.push(ReportHeader.getA4Container(renderStudentCard(one), 'portrait'));
           }
           bodyHtml = parts.join(ReportHeader.getPageBreak());
           orientation = (orientation==='auto' || !orientation) ? 'portrait' : orientation;
         } else {
           // student-performance batch: one top-half-template section per student
-          const fnMap={ 'student-performance':'studentPerformance', 'exam-class-summary':'examClassSummary', 'subject-performance':'subjectPerformance', 'class-performance':'classPerformance', 'missing-marks':'missingMarks', 'school-performance':'schoolPerformance', 'teacher-performance':'teacherPerformance', 'grade-distribution':'gradeDistribution'};
+          const fnMap={ 'student-performance':'studentPerformance', 'teacher-student-performance':'teacherStudentPerformance', 'exam-class-summary':'examClassSummary', 'subject-performance':'subjectPerformance', 'class-performance':'classPerformance', 'missing-marks':'missingMarks', 'school-performance':'schoolPerformance', 'teacher-performance':'teacherPerformance', 'teacher-assessment-class':'teacherAssessmentClass', 'grade-distribution':'gradeDistribution'};
           const parts=[];
           for (const sid of targetIds){
             const one = await ReportEngine.generate({...cfg, studentId:sid, studentIds:[sid]});
             const tfn=ReportTemplates[fnMap[one.type] || 'studentPerformance'];
-            if (tfn) parts.push(tfn(one));
+            if (tfn) parts.push(ReportHeader.getA4Container(tfn(one), 'portrait'));
           }
           bodyHtml = parts.join(ReportHeader.getPageBreak());
           orientation = (orientation==='auto' || !orientation) ? 'portrait' : orientation;
@@ -887,7 +1005,8 @@ const ReportWizard = {
         let _bodyHtml='';
         let _orientation=orientation;
         {
-          const fnMap={ 'student-card':'studentCard', 'student-performance':'studentPerformance', 'exam-class-summary':'examClassSummary', 'subject-performance':'subjectPerformance', 'class-performance':'classPerformance', 'missing-marks':'missingMarks', 'school-performance':'schoolPerformance', 'teacher-performance':'teacherPerformance', 'grade-distribution':'gradeDistribution'};
+          const fnMap={ 'student-card':'studentCard', 'student-performance':'studentPerformance', 'teacher-student-performance':'teacherStudentPerformance', 'exam-class-summary':'examClassSummary', 'subject-performance':'subjectPerformance', 'class-performance':'classPerformance', 'missing-marks':'missingMarks', 'school-performance':'schoolPerformance', 'teacher-performance':'teacherPerformance', 'teacher-assessment-class':'teacherAssessmentClass', 'grade-distribution':'gradeDistribution',
+            'student-marks':'studentMarks', 'class-marks-sheet':'marksSheet', 'subject-marks-sheet':'marksSheet', 'class-ranking':'classPerformance', 'subject-grade-distribution':'gradeDistribution', 'subject-assessment-comparison':'subjectAssessmentComparison', 'assessment-summary':'assessmentSummary', 'assessment-completion':'assessmentCompletion', 'teacher-assessment-submission':'teacherAssessmentSubmission', 'term-performance-summary':'schoolPerformance', 'academic-year-performance':'schoolPerformance'};
           const tfn=ReportTemplates[fnMap[data.type]];
           _bodyHtml = cfg.reportType === 'student-card' ? renderStudentCard(data) : (tfn ? tfn(data) : '<p>Template not found</p>');
           _orientation = orientation==='auto'? ReportHeader.getOrientation(data.type) : orientation;
@@ -895,7 +1014,9 @@ const ReportWizard = {
           orientation = _orientation;
         }
       }
-      const a4 = ReportHeader.getA4Container(bodyHtml, orientation);
+      const a4 = bodyHtml.includes('rms-a4-container')
+        ? bodyHtml
+        : ReportHeader.getA4Container(bodyHtml, orientation, true);
       this.state.previewHtml=a4;
       this.state.previewOrientation=orientation;
       this.state.previewFilename=(typeof ReportCenter!=='undefined' && ReportCenter.buildFilename ? ReportCenter.buildFilename({title: this.DEFS[cfg.reportType].label, year:{name:''}}, orientation) : `RMS-MIS_${cfg.reportType}_${orientation}.pdf`);
@@ -906,6 +1027,9 @@ const ReportWizard = {
           <div class="report-preview-toolbar-flex no-print" style="margin-bottom:12px;display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap">
             <div><h3 style="font-size:16px;font-weight:700">A4 Preview — ${orientation==='landscape'?'Landscape':'Portrait'} (${orientation==='landscape'?'297×210':'210×297'} mm)</h3><p class="text-sm text-muted">Live preview · matches print/PDF.</p></div>
             <div class="flex gap-2" style="flex-wrap:wrap">
+              <button class="btn btn-outline btn-sm" onclick="ReportWizard.closePreview()"><i data-lucide="x"></i> Close Preview</button>
+              <button class="btn btn-outline btn-sm" onclick="ReportWizard.openPreviewTab()"><i data-lucide="external-link"></i> Open in New Tab</button>
+              <button class="btn btn-outline btn-sm" onclick="ReportWizard.exportExcel()"><i data-lucide="file-spreadsheet"></i> Excel</button>
               <button class="btn btn-outline btn-sm" onclick="ReportWizard.print()"><i data-lucide="printer"></i> Print</button>
               <button class="btn btn-primary btn-sm" onclick="ReportWizard.downloadPDF()"><i data-lucide="file-down"></i> Download PDF</button>
             </div>
@@ -928,6 +1052,24 @@ const ReportWizard = {
     setTimeout(()=> this.preview(), 80);
   },
 
+  closePreview(){
+    this.state.previewHtml='';
+    ['rw-preview-area','rw-preview'].forEach(id=>{ const el=document.getElementById(id); if(el) el.innerHTML=''; });
+    const c=document.getElementById('rw-report-container'); if(c) c.innerHTML='';
+    if (typeof Utils!=='undefined' && Utils.toast) Utils.toast('Preview closed','info');
+  },
+
+  openPreviewTab(){
+    const html=this.state.previewHtml || (document.getElementById('rw-report-container') ? document.getElementById('rw-report-container').innerHTML : '');
+    if (!html){ Utils.toast('Generate preview first','error'); return; }
+    const orientation=this.state.previewOrientation || 'portrait';
+    if (typeof ReportCenter!=='undefined' && ReportCenter.openPreviewDocument){
+      ReportCenter.openPreviewDocument(html, 'RMS-MIS Report Preview', orientation);
+      return;
+    }
+    Utils.toast('Preview window is unavailable','error');
+  },
+
   print(){
     const html=this.state.previewHtml || (document.getElementById('rw-report-container')? document.getElementById('rw-report-container').innerHTML : '');
     if (!html){ Utils.toast('Generate preview first','error'); return; }
@@ -947,12 +1089,15 @@ const ReportWizard = {
     if (!html){ await this.preview(); }
     const orientation=this.state.previewOrientation||'portrait';
     const filename=this.state.previewFilename||'RMS-MIS_Report.pdf';
+    const localPreview = /^(localhost|127\.0\.0\.1)$/i.test(window.location.hostname);
     try{
+      if (localPreview) throw new Error('Local PDF endpoint unavailable');
       const pdfHtml = typeof ReportCenter !== 'undefined' && ReportCenter.buildPdfDocument
-        ? ReportCenter.buildPdfDocument(this.state.previewHtml)
+        ? ReportCenter.buildPdfDocument(this.state.previewHtml, orientation)
         : this.state.previewHtml;
       const r=await fetch('/api/reports/pdf',{method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({html:pdfHtml, filename})});
       if (r.ok){ const b=await r.blob(); const u=URL.createObjectURL(b); const a=document.createElement('a'); a.href=u; a.download=filename; document.body.appendChild(a); a.click(); a.remove(); URL.revokeObjectURL(u); Utils.toast('PDF downloaded','success'); return; }
+      if (r.status !== 405) console.warn('[ReportWizard] server PDF unavailable:', r.status);
     } catch(e){}
     Utils.toast('In print dialog choose Save as PDF ('+filename+')','info');
     this.print();

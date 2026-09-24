@@ -86,6 +86,7 @@ const ReportStudent = {
     else if (termId) filter.term_id = termId;
     if (assessmentTypeId) filter.assessment_type_id = assessmentTypeId;
     if (assessmentIds && assessmentIds.length) filter.id = assessmentIds;
+    if (typeof Auth !== 'undefined' && Auth.isTeacher && Auth.isTeacher()) filter.teacher_id = Auth.getTeacherId();
     let list = await DB.query('assessments', '*', filter, { column: 'assessment_date', asc: true });
     if (subjectIds && subjectIds.length) {
       const set = new Set(subjectIds.map(String));
@@ -111,10 +112,11 @@ const ReportStudent = {
       const key = String(a.assessment_type_id || a.name || 'GEN');
       if (!seen.has(key)) {
         const nm = t ? t.name : (a.name || 'Assessment');
+        const storedCode = t && t.code ? String(t.code).trim().toUpperCase() : '';
         seen.set(key, {
           key,
           name: nm,
-          code: (t && t.code) || String(nm).split(/\s+/).map(w => w[0]).join('').slice(0, 4).toUpperCase(),
+          code: storedCode || String(nm).split(/\s+/).map(w => w[0]).join('').slice(0, 6).toUpperCase(),
           typeId: a.assessment_type_id || null
         });
       }
@@ -265,14 +267,20 @@ const ReportStudent = {
     const grades = subjRows.filter(r => r.hasMarks).map(r => r.grade);
     const gradeDist = ReportUtils.getGradeDistribution(grades, scale);
 
-    // Class teacher: teacher of most official assessments for this class
-    const tCount = {};
-    official.forEach(a => { if (a.teacher_id) tCount[a.teacher_id] = (tCount[a.teacher_id] || 0) + 1; });
-    const topTeacherId = Object.entries(tCount).sort((a, b) => b[1] - a[1])[0]?.[0] || null;
+    // Class teacher: explicitly assigned by DOS, falling back to the most active assessor only if needed.
     let teacherName = '';
-    if (topTeacherId) {
-      const t = await DB.get('teachers', { id: topTeacherId }).then(r => r[0]).catch(() => null);
+    if (cls?.class_teacher_id) {
+      const t = await DB.get('teachers', { id: cls.class_teacher_id }).then(r => r[0]).catch(() => null);
       teacherName = t ? t.full_name : '';
+    }
+    if (!teacherName) {
+      const tCount = {};
+      official.forEach(a => { if (a.teacher_id) tCount[a.teacher_id] = (tCount[a.teacher_id] || 0) + 1; });
+      const topTeacherId = Object.entries(tCount).sort((a, b) => b[1] - a[1])[0]?.[0] || null;
+      if (topTeacherId) {
+        const t = await DB.get('teachers', { id: topTeacherId }).then(r => r[0]).catch(() => null);
+        teacherName = t ? t.full_name : '';
+      }
     }
 
     return {
@@ -449,11 +457,16 @@ const ReportStudent = {
   renderCardInner(card) {
     const { settings, learner, cls, year, term, level, subjRows } = card;
     const cols = card.columnMeta && card.columnMeta.length ? card.columnMeta : (card.columns || []);
+    const densityClass = subjRows.length > 12 || cols.length > 6
+      ? 'src-sheet-ultra'
+      : subjRows.length > 8 || cols.length > 4
+        ? 'src-sheet-compact'
+        : '';
     const totals = card.columnTotals || [];
     const s = settings || {};
     const ministryLogo = s.ministry_logo_url || 'public/logo.webp';
     const schoolLogo = s.school_logo_url || s.logo_url || 'public/logo.webp';
-    const motto = s.school_motto || s.motto || 'RMS-MIS';
+    const motto = 'Education, Work and Success';
     const stream = cls?.stream || learner?.stream || 'General';
     const dob = learner?.date_of_birth || learner?.dob || '';
     const now = new Date();
@@ -463,7 +476,7 @@ const ReportStudent = {
       const compTds = (r.components || []).map(c => c == null
         ? '<td>—</td>'
         : `<td>${c.obtained}</td>`).join('');
-      return `<tr><td>${i + 1}</td><td class="src-subject">${Utils.escapeHtml(r.subject.name)}</td>${compTds}<td><strong>${r.hasMarks ? r.obtained : '—'}</strong></td><td><strong>${r.pct == null ? 'N/A' : r.pct.toFixed(1)}</strong></td><td><strong>${r.grade}</strong></td><td>${r.status === 'PASS' ? 'Pass' : r.status === 'FAIL' ? 'Fail' : Utils.escapeHtml(r.status)}</td><td>${Utils.escapeHtml(this.shortRemark(r.pct, card.scale))}</td></tr>`;
+      return `<tr><td class="src-subject">${Utils.escapeHtml(r.subject.name)}</td>${compTds}<td><strong>${r.hasMarks ? r.obtained : '—'}</strong></td><td><strong>${r.pct == null ? 'N/A' : r.pct.toFixed(1)}</strong></td><td><strong>${r.grade}</strong></td></tr>`;
     }).join('');
 
     const compHeaders = cols.map(c => `<th>${Utils.escapeHtml(c.code)}<br><span style="font-size:8px;font-weight:400">${Utils.escapeHtml(c.sub || '')}</span></th>`).join('');
@@ -475,7 +488,7 @@ const ReportStudent = {
     const posText = card.position ? `${card.position} out of ${card.positionOutOf}` : 'Not available';
 
     return `
-    <div class="src-sheet">
+    <div class="src-sheet ${densityClass}">
       <div class="src-header">
         <div class="src-head-left">
           <img src="${Utils.escapeHtml(ministryLogo)}" class="src-logo" alt="Ministry logo" onerror="this.style.display='none'">
@@ -494,14 +507,12 @@ const ReportStudent = {
         <div class="src-head-right">
           <img src="${Utils.escapeHtml(schoolLogo)}" class="src-logo" alt="School logo" onerror="this.style.display='none'">
           <div class="src-logo-caption">${Utils.escapeHtml(motto)}</div>
-          <div class="src-logo-caption">RMS-MIS</div>
+          <div class="src-logo-caption">RUKARA MODEL SCHOOL</div>
         </div>
       </div>
       <hr class="src-head-rule">
       <div class="src-title-main">STUDENT REPORT CARD</div>
       <div class="src-title-sub">${level.label}</div>
-      <div style="margin-bottom:6px"><span class="src-badge ${card.approval === 'APPROVED' ? 'solid' : ''}">${Utils.escapeHtml(card.approval || 'DRAFT')}</span>
-      ${card.hasMissing ? '<span class="src-badge" style="margin-left:6px">Some marks are missing — final performance may be incomplete.</span>' : ''}</div>
       <div class="src-info">
         <div class="src-info-col">
           <div class="src-info-row"><span class="src-info-lbl">Student Name</span><span class="src-info-sep">:</span><span class="src-info-val">${Utils.escapeHtml(learner?.full_name || '-')}</span></div>
@@ -518,11 +529,11 @@ const ReportStudent = {
       </div>
       <table class="src-table">
         <thead>
-          <tr><th rowspan="2">No.</th><th rowspan="2" style="text-align:left">Subject</th><th colspan="${cols.length || 1}">Assessment Components</th><th rowspan="2">Total<br><span style="font-size:8px;font-weight:400">(100)</span></th><th rowspan="2">Percentage<br><span style="font-size:8px;font-weight:400">(%)</span></th><th rowspan="2">Grade</th><th rowspan="2">Status</th><th rowspan="2">Remark</th></tr>
+          <tr><th rowspan="2" style="text-align:left">Subject</th><th colspan="${cols.length || 1}">Assessment Components</th><th rowspan="2">Total</th><th rowspan="2">Percentage<br><span style="font-size:8px;font-weight:400">(%)</span></th><th rowspan="2">Grade</th></tr>
           <tr>${compHeaders}</tr>
         </thead>
         <tbody>${headRows}</tbody>
-        <tfoot><tr><td></td><td class="src-subject">Total</td>${totalTds}<td>${card.totalObtained}</td><td>${card.overallPct == null ? 'N/A' : card.overallPct.toFixed(1)}</td><td>${card.overallGrade?.grade || '—'}</td><td>${card.overallPf === 'PASS' ? 'Pass' : card.overallPf === 'FAIL' ? 'Fail' : Utils.escapeHtml(card.overallPf || '')}</td><td>${Utils.escapeHtml(overallShort)}</td></tr></tfoot>
+        <tfoot><tr><td class="src-subject">Total</td>${totalTds}<td>${card.totalObtained}</td><td>${card.overallPct == null ? 'N/A' : card.overallPct.toFixed(1)}</td><td>${card.overallGrade?.grade || '—'}</td></tr></tfoot>
       </table>
       <div class="src-panels">
         <div class="src-panel src-summary">
@@ -550,6 +561,7 @@ const ReportStudent = {
       <div class="src-comments">
         <div class="src-comment"><h5>Teacher's Comment</h5><p>${Utils.escapeHtml(card.teacherComment || '')}</p></div>
         <div class="src-comment"><h5>DOS Comment</h5><p>${Utils.escapeHtml(card.dosComment || '')}</p></div>
+        <div class="src-comment"><h5>Parent's Comment</h5><p>${Utils.escapeHtml(card.parentComment || '')}</p></div>
       </div>
       <div class="src-signatures">
         <div class="src-sig">
@@ -557,23 +569,27 @@ const ReportStudent = {
           <div class="sig-name">${Utils.escapeHtml(card.teacherName || '')}</div>
           <div>Date:&nbsp; ${Utils.escapeHtml(Utils.dateStr(now))}</div>
           <div style="margin-top:8px;font-family:cursive;font-size:16px;color:#0d47a1;height:24px;display:flex;align-items:flex-end">${Utils.escapeHtml(card.teacherName ? card.teacherName.split(' ')[0] : 'Signature')}</div>
-          <div class="sig-line">Signature</div>
         </div>
         <div class="src-sig">
           <h5>DOS Signature</h5>
           <div class="sig-name">${Utils.escapeHtml(s.dos_name || '')}</div>
           <div>Date:&nbsp; ${Utils.escapeHtml(Utils.dateStr(now))}</div>
           <div style="margin-top:8px;font-family:cursive;font-size:16px;color:#0d47a1;height:24px;display:flex;align-items:flex-end">${Utils.escapeHtml(s.dos_name ? s.dos_name.split(' ')[0] : 'Signature')}</div>
-          <div class="sig-line">Signature</div>
+        </div>
+        <div class="src-sig">
+          <h5>Parent/Guardian Signature</h5>
+          <div class="sig-name">&nbsp;</div>
+          <div>Date:&nbsp; __________________</div>
+          <div class="sig-line"></div>
         </div>
       </div>
       <div class="src-footer">
         <div class="src-footer-row">
           <div><strong>RMS-MIS &nbsp;|&nbsp; ${Utils.escapeHtml(s.school_name || 'Rukara Model School')}</strong><br>Marks Information System</div>
           <div style="text-align:center">Academic Year: ${Utils.escapeHtml(year?.name || '-')}<br>Term: ${Utils.escapeHtml(term?.name || '-')}</div>
-          <div style="text-align:right">Generated: ${Utils.escapeHtml(genDate)}<br>Page 1 of 1</div>
+          <div style="text-align:right">Generated: ${Utils.escapeHtml(genDate)}</div>
         </div>
-        <div class="src-footer-motto">${Utils.escapeHtml(s.school_motto || s.motto || 'Learn, Discipline and Success Our Aim.')}</div>
+        <div class="src-footer-motto">Education, Work and Success</div>
         <div class="src-wave"></div>
       </div>
     </div>`;

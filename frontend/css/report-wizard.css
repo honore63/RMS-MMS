@@ -45,6 +45,21 @@
 .rw-help { font-size:11px; color:var(--gray-500); }
 .rw-toast-err { display:flex; gap:10px; align-items:flex-start; background:#fef2f2; border:1px solid #fecaca; color:#991b1b; padding:10px 12px; border-radius:8px; font-size:13px; margin-bottom:12px; }
 
+/* Compact generic reports while leaving the detailed student card untouched. */
+.rms-a4-container:not(:has(.src-sheet)) .rms-report-header { margin-bottom:6px; }
+.rms-a4-container:not(:has(.src-sheet)) .rms-header-logo { max-height:42px; }
+.rms-a4-container:not(:has(.src-sheet)) .rms-header-country,
+.rms-a4-container:not(:has(.src-sheet)) .rms-header-ministry,
+.rms-a4-container:not(:has(.src-sheet)) .rms-header-province,
+.rms-a4-container:not(:has(.src-sheet)) .rms-header-district,
+.rms-a4-container:not(:has(.src-sheet)) .rms-header-sector { font-size:8px; line-height:1.1; }
+.rms-a4-container:not(:has(.src-sheet)) .rms-header-school { font-size:12px; }
+.rms-a4-container:not(:has(.src-sheet)) .rms-header-title { font-size:13px; }
+.rms-a4-container:not(:has(.src-sheet)) table { table-layout:fixed; font-size:7.5pt; }
+.rms-a4-container:not(:has(.src-sheet)) th,
+.rms-a4-container:not(:has(.src-sheet)) td { padding:2px 3px; line-height:1.15; overflow-wrap:anywhere; }
+.rms-a4-container:not(:has(.src-sheet)) .rms-summary-grid { gap:5px 10px; }
+
 /* ── Print clarity — high contrast, sharp tables, A4 paginated ─────── */
 @media print {
   @page { margin:10mm 11mm; }
@@ -62,6 +77,12 @@
   table, .rc-data-table, .report-marks-table, .rms-a4-container table { width:100% !important; border-collapse:collapse !important; font-size:8.5pt !important; border:1.5px solid #1e3a5f !important; }
   th, .rc-data-table th, .rms-a4-container th { background:#dbe7f2 !important; color:#1e3a5f !important; font-weight:800 !important; border:1px solid #1e3a5f !important; padding:5px 5px !important; font-size:8pt !important; text-transform:uppercase; letter-spacing:.2px; }
   td, .rc-data-table td, .rms-a4-container td { border:1px solid #1e3a5f !important; padding:4px 5px !important; color:#111827 !important; font-weight:500; }
+  .rms-a4-container:not(:has(.src-sheet)) { padding:7mm !important; }
+  .rms-a4-container:not(:has(.src-sheet)) .rms-report-header { margin-bottom:4px !important; padding-bottom:4px !important; }
+  .rms-a4-container:not(:has(.src-sheet)) .rms-header-logo { max-height:38px !important; }
+  .rms-a4-container:not(:has(.src-sheet)) table { table-layout:fixed !important; font-size:7pt !important; }
+  .rms-a4-container:not(:has(.src-sheet)) th,
+  .rms-a4-container:not(:has(.src-sheet)) td { padding:2px 3px !important; line-height:1.1 !important; overflow-wrap:anywhere !important; }
   .rc-all-subjects-row td { background:#5b8bc4 !important; color:#fff !important; -webkit-print-color-adjust:exact !important; }
   .rc-badge-top { background:#1e3a5f !important; color:#fff !important; }
   .rc-badge-bottom { background:#dbe7f2 !important; color:#1e3a5f !important; border:1px solid #1e3a5f !important; }

@@ -32,7 +32,7 @@ const MarksImport = (() => {
   const normHdr = v => low(v).replace(/[^a-z0-9]/g, '');
   // Extract digits only – handles Excel leading apostrophe, spaces, dashes, etc.
   const normCode = v => String(v == null ? '' : v).replace(/\D/g, '');
-  const isCode11 = v => /^\d{11}$/.test(normCode(v));
+  const isStudentCode = v => /^\d{11,12}$/.test(normCode(v));
 
   const codeAliases = ['studentcode', 'studentno', 'studentnumber', 'code', 'learnercode', 'studcode', 'admno', 'admissionno', 'admission', 'regno', 'indexno', 'registrationno', 'nationalid'];
   const nameAliases = ['studentname', 'name', 'names', 'fullname', 'learnername', 'student', 'pupil', 'candidate'];
@@ -150,8 +150,8 @@ const MarksImport = (() => {
         const v = cell(row, c);
         if (!v) continue;
         const st = stats[c];
-        if (isCode11(v)) st.code++;
-        else if (/^\d{10,12}$/.test(normCode(v)) && normCode(v).length !== 11) st.code++;
+        if (isStudentCode(v)) st.code++;
+        else if (/^\d{10,12}$/.test(normCode(v)) && normCode(v).length !== 11 && normCode(v).length !== 12) st.code++;
         const n = parseMarkNum(v);
         if (n != null) st.numeric++;
         if (/[A-Za-z]/.test(v)) st.text++;
@@ -496,7 +496,7 @@ const MarksImport = (() => {
 
     if (!rec.code) {
       rec.errors.push('Missing Student Code');
-    } else if (!isCode11(rec.code)) {
+    } else if (!isStudentCode(rec.code)) {
       const fixed = ocrFixCode(rec.code, S.rosterByCode);
       if (fixed) {
         rec.ocrFixed = true;
@@ -504,10 +504,10 @@ const MarksImport = (() => {
         rec.code = fixed.code;
         rec.learner = fixed.learner;
       } else {
-        rec.errors.push('Student Code must be exactly 11 digits');
+        rec.errors.push('Student Code must be 11 or 12 digits');
       }
     }
-    if (!rec.learner && rec.code && isCode11(rec.code)) {
+    if (!rec.learner && rec.code && isStudentCode(rec.code)) {
       rec.learner = S.rosterByCode[rec.code];
       if (!rec.learner) rec.errors.push('Student Not Found');
     }
@@ -1301,8 +1301,8 @@ const MarksImport = (() => {
     const bad = S.records.filter(r => r.errors.length);
     const rows = [['Row', 'Student Code', 'Student Name', 'Mark', 'Error', 'Recommended Correction']];
     const fixes = {
-      'Missing Student Code': 'Add the 11-digit student code',
-      'Student Code must be exactly 11 digits': 'Check the code (exactly 11 digits, no letters, formatted as text)',
+      'Missing Student Code': 'Add the student code',
+      'Student Code must be 11 or 12 digits': 'Check the code (11 or 12 digits, no letters, formatted as text)',
       'Student Not Found': 'Confirm the student is registered in this class, or fix the code',
       'Missing Mark': 'Enter the mark obtained',
       'Invalid Mark (not a number)': 'Use a number such as 78 or 15.5',
@@ -1381,7 +1381,7 @@ const MarksImport = (() => {
           ['MARKS SHEET TEMPLATE'],
           [],
           ['Fill in one row per student.'],
-          ['Student Code: the 11-digit learner code (no letters, no spaces).'],
+          ['Student Code: the learner code (11 or 12 digits, no letters, no spaces).'],
           ['Student Name: full name shown in the class register.'],
           ['Mark: the mark the student obtained out of the class assessment maximum.'],
           ['Do not change the header names. Keep the code as text (start with an apostrophe in Excel if needed).'],
@@ -1455,7 +1455,7 @@ const MarksImport = (() => {
         doc.text('MARKS SHEET TEMPLATE', 105, 22, { align: 'center' });
         doc.setFontSize(10);
         doc.setFont(undefined, 'normal');
-        doc.text('Fill in each student\'s 11-digit code, full name and the mark obtained (out of the assessment maximum).', 105, 30, { align: 'center' });
+        doc.text('Fill in each student\'s code (11 or 12 digits), full name and the mark obtained (out of the assessment maximum).', 105, 30, { align: 'center' });
         doc.setFontSize(11);
         doc.setFont(undefined, 'bold');
         doc.text('Student Code', 20, 48);
@@ -1502,69 +1502,4 @@ const MarksImport = (() => {
    ============================================================ */
 if (typeof window !== 'undefined') {
   window.MarksImport = window.MarksImport || MarksImport;
-}
-
-/* ============================================================
-   IMPORT HISTORY PAGE (registered as 'admin/import-history')
-   Lists every import performed, marks included.
-   ============================================================ */
-async function renderImportHistory() {
-  setHeader('Import History', 'Log of all bulk imports (learners, marks, etc.)');
-  setContent(Utils.loading());
-  try {
-    const [rows, assessments] = await Promise.all([
-      DB.query('import_history', '*', {}, { column: 'created_at', asc: false }),
-      DB.get('assessments')
-    ]);
-    const byAid = {};
-    assessments.forEach(a => { byAid[a.id] = a; });
-
-    const body = (rows || []).map(h => {
-      const when = h.created_at ? Utils.dateTimeStr(h.created_at) : '';
-      const statusColor = h.status === 'completed' ? 'badge-success' : h.status === 'partial' ? 'badge-warning' : 'badge-danger';
-      const details = (Array.isArray(h.details) && h.details.length)
-        ? `<div class="text-xs text-muted" style="margin-top:4px">${h.details.slice(0, 3).map(d => esc(d.code) + ' - ' + esc(d.error)).join('<br>')}${h.details.length > 3 ? '<br>+' + (h.details.length - 3) + ' more' : ''}</div>`
-        : '';
-      return `<tr>
-        <td>${h.id}</td>
-        <td>${Utils.escapeHtml(h.user_name || '-')}</td>
-        <td>${Utils.escapeHtml(h.file_name || '-')}<div class="text-xs text-muted">${Utils.escapeHtml((h.file_type || '')).toUpperCase()}</div></td>
-        <td class="text-xs">${esc(h.academic_year_name || '-')}<br>${esc(h.term_name || '-')}</td>
-        <td class="text-xs">${esc(h.class_name || '-')}<br>${esc(h.subject_name || '-')}</td>
-        <td>${Utils.escapeHtml(h.assessment_name || '-')}</td>
-        <td class="text-center">${h.total_records || 0}</td>
-        <td class="text-center" style="color:var(--green-600)">${h.imported || 0}</td>
-        <td class="text-center" style="color:var(--blue-600)">${h.updated || 0}</td>
-        <td class="text-center" style="color:var(--amber-600)">${h.duplicates || 0}</td>
-        <td class="text-center" style="color:var(--red-500)">${h.errors || 0}</td>
-        <td class="text-sm text-muted">${when}</td>
-        <td><span class="badge ${statusColor}">${Utils.escapeHtml(h.status || '-')}</span>${details}</td>
-      </tr>`;
-    }).join('');
-
-    const legend = `
-      <style>
-        .import-history-legend { display:flex; gap:16px; flex-wrap:wrap; margin-bottom:16px; font-size:12px; color:var(--gray-600); }
-        .import-history-legend span { display:flex; align-items:center; gap:6px; }
-        .legend-dot { width:10px; height:10px; border-radius:50%; display:inline-block; }
-      </style>
-      <div class="import-history-legend">
-        <span><span class="legend-dot" style="background:var(--green-500)"></span>Completed</span>
-        <span><span class="legend-dot" style="background:var(--amber-500)"></span>Partial (some rows failed)</span>
-        <span><span class="legend-dot" style="background:var(--red-500)"></span>Failed</span>
-      </div>`;
-
-    setContent(legend + `
-      <div class="card"><div class="table-container"><table class="data-table" style="font-size:12px">
-        <thead><tr>
-          <th>Import ID</th><th>Teacher</th><th>File</th><th>Year/Term</th><th>Class/Subject</th><th>Assessment</th>
-          <th class="text-center">Records</th><th class="text-center">Imported</th><th class="text-center">Updated</th>
-          <th class="text-center">Duplicates</th><th class="text-center">Errors</th><th>Date/Time</th><th>Status</th>
-        </tr></thead>
-        <tbody>${body || `<tr><td colspan="13">${Utils.empty('No imports recorded yet', 'inbox')}</td></tr>`}</tbody>
-      </table></div></div>`);
-  } catch (e) {
-    console.error('[ImportHistory]', e);
-    setContent(Utils.empty('Unable to load import history: ' + e.message, 'alert-triangle'));
-  }
 }

@@ -59,6 +59,18 @@ const SchoolSettings = {
               <input id="ss-pass-mark" class="select-field" type="number" value="${settings.pass_mark || 50}">
             </div>
           </div>
+          <div class="form-grid">
+            <div class="form-group">
+              <label><span class="required">*</span>Primary DOS Name</label>
+              <input id="ss-dos-primary" class="select-field" value="${Utils.escapeHtml(settings.dos_primary_name || '')}" placeholder="e.g., John Doe — Primary">
+              <p class="form-hint">Full name of the DOS responsible for PRIMARY schools — appears on all Primary report headers.</p>
+            </div>
+            <div class="form-group">
+              <label><span class="required">*</span>Secondary DOS Name</label>
+              <input id="ss-dos-secondary" class="select-field" value="${Utils.escapeHtml(settings.dos_secondary_name || '')}" placeholder="e.g., Jane Smith — Secondary">
+              <p class="form-hint">Full name of the DOS responsible for SECONDARY schools — appears on all Secondary report headers.</p>
+            </div>
+          </div>
           <div class="flex gap-3 mt-4">
             <button class="btn btn-primary" onclick="SchoolSettings.save()"><i data-lucide="save"></i> Save Settings</button>
             <button class="btn btn-secondary" onclick="SchoolSettings.uploadLogo('ministry')"><i data-lucide="image"></i> Upload Ministry Logo</button>
@@ -89,7 +101,9 @@ const SchoolSettings = {
       ministry: document.getElementById('ss-ministry')?.value || 'Ministry of Education',
       province: document.getElementById('ss-province')?.value || 'Eastern Province',
       district: document.getElementById('ss-district')?.value || 'Kayonza',
-      sector: document.getElementById('ss-sector')?.value || 'Gahini'
+      sector: document.getElementById('ss-sector')?.value || 'Gahini',
+      dos_primary_name: document.getElementById('ss-dos-primary')?.value || '',
+      dos_secondary_name: document.getElementById('ss-dos-secondary')?.value || ''
     };
 
     try {
@@ -99,8 +113,10 @@ const SchoolSettings = {
       } else {
         await DB.insert('school_settings', settings);
       }
+      DB.invalidate('school_settings');
+      ReportUtils.invalidate('settings');
       Utils.toast('School settings saved', 'success');
-      this.state.settings = settings;
+      this.state.settings = { ...this.state.settings, ...settings };
       this.updatePreview();
     } catch (e) {
       Utils.toast('Error saving settings: ' + e.message, 'error');
@@ -125,7 +141,10 @@ const SchoolSettings = {
         } else {
           settings.id = await DB.insert('school_settings', { ...settings, school_name: 'Rukara Model School' });
         }
+        DB.invalidate('school_settings');
+        ReportUtils.invalidate('settings');
         Utils.toast(`${type} logo uploaded`, 'success');
+        this.state.settings = { ...this.state.settings, ...settings };
         this.updatePreview();
       } catch (e) {
         Utils.toast('Error uploading logo: ' + e.message, 'error');

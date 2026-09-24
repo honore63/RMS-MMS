@@ -62,17 +62,12 @@ function analyticsField(label, html) {
 function analyticsChips(filters, ctx) {
   const parts = [];
   const add = (k) => { if (filters[k] && filters[k] !== 'all') parts.push(k); };
-  add('yearId'); add('termId'); add('classId'); add('stream'); add('subjectId'); add('typeId');
-  if (analyticsIsTeacher) { if (ctx.assignments && ctx.assignments.length) parts.push('scoped'); }
-  else add('teacherId');
+  add('yearId'); add('termId'); add('classId'); add('typeId');
   const list = [];
   if (ctx.yearById(filters.yearId)) list.push(ctx.yearById(filters.yearId).name);
   if (ctx.termById(filters.termId)) list.push(ctx.termById(filters.termId).name);
   if (ctx.classByName(filters.classId)) list.push(ctx.classByName(filters.classId).name);
-  if (filters.stream && filters.stream !== 'all') list.push('Stream ' + filters.stream);
-  if (ctx.subjectById(filters.subjectId)) list.push(ctx.subjectById(filters.subjectId).name);
   if (filters.typeId && filters.typeId !== 'all') { const t = ctx.types.find(x => x.id === filters.typeId); if (t) list.push(t.name); }
-  if (filters.teacherId && filters.teacherId !== 'all') { const t = ctx.teacherById(filters.teacherId); if (t) list.push('Teacher: ' + t.full_name); }
   return list.length ? `Showing: <strong>${list.map(AStrs.esc).join(' &bull; ')}</strong>` : 'Showing: <strong>Whole school (all records)</strong>';
 }
 
@@ -202,16 +197,7 @@ async function analyticsRenderPage(data, ctx, assessmentsList) {
   fields.push(analyticsField('Academic Year', analyticsSelect('yearId', [{ value: 'all', label: 'All Years' }].concat(ctx.years.map(y => ({ value: y.id, label: y.name + (y.is_current ? ' (Current)' : '') }))), s.yearId)));
   fields.push(analyticsField('Term', analyticsSelect('termId', [{ value: 'all', label: 'All Terms' }].concat(termsOpts.map(t => ({ value: t.id, label: t.name }))), s.termId)));
   fields.push(analyticsField('Class', analyticsSelect('classId', [{ value: 'all', label: 'All Classes' }].concat(classOpts.map(c => ({ value: c.id, label: c.name }))), s.classId)));
-  fields.push(analyticsField('Stream', analyticsSelect('stream', [{ value: 'all', label: 'All Streams' }].concat(streams.map(x => ({ value: x, label: 'Stream ' + x }))), s.stream)));
-  fields.push(analyticsField('Subject', analyticsSelect('subjectId', [{ value: 'all', label: 'All Subjects' }].concat(subjectOpts.map(x => ({ value: x.id, label: x.name }))), s.subjectId)));
   fields.push(analyticsField('Assessment Type', analyticsSelect('typeId', [{ value: 'all', label: 'All Types' }].concat(typeOpts.map(x => ({ value: x.id, label: x.name }))), s.typeId)));
-  fields.push(analyticsField('Assessment', analyticsSelect('assessmentId', [{ value: 'all', label: 'All Assessments' }].concat(assessOpts.length ? assessOpts : [{ value: 'none', label: 'No assessments in scope' }]), s.assessmentId)));
-  fields.push(analyticsField('Student', analyticsSelect('studentId', [{ value: 'all', label: 'All Students' }].concat(learnerOpts.length ? learnerOpts : [{ value: 'none', label: 'No assessed students in scope' }]), s.studentId)));
-  if (!isT) fields.push(analyticsField('Teacher', analyticsSelect('teacherId', [{ value: 'all', label: 'All Teachers' }].concat(teacherOpts.map(x => ({ value: x.id, label: x.full_name }))), s.teacherId)));
-  fields.push(analyticsField('Status', analyticsSelect('status', statusOpts, s.status)));
-  fields.push(analyticsField('Metric', analyticsSelect('metric', metricOpts, s.metric)));
-  fields.push(analyticsField('Comparison', analyticsSelect('compare', compareOpts, s.compare)));
-  fields.push(analyticsField('Performers List', analyticsSelect('limit', limitOpts, s.limit)));
 
   /* ----- Export / target bar ----- */
   const targetCtl = isT ? '' : `<div class="analysis-tool">
@@ -238,28 +224,21 @@ async function analyticsRenderPage(data, ctx, assessmentsList) {
     sections = analyticsAggregateSections(data, ctx);
   }
 
-  const __levelBadge = (()=>{ try{ if(typeof Scope!=='undefined' && Scope.isScoped()) return Scope.isPrimary()?'PRIMARY ANALYTICS':'SECONDARY ANALYTICS'; if(isT) return 'MY TEACHING ANALYTICS'; return 'SCHOOL ANALYTICS'; }catch(e){return isT?'MY TEACHING ANALYTICS':'ANALYTICS'; } })();
   setContent(`<div class="analytics-page">
-    <div style="background:linear-gradient(135deg,rgba(59,130,246,0.08),rgba(37,99,235,0.04));border:1px solid var(--blue-100);border-radius:var(--radius);padding:12px 16px;margin-bottom:16px;display:flex;align-items:center;gap:10px">
-      <i data-lucide="sparkles" style="width:16px;height:16px;color:var(--blue-600)"></i>
-      <span class="text-sm" style="color:var(--gray-700)"><strong>Automatically loaded</strong> for your authorized ${isT ? 'classes & subjects' : 'education level'} — <strong>no selection required</strong>. Dashboard below is ready.</span>
-      <span class="badge badge-blue" style="margin-left:auto">${__levelBadge}</span>
-    </div>
     ${sections}
     ${exportBar}
     <div class="card mb-6" style="margin-top:16px;opacity:0.95">
       <div class="card-header analytics-card-header" style="cursor:pointer" onclick="const b=document.getElementById('analytics-filters-body'); const c=this.querySelector('.af-chevron'); b.style.display=b.style.display==='none'?'':'none'; if(c) c.style.transform=b.style.display==='none'?'':'rotate(180deg)';">
-        <h3><i data-lucide="sliders-horizontal"></i> Optional Filters <span class="text-sm text-muted" style="font-weight:400;margin-left:8px">— click to refine (already auto-scoped)</span></h3>
+        <h3><i data-lucide="sliders-horizontal"></i> Analytics Focus <span class="text-sm text-muted" style="font-weight:400;margin-left:8px">— class and assessment type</span></h3>
         <div class="analytics-header-actions" style="display:flex;align-items:center;gap:8px">
           <button class="btn btn-sm btn-secondary" onclick="event.stopPropagation(); analyticsClearFilters()"><i data-lucide="rotate-ccw"></i> Reset</button>
-          ${s.assessmentId !== 'all' ? `<button class="btn btn-sm btn-secondary" onclick="event.stopPropagation(); analyticsSetFilter('assessmentId','all')"><i data-lucide="x"></i> Clear Assessment</button>` : ''}
           <i data-lucide="chevron-down" class="af-chevron" style="width:16px;height:16px;transition:transform .2s"></i>
         </div>
       </div>
-      <div id="analytics-filters-body" style="display:none;padding:16px">
+      <div id="analytics-filters-body" style="padding:16px">
         <div class="filters-grid">${fields.join('')}</div>
         <div style="margin-top:12px">${scopeNote}</div>
-        <p class="text-xs text-muted" style="margin-top:8px">Filters refine the dashboard above — they are never required to see analytics.</p>
+        <p class="text-xs text-muted" style="margin-top:8px">Choose a class and assessment type to focus the analytics above.</p>
       </div>
     </div>
   </div>`);
@@ -345,23 +324,6 @@ function analyticsAggregateSections(data, ctx) {
   ];
   const kpiGrid = `<section class="mb-6"><div class="grid-4">${kpiCards.join('')}</div></section>`;
   const overviewGrid = `<section class="mb-6"><div class="grid-4">${overviewCards.join('')}</div></section>`;
-  // Explicit separation summary — proves analytics are split by class / assignment / teacher / type / many more
-  const typeCount = (ctx.types||[]).length;
-  const termCount = (ctx.terms||[]).length;
-  const assignCount = isT ? (ctx.assignments||[]).length : ( (data.teacherPerf||[]).reduce((a,b)=>a,0) ? (ctx.assignments ? ctx.assignments.length : activeTeachers) : 0 );
-  // For DOS, fetch assignment count from DB if not in ctx (fallback to 0, still shows separation)
-  const separationCard = `<div class="card mb-6" style="border-left:4px solid var(--blue-500)"><div class="card-header"><h3>${AStrs.icon('git-branch')} Separated Analytics — By Class, Assignment, Teacher, Type & More</h3><span class="text-sm text-muted">Each chart below is a separate slice — not mixed</span></div><div class="card-body" style="padding:16px 20px">
-    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px;text-align:center">
-      <div style="background:var(--gray-50);border:1px solid var(--gray-200);border-radius:var(--radius);padding:12px"><div class="text-xs text-muted">Classes</div><div style="font-size:20px;font-weight:800;color:var(--blue-700)">${totalClasses}</div><div class="text-xs text-muted">Separate per class</div></div>
-      <div style="background:var(--gray-50);border:1px solid var(--gray-200);border-radius:var(--radius);padding:12px"><div class="text-xs text-muted">Assignments</div><div style="font-size:20px;font-weight:800;color:var(--purple-600)">${isT ? assignCount : (activeTeachers ? assignCount||'—' : totalClasses)}</div><div class="text-xs text-muted">Class × Subject pairs</div></div>
-      <div style="background:var(--gray-50);border:1px solid var(--gray-200);border-radius:var(--radius);padding:12px"><div class="text-xs text-muted">Teachers</div><div style="font-size:20px;font-weight:800;color:var(--green-600)">${isT ? '1 (You)' : activeTeachers}</div><div class="text-xs text-muted">Per-teacher avg</div></div>
-      <div style="background:var(--gray-50);border:1px solid var(--gray-200);border-radius:var(--radius);padding:12px"><div class="text-xs text-muted">Assessment Types</div><div style="font-size:20px;font-weight:800;color:var(--amber-600)">${typeCount}</div><div class="text-xs text-muted">${(data.typePerf||[]).map(t=>t.name).slice(0,3).join(', ')||'As configured'}</div></div>
-      <div style="background:var(--gray-50);border:1px solid var(--gray-200);border-radius:var(--radius);padding:12px"><div class="text-xs text-muted">Subjects</div><div style="font-size:20px;font-weight:800;color:var(--blue-600)">${totalSubjects}</div><div class="text-xs text-muted">Per-subject chart</div></div>
-      <div style="background:var(--gray-50);border:1px solid var(--gray-200);border-radius:var(--radius);padding:12px"><div class="text-xs text-muted">Terms / Assessments</div><div style="font-size:20px;font-weight:800;color:var(--gray-700)">${termCount} / ${totalAssessments}</div><div class="text-xs text-muted">Trend + per-assessment</div></div>
-    </div>
-    <p class="text-xs text-muted" style="margin-top:10px">Scope: <strong>${levelBadge}</strong> — every query is filtered by <code>education_level</code> / <code>teacher_assignments</code> before aggregation. Use Optional Filters to isolate one class, subject, teacher or type and all charts re-separate.</p>
-  </div></div>`;
-
   // Visual marks completion & teacher activity – always visible, real counts
   const completionPct = totalAssessments ? Math.round((approvedCnt/totalAssessments)*100) : 0;
   const missingPct = 100 - (totalAssessments ? Math.round((entered ? 100 : 0)) : 0);
@@ -470,7 +432,7 @@ function analyticsAggregateSections(data, ctx) {
     <section class="grid-2">${topCard}${bottomCard}</section>
     ${matrixCard}
     ${insightCard}`;
-  return overviewGrid + separationCard + kpiGrid + wrap;
+  return overviewGrid + kpiGrid + wrap;
 }
 
 function analyticsStudentSections(student, data, ctx) {

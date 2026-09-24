@@ -292,22 +292,18 @@ async function subjectToggle(id, newStatus) {
 
 async function subjectDelete(id, name) {
   // Guard: check if subject is in-use by teacher_assignments or assessments
-  const [assignments, assessments] = await Promise.all([
-    DB.query('teacher_assignments', '*', { subject_id: id }),
-    DB.query('assessments', '*', { subject_id: id })
+  const [assignments, assessments, classSubjects] = await Promise.all([
+    DB.query('teacher_assignments', '*', { subject_id: id }).catch(() => []),
+    DB.query('assessments', '*', { subject_id: id }).catch(() => []),
+    DB.query('class_subjects', '*', { subject_id: id }).catch(() => [])
   ]);
 
-  if (assignments.length > 0 || assessments.length > 0) {
-    return Modal.show('Cannot Delete Subject', `
-      <div class="alert alert-warning mb-4">
-        <i data-lucide="alert-triangle"></i>
-        Subject <strong>${Utils.escapeHtml(name)}</strong> cannot be deleted because it is linked to
-        <strong>${assignments.length} teacher assignment(s)</strong> and
-        <strong>${assessments.length} assessment(s)</strong>.
-      </div>
-      <p class="text-sm text-muted">You can set this subject to <strong>Inactive</strong> to hide it from new assignments without losing any historical data.</p>`,
-      `<button class="btn btn-secondary" onclick="Modal.close()">Close</button>
-       <button class="btn btn-danger" onclick="Modal.close();subjectToggle('${id}','inactive')"><i data-lucide="power"></i> Set Inactive Instead</button>`);
+  if (assignments.length > 0 || assessments.length > 0 || classSubjects.length > 0) {
+    return subjectBlockDeleteModal(id, name, {
+      assignments: assignments.length,
+      assessments: assessments.length,
+      classSubjects: classSubjects.length
+    });
   }
 
   Modal.confirm('Delete Subject',
@@ -318,9 +314,49 @@ async function subjectDelete(id, name) {
         Utils.toast('Subject deleted', 'success');
         renderSubjects();
       } catch (e) {
-        Utils.toast('Delete error: ' + e.message, 'error');
+        const msg = [e.message, e.details].filter(Boolean).join(' | ');
+        if (/foreign key|violates|23503/i.test(msg)) {
+          const counts = await subjectUsageCounts(id);
+          return subjectBlockDeleteModal(id, name, counts);
+        }
+        Utils.toast('Delete failed: ' + (msg || 'Unknown error'), 'error');
       }
     });
+}
+
+async function subjectUsageCounts(id) {
+  const count = async (table, col) => {
+    try {
+      const { count: c } = await sbClient.from(table).select('id', { count: 'exact', head: true }).eq(col, id);
+      return c || 0;
+    } catch (e) { return 0; }
+  };
+  const [assignments, assessments, classSubjects] = await Promise.all([
+    count('teacher_assignments', 'subject_id'),
+    count('assessments', 'subject_id'),
+    count('class_subjects', 'subject_id')
+  ]);
+  return { assignments, assessments, classSubjects };
+}
+
+function subjectBlockDeleteModal(id, name, counts) {
+  const a = counts.assignments || 0;
+  const b = counts.assessments || 0;
+  const c = counts.classSubjects || 0;
+  Modal.show('Cannot Delete Subject', `
+    <div class="alert alert-warning mb-4">
+      <i data-lucide="alert-triangle"></i>
+      Subject <strong>${Utils.escapeHtml(name)}</strong> is still referenced by existing records, so deleting it would break them.
+    </div>
+    <div style="display:grid;gap:8px;margin-bottom:14px">
+      <div style="display:flex;justify-content:space-between;padding:8px 12px;background:var(--gray-50);border-radius:8px"><span>Assessments</span><strong>${b}</strong></div>
+      <div style="display:flex;justify-content:space-between;padding:8px 12px;background:var(--gray-50);border-radius:8px"><span>Teacher assignments</span><strong>${a}</strong></div>
+      <div style="display:flex;justify-content:space-between;padding:8px 12px;background:var(--gray-50);border-radius:8px"><span>Class &rarr; subject links</span><strong>${c}</strong></div>
+    </div>
+    <p class="text-sm text-muted">Set the subject to <strong>Inactive</strong> to hide it from new assignments and report filters while keeping every historical mark and report intact.</p>`,
+    `<button class="btn btn-secondary" onclick="Modal.close()">Close</button>
+     <button class="btn btn-warning" onclick="Modal.close();subjectToggle('${id}','inactive')"><i data-lucide="power"></i> Set Inactive Instead</button>`);
+  if (typeof lucide !== 'undefined') lucide.createIcons();
 }
 
 // ---- Seed Rwanda Subjects ---------------------------------------------------
@@ -374,7 +410,13 @@ async function subjectSeedRwanda() {
         let skipped = 0;
         for (const subj of toAdd) {
           try {
-            await DB.insert('subjects', { name: subj.name, code: subj.code, status: 'active' });
+            const payload = { name: subj.name, code: subj.code, status: 'active' };
+            if (subj.level) { payload.level = subj.level; payload.education_level = subj.level; }
+            if (typeof Scope !== 'undefined' && Scope.isScoped()) {
+              payload.level = Scope.isPrimary() ? 'Primary' : 'Secondary';
+              payload.education_level = payload.level;
+            }
+            await DB.insert('subjects', payload);
             added++;
           } catch (_) {
             skipped++;

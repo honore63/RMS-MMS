@@ -13,11 +13,12 @@ async function renderClasses() {
   setHeader('Class Management', 'Organize & control school classes by Education Level categories (Primary, Lower & Upper Secondary)');
   setContent(Utils.loading());
 
-  const [classes, years, learners, assignments, eduLevels] = await Promise.all([
+  const [classes, years, learners, assignments, teachers, eduLevels] = await Promise.all([
     DB.get('classes'),
     DB.get('academic_years'),
     DB.get('learners'),
     DB.get('teacher_assignments'),
+    DB.get('teachers', { status: 'active' }).catch(() => []),
     DB.get('education_levels').catch(() => [])
   ]);
 
@@ -30,6 +31,7 @@ async function renderClasses() {
   const scopedCats  = (typeof Scope !== 'undefined' && Scope.isScoped()) ? Scope.categories() : null;
 
   const filtered = classes.filter(c => {
+    if (scopedCats && !scopedCats.includes(c.education_level)) return false;
     const matchS  = !classesSearch || (c.name + ' ' + (c.level || '') + ' ' + (c.stream || '') + ' ' + (c.education_level || '')).toLowerCase().includes(classesSearch.toLowerCase());
     const matchC  = classesCategory === 'all' || c.education_level === classesCategory;
     const matchSt = classesStatus   === 'all' || (c.status || 'active') === classesStatus;
@@ -37,9 +39,12 @@ async function renderClasses() {
     return matchS && matchC && matchSt && matchY;
   });
 
-  const totalActive   = classes.filter(c => (c.status || 'active') === 'active').length;
-  const totalInactive = classes.filter(c => c.status === 'inactive').length;
-  const totalLearners = learners.length;
+  const visibleClasses = scopedCats ? classes.filter(c => scopedCats.includes(c.education_level)) : classes;
+  const visibleClassIds = new Set(visibleClasses.map(c => String(c.id)));
+  const visibleLearners = learners.filter(l => visibleClassIds.has(String(l.class_id)));
+  const totalActive   = visibleClasses.filter(c => (c.status || 'active') === 'active').length;
+  const totalInactive = visibleClasses.filter(c => c.status === 'inactive').length;
+  const totalLearners = visibleLearners.length;
 
   // Group filtered classes by Education Level
   const grouped = {
@@ -82,6 +87,7 @@ async function renderClasses() {
       const yr           = years.find(y => y.id === c.academic_year_id);
       const learnerCount = learners.filter(l => l.class_id === c.id).length;
       const teacherCount = new Set(assignments.filter(a => a.class_id === c.id).map(a => a.teacher_id)).size;
+      const classTeacher = teachers.find(t => t.id === c.class_teacher_id);
       const st           = c.status || 'active';
       const isActive     = st === 'active';
 
@@ -102,9 +108,12 @@ async function renderClasses() {
               ${Utils.escapeHtml(c.name)}
             </h4>
 
-            <div style="font-size:13px;color:var(--gray-500);margin-bottom:14px;display:flex;gap:12px;flex-wrap:wrap">
+            <div style="font-size:13px;color:var(--gray-500);margin-bottom:10px;display:flex;gap:12px;flex-wrap:wrap">
               ${c.stream ? `<span style="display:inline-flex;align-items:center;gap:4px;background:#f3f4f6;padding:2px 8px;border-radius:6px;font-weight:600"><i data-lucide="git-branch" style="width:12px;height:12px"></i> ${Utils.escapeHtml(c.stream)}</span>` : ''}
               <span style="display:inline-flex;align-items:center;gap:4px"><i data-lucide="calendar" style="width:12px;height:12px"></i> ${Utils.escapeHtml(yr?.name || 'All Years')}</span>
+            </div>
+            <div style="font-size:12px;color:var(--gray-600);margin-bottom:12px;padding:8px 10px;border-radius:8px;background:rgba(59,130,246,0.06);border:1px solid rgba(59,130,246,0.12)">
+              <strong>Class teacher:</strong> ${Utils.escapeHtml(classTeacher?.full_name || 'Not assigned')}
             </div>
 
             <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;padding:10px 12px;background:var(--gray-50,#f9fafb);border-radius:10px;margin-bottom:14px">
@@ -282,7 +291,10 @@ async function renderClasses() {
 // ---- Add Cascading Class Form -----------------------------------------------
 
 async function classForm() {
-  const years        = await DB.get('academic_years');
+  const [years, teachers] = await Promise.all([
+    DB.get('academic_years'),
+    DB.get('teachers', { status: 'active' }).catch(() => [])
+  ]);
   const activeYearId = (typeof getActiveYearId === 'function' ? getActiveYearId(years) : null) || '';
   const scopedCats   = (typeof Scope !== 'undefined' && Scope.isScoped()) ? Scope.categories() : null;
 
@@ -323,6 +335,14 @@ async function classForm() {
     <div class="form-group">
       <label><i data-lucide="tag" style="width:13px;height:13px;margin-right:4px"></i>Full Class Name <span class="required">*</span></label>
       <input id="cf-name" class="input-field" placeholder="Auto-generated e.g. S6 – PCM or P4A" data-user-edited="false" oninput="this.dataset.userEdited='true'">
+    </div>
+
+    <div class="form-group">
+      <label><i data-lucide="user-check" style="width:13px;height:13px;margin-right:4px"></i>Class Teacher</label>
+      <select id="cf-class-teacher" class="select-field">
+        <option value="">Not assigned</option>
+        ${(teachers || []).map(t => `<option value="${t.id}">${Utils.escapeHtml(t.full_name)} (${Utils.escapeHtml(t.teacher_code || '')})</option>`).join('')}
+      </select>
     </div>
 
     <div class="form-group">
@@ -408,6 +428,7 @@ async function classSave() {
   const level           = document.getElementById('cf-level')?.value?.trim() || '';
   const stream          = document.getElementById('cf-stream-select')?.value?.trim() || null;
   const name            = document.getElementById('cf-name')?.value?.trim();
+  const class_teacher_id = document.getElementById('cf-class-teacher')?.value || null;
   const academic_year_id= document.getElementById('cf-year')?.value || null;
   const status          = document.getElementById('cf-status')?.value || 'active';
 
@@ -430,7 +451,7 @@ async function classSave() {
         (c.academic_year_id||null) === (academic_year_id||null))) {
       return Utils.toast(`❌ "${name}" already exists for this academic year`, 'error');
     }
-    await DB.insert('classes', { name, level, stream, education_level, academic_year_id, status });
+    await DB.insert('classes', { name, level, stream, education_level, class_teacher_id, academic_year_id, status });
     Modal.close();
     Utils.toast('✅ Class created successfully', 'success');
     renderClasses();
@@ -472,6 +493,13 @@ async function classEdit(c) {
       </div>
     </div>
     <div class="form-group">
+      <label><i data-lucide="user-check" style="width:13px;height:13px;margin-right:4px"></i>Class Teacher</label>
+      <select id="ce-class-teacher" class="select-field">
+        <option value="">Not assigned</option>
+        ${(await DB.get('teachers', { status: 'active' }).catch(() => [])).map(t => `<option value="${t.id}" ${String(c.class_teacher_id || '') === String(t.id) ? 'selected' : ''}>${Utils.escapeHtml(t.full_name)} (${Utils.escapeHtml(t.teacher_code || '')})</option>`).join('')}
+      </select>
+    </div>
+    <div class="form-group">
       <label><i data-lucide="calendar" style="width:13px;height:13px;margin-right:4px"></i>Academic Year</label>
       <select id="ce-year" class="select-field">
         <option value="">All Academic Years (Global Default)</option>
@@ -499,6 +527,7 @@ async function classUpdate(id) {
   const name             = document.getElementById('ce-name')?.value?.trim();
   const level            = document.getElementById('ce-level')?.value?.trim();
   const stream           = document.getElementById('ce-stream')?.value?.trim() || null;
+  const class_teacher_id = document.getElementById('ce-class-teacher')?.value || null;
   const academic_year_id = document.getElementById('ce-year')?.value || null;
   const status           = document.getElementById('ce-status')?.value || 'active';
 
@@ -519,7 +548,7 @@ async function classUpdate(id) {
         (c.academic_year_id||null) === (academic_year_id||null))) {
       return Utils.toast(`❌ "${name}" already exists for this academic year`, 'error');
     }
-    await DB.update('classes', id, { name, level, stream, education_level, academic_year_id, status });
+    await DB.update('classes', id, { name, level, stream, education_level, class_teacher_id, academic_year_id, status });
     Modal.close();
     Utils.toast('✅ Class updated successfully', 'success');
     renderClasses();

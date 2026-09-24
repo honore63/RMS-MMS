@@ -68,6 +68,8 @@ async function renderAdminDashboard() {
       { icon: 'graduation-cap', bg: 'var(--green-50)', color: 'var(--green-600)', title: 'Manage Teachers', desc: 'Add and manage teaching staff', route: 'admin/teachers' },
 { icon: 'school', bg: 'var(--amber-50)', color: 'var(--amber-600)', title: 'Manage Classes', desc: 'Set up classes and subjects', route: 'admin/academic' },
        { icon: 'file-bar-chart', bg: 'var(--blue-50)', color: 'var(--blue-600)', title: 'Report Center', desc: 'Generate academic reports', route: 'admin/reports' },
+  { icon: 'school', bg: 'var(--green-50)', color: 'var(--green-600)', title: 'Class Performance', desc: 'View marks grouped by class', route: 'admin/reports/class' },
+  { icon: 'trophy', bg: 'var(--amber-50)', color: 'var(--amber-600)', title: 'Top Performance', desc: 'View top learners and class ranking', route: 'admin/reports/class-ranking' },
        { icon: 'settings', bg: 'var(--gray-100)', color: 'var(--gray-600)', title: 'School Settings', desc: 'Configure school information', route: 'admin/settings' }
     ];
     const actionCards = actions.map(a => `

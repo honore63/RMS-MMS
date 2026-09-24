@@ -3,10 +3,8 @@
    Single source of truth is Supabase. This service:
      1. Opens ONE channel subscribed to every shared table.
      2. Fans out INSERT/UPDATE/DELETE events to registered handlers.
-     3. Auto-refreshes the active route's render when a table it
-        depends on changes (debounced, route-guard aware).
-     4. Refreshes the active route when the tab regains focus and on
-        a quiet 60s poll while focused (fallback if realtime drops).
+      3. Invalidates affected data caches when shared tables change.
+      4. Leaves page refreshes under explicit user control.
    No duplicate subscriptions: one channel, one listener per table.
    ============================================================ */
 
@@ -37,8 +35,7 @@ const Realtime = {
     'grading_scales',
     'school_settings',
     'notifications',
-    'audit_logs',
-    'documents'
+    'audit_logs'
   ],
 
   init() {
@@ -68,15 +65,6 @@ const Realtime = {
       console.warn('[Realtime] init error:', e);
     }
 
-    document.addEventListener('visibilitychange', () => {
-      if (document.visibilityState === 'visible') this.refreshActive();
-    });
-
-    this._pollTimer = setInterval(() => {
-      if (document.visibilityState === 'visible' && document.hasFocus()) {
-        this.refreshActive();
-      }
-    }, 60000);
   },
 
   stop() {
@@ -126,31 +114,6 @@ const Realtime = {
         try { fn(payload); } catch (e) { console.error('[Realtime] handler:', e); }
       });
     }
-    this._scheduleRouteRefresh(table);
   },
 
-  _scheduleRouteRefresh(table) {
-    const route = this.baseRoute(this.activeRoute());
-    if (!route) return;
-    const def = this._routes[route];
-    if (!def || !def.tables.has(table)) return;
-    if (def.guard && def.guard() === false) return;
-    if (this._pending.has(route)) return;
-
-    this._pending.add(route);
-    setTimeout(() => {
-      this._pending.delete(route);
-      if (this.baseRoute(this.activeRoute()) === route) {
-        Router.render();
-      }
-    }, 300);
-  },
-
-  refreshActive() {
-    const route = this.baseRoute(this.activeRoute());
-    if (!route) return;
-    const def = this._routes[route];
-    if (def && def.guard && def.guard() === false) return;
-    Router.render();
-  }
 };

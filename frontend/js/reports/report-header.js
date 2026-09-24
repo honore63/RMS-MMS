@@ -21,6 +21,8 @@ const ReportHeader = {
     const province = s.province || 'Eastern Province';
     const district = s.district || 'Kayonza';
     const sector = s.sector || 'Gahini';
+    const dosPrimary = s.dos_primary_name || s.dos_name || '';
+    const dosSecondary = s.dos_secondary_name || '';
 
     return `
       <div class="rms-report-header">
@@ -32,6 +34,8 @@ const ReportHeader = {
             <div class="rms-header-province">${Utils.escapeHtml(province)}</div>
             <div class="rms-header-district">${Utils.escapeHtml(district)}</div>
             <div class="rms-header-sector">${Utils.escapeHtml(sector)}</div>
+            ${dosPrimary ? `<div class="rms-header-dos">Primary DOS: ${Utils.escapeHtml(dosPrimary)}</div>` : ''}
+            ${dosSecondary ? `<div class="rms-header-dos">Secondary DOS: ${Utils.escapeHtml(dosSecondary)}</div>` : ''}
             <div class="rms-header-school">${Utils.escapeHtml(schoolName)}</div>
             <div class="rms-header-code">School Code: ${schoolCode}</div>
             ${email ? `<div class="rms-header-email">Email: ${Utils.escapeHtml(email)}</div>` : ''}
@@ -115,9 +119,9 @@ const ReportHeader = {
     return '<div class="rms-page-break" style="page-break-after:always; height:0; margin:0; padding:0;"></div>';
   },
 
-  getA4Container(html, orientation = 'portrait') {
+  getA4Container(html, orientation = 'portrait', multiPage = false) {
     const isLandscape = orientation === 'landscape';
-    const cls = isLandscape ? 'rms-a4-container rms-a4-landscape' : 'rms-a4-container';
+    const cls = (isLandscape ? 'rms-a4-container rms-a4-landscape' : 'rms-a4-container') + (multiPage ? ' rms-report-document' : '');
     return `
       <div class="${cls}" data-report-orientation="${orientation}">
         ${html}
@@ -145,7 +149,11 @@ const ReportHeader = {
     const landscapeTypes = [
       'exam-class-summary', 'subject-performance', 'class-performance',
       'missing-marks', 'school-performance', 'grade-distribution',
-      'teacher-performance'
+      'teacher-performance', 'class-marks-sheet', 'subject-marks-sheet',
+      'subject-assessment-comparison', 'assessment-summary', 'assessment-completion',
+      'teacher-assessment-submission', 'term-performance-summary',
+      'academic-year-performance', 'class-ranking', 'student-marks',
+      'teacher-student-performance', 'teacher-assessment-class'
     ];
     return landscapeTypes.includes(reportType) ? 'landscape' : 'portrait';
   }
@@ -164,9 +172,23 @@ function schoolReportHeader(title, opts = {}) {
 
 function schoolSignatureSection(teacherName, dosName, headteacherName) {
   const d = typeof getSchoolSettings === 'function' ? getSchoolSettings() : {};
+  const dosPrimary = d.dos_primary_name || d.dos_name || dosName || '-';
+  const dosSecondary = d.dos_secondary_name || '';
   return `<div style="display:flex;justify-content:space-between;margin-top:40px;font-size:12px">
     <div><strong>Class Teacher:</strong> ${Utils.escapeHtml(teacherName || '-')}<br><br>Signature: ______________________</div>
-    <div><strong>DOS:</strong> ${Utils.escapeHtml(dosName || d.dos_name || '-')}<br><br>Signature: ______________________</div>
+    <div><strong>Primary DOS:</strong> ${Utils.escapeHtml(dosPrimary)}<br><br>Signature: ______________________</div>
+    <div><strong>Secondary DOS:</strong> ${Utils.escapeHtml(dosSecondary)}<br><br>Signature: ______________________</div>
     <div><strong>Headteacher:</strong> ${Utils.escapeHtml(headteacherName || d.headteacher_name || '-')}<br><br>Signature: ______________________</div>
   </div>`;
+}
+
+/**
+ * Returns the DOS name appropriate for the given education level.
+ * Used by report templates to show the correct DOS name on each report.
+ */
+function getDosName(level) {
+  const d = typeof getSchoolSettings === 'function' ? getSchoolSettings() : {};
+  if (level === 'Primary' || level === 'PRIMARY') return d.dos_primary_name || d.dos_name || '-';
+  if (level === 'Secondary' || level === 'SECONDARY' || level === 'Lower Secondary' || level === 'Upper Secondary') return d.dos_secondary_name || '-';
+  return d.dos_primary_name || d.dos_secondary_name || d.dos_name || '-';
 }

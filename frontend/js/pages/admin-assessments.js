@@ -15,7 +15,8 @@ async function renderAssessments() {
     if (assessFilter !== 'all' && a.status !== assessFilter) return false;
     const cls = classes.find(c => c.id === a.class_id);
     if (scoped) {
-      return Scope.matchesClass(cls);
+      const subj = subjects.find(s => s.id === a.subject_id);
+      return Scope.matchesClass(cls) && Scope.matchesSubject(subj);
     }
     if (assessEduLevel !== 'all') {
       if (EducationLevels.getCategory(cls) !== assessEduLevel) return false;
@@ -56,7 +57,7 @@ async function renderAssessments() {
   const rowsHtml = rows.join('');
 
   setContent(`
-    <div class="flex justify-between items-center mb-6" style="flex-wrap:wrap;gap:12px">
+    <div class="flex justify-between items-center mb-4" style="flex-wrap:wrap;gap:12px">
       <div class="tab-bar">
         <button class="tab-btn ${assessFilter === 'all' ? 'active' : ''}" onclick="assessFilter='all';renderAssessments()">All</button>
         <button class="tab-btn ${assessFilter === 'draft' ? 'active' : ''}" onclick="assessFilter='draft';renderAssessments()">Draft</button>
@@ -65,6 +66,10 @@ async function renderAssessments() {
         <button class="tab-btn ${assessFilter === 'rejected' ? 'active' : ''}" onclick="assessFilter='rejected';renderAssessments()">Rejected</button>
         <button class="tab-btn ${assessFilter === 'locked' ? 'active' : ''}" onclick="assessFilter='locked';renderAssessments()">Locked</button>
       </div>
+      <button class="btn btn-primary" onclick="assessForm()"><i data-lucide="plus"></i> New Assessment</button>
+    </div>
+    <div class="flex justify-between items-center mb-6" style="flex-wrap:wrap;gap:12px">
+      <div class="text-sm text-muted">All steps of creation are on one page — fill every section and click Create.</div>
       <div>
         ${scoped
           ? `<span class="badge badge-info" style="font-size:12px;font-weight:700;margin-right:6px">${Utils.escapeHtml(Scope.label())}</span><span class="text-sm text-muted">${Scope.isPrimary() ? '📗 Primary only' : '📘📙 Secondary (S1-S6)'}</span>`
@@ -148,25 +153,67 @@ async function assessForm() {
     getAssessmentTypes()
   ]);
   const activeTypes = types.filter(t => t.status === 'active');
+  const scoped = typeof Scope !== 'undefined' && Scope.isScoped();
+  const scopedClasses = scoped ? Scope.filterClasses(classes) : classes;
+  const scopedSubjects = scoped ? Scope.filterSubjects(subjects) : subjects;
+  const scopedTeachers = scoped ? teachers.filter(t => {
+    /* Only show teachers whose assigned class education level matches the DOS scope */
+    const assigned = (typeof teacherAssignmentsCache !== 'undefined' && teacherAssignmentsCache) || [];
+    const hasMatching = assigned.some(a => {
+      const cls = classes.find(c => String(c.id) === String(a.class_id));
+      return cls && Scope.matchesClass(cls);
+    });
+    return hasMatching || !assigned.length;
+  }) : teachers;
   const selYear = (typeof getActiveYearId === 'function' ? getActiveYearId(years) : null) || '';
   const selTerm = selYear ? (terms.find(t => t.academic_year_id === selYear && t.is_active)?.id || '') : '';
-  Modal.show('Create Assessment (DOS)', `
-    <div class="form-group"><label>Name <span class="required">*</span></label><input id="asf-name" class="input-field" placeholder="e.g., Unit 3 Quiz, Terminal Exam S2, PRACTICAL 1"></div>
-    <div class="form-group"><label>Assessment Type <span class="required">*</span></label><select id="asf-type" class="select-field" onchange="assessTypeChanged()">${activeTypes.map((t, i) => `<option value="${t.id}" data-default-max="${t.default_maximum_mark ?? ''}" ${i === 0 ? 'selected' : ''}>${Utils.escapeHtml(t.name)}${t.weight != null ? ' (w=' + t.weight + ')' : ''}</option>`).join('')}</select></div>
-    <div class="form-row"><div class="form-group"><label>Academic Year</label><select id="asf-year" class="select-field"><option value="">Select</option>${years.map(y => `<option value="${y.id}" ${y.id === selYear ? 'selected' : ''}>${y.name}</option>`).join('')}</select></div>
-    <div class="form-group"><label>Term</label><select id="asf-term" class="select-field"><option value="">Select</option>${terms.map(t => `<option value="${t.id}" ${t.id === selTerm ? 'selected' : ''}>${t.name}</option>`).join('')}</select></div></div>
-    <div class="form-row"><div class="form-group"><label>Class <span class="required">*</span></label><select id="asf-class" class="select-field"><option value="">Select</option>${classes.map(c => `<option value="${c.id}">${c.name}</option>`).join('')}</select></div>
-    <div class="form-group"><label>Subject <span class="required">*</span></label><select id="asf-subject" class="select-field"><option value="">Select</option>${subjects.map(s => `<option value="${s.id}">${s.name}</option>`).join('')}</select></div></div>
-    <div class="form-group"><label>Teacher <span class="required">*</span></label><select id="asf-teacher" class="select-field"><option value="">Select</option>${teachers.map(t => `<option value="${t.id}">${t.full_name}</option>`).join('')}</select></div>
-    <div class="form-group"><label>Unit <span class="text-muted">(only for unit-based types, e.g. End-of-Unit Assessment)</span></label><input id="asf-unit" class="input-field" placeholder="e.g., Unit 3 - Whole Numbers"></div>
-    <div class="form-row">
-      <div class="form-group"><label>Maximum Mark</label><input id="asf-max" type="number" class="input-field" value="${activeTypes[0]?.default_maximum_mark ?? 30}"></div>
-      <div class="form-group"><label>Weight <span class="text-muted">(optional)</span></label><input id="asf-weight" type="number" min="0" step="any" class="input-field" placeholder="blank = use type default"></div>
+  const yearTerms = selYear ? terms.filter(t => t.academic_year_id === selYear) : terms;
+  Modal.show('Create Assessment — All Steps on One Page', `
+    <style>
+      .asf-section { background:#f8fafc; border:1px solid #e2e8f0; border-radius:12px; padding:14px; margin-bottom:14px; }
+      .asf-section-title { font-size:11px; font-weight:800; text-transform:uppercase; letter-spacing:.08em; color:#475569; margin-bottom:10px; display:flex; align-items:center; gap:8px; }
+      .asf-section-title::after { content:""; flex:1; height:1px; background:#e2e8f0; }
+      .asf-section .form-group { margin-bottom:10px; }
+      .asf-section .form-group:last-child { margin-bottom:0; }
+    </style>
+    ${scoped ? `<div class="alert alert-info" style="margin-bottom:12px"><i data-lucide="shield-check"></i> Creating for <strong>${Utils.escapeHtml(Scope.label())}</strong> — only ${scoped ? Scope.label() : ''} classes/subjects are listed.</div>` : ''}
+    <div class="asf-section">
+      <div class="asf-section-title"><i data-lucide="file-text" style="width:14px;height:14px"></i> 1 — Basic Info</div>
+      <div class="form-group"><label>Assessment Name <span class="required">*</span></label><input id="asf-name" class="input-field" placeholder="e.g., Unit 3 Quiz, Terminal Exam S2, PRACTICAL 1"></div>
+      <div class="form-group"><label>Assessment Type <span class="required">*</span></label><select id="asf-type" class="select-field" onchange="assessTypeChanged()">${activeTypes.map((t, i) => `<option value="${t.id}" data-default-max="${t.default_maximum_mark ?? ''}" ${i === 0 ? 'selected' : ''}>${Utils.escapeHtml(t.name)}${t.weight != null ? ' (w=' + t.weight + ')' : ''}</option>`).join('')}</select></div>
+      <div class="form-group"><label>Unit <span class="text-muted">— only for End-of-Unit types</span></label><input id="asf-unit" class="input-field" placeholder="e.g., Unit 3 - Whole Numbers"></div>
     </div>
-    <div class="form-group"><label>Date</label><input id="asf-date" type="date" class="input-field" value="${new Date().toISOString().split('T')[0]}"></div>
-    <div class="form-group"><label>Description</label><textarea id="asf-desc" class="textarea-field" placeholder="Optional notes about this assessment"></textarea></div>`,
+    <div class="asf-section">
+      <div class="asf-section-title"><i data-lucide="users" style="width:14px;height:14px"></i> 2 — Class • Subject • Teacher</div>
+      <div class="form-row"><div class="form-group"><label>Class <span class="required">*</span></label><select id="asf-class" class="select-field"><option value="">Select class</option>${scopedClasses.map(c => `<option value="${c.id}">${Utils.escapeHtml(c.name)} — ${Utils.escapeHtml(EducationLevels.getCategory(c))}</option>`).join('')}</select></div>
+      <div class="form-group"><label>Subject <span class="required">*</span></label><select id="asf-subject" class="select-field"><option value="">Select subject</option>${scopedSubjects.map(s => `<option value="${s.id}">${Utils.escapeHtml(s.name)} (${Utils.escapeHtml(s.code || '')})</option>`).join('')}</select></div></div>
+      <div class="form-group"><label>Teacher <span class="required">*</span></label><select id="asf-teacher" class="select-field"><option value="">Select teacher</option>${scopedTeachers.map(t => `<option value="${t.id}">${Utils.escapeHtml(t.full_name)} — ${Utils.escapeHtml(t.teacher_code || '')}</option>`).join('')}</select></div>
+    </div>
+    <div class="asf-section">
+      <div class="asf-section-title"><i data-lucide="calendar" style="width:14px;height:14px"></i> 3 — Period & Scoring</div>
+      <div class="form-row"><div class="form-group"><label>Academic Year <span class="required">*</span></label><select id="asf-year" class="select-field"><option value="">Select year</option>${years.map(y => `<option value="${y.id}" ${y.id === selYear ? 'selected' : ''}>${Utils.escapeHtml(y.name)}</option>`).join('')}</select></div>
+      <div class="form-group"><label>Term <span class="required">*</span></label><select id="asf-term" class="select-field"><option value="">Select term</option>${yearTerms.map(t => `<option value="${t.id}" ${t.id === selTerm ? 'selected' : ''}>${Utils.escapeHtml(t.name)}</option>`).join('')}</select></div></div>
+      <div class="form-row">
+        <div class="form-group"><label>Maximum Mark <span class="required">*</span></label><input id="asf-max" type="number" class="input-field" value="${activeTypes[0]?.default_maximum_mark ?? 30}" min="1" max="100"></div>
+        <div class="form-group"><label>Weight <span class="text-muted">(optional, blank = type default)</span></label><input id="asf-weight" type="number" min="0" step="any" class="input-field" placeholder="e.g., 0.3"></div>
+      </div>
+      <div class="form-group"><label>Date <span class="required">*</span></label><input id="asf-date" type="date" class="input-field" value="${new Date().toISOString().split('T')[0]}"></div>
+    </div>
+    <div class="asf-section" style="margin-bottom:0">
+      <div class="asf-section-title"><i data-lucide="align-left" style="width:14px;height:14px"></i> 4 — Description (optional)</div>
+      <div class="form-group"><textarea id="asf-desc" class="textarea-field" rows="3" placeholder="Optional notes about this assessment"></textarea></div>
+    </div>`,
     `<button class="btn btn-secondary" onclick="Modal.close()">Cancel</button>
-     <button class="btn btn-primary" onclick="assessSave(this)"><i data-lucide="save"></i> Create</button>`);
+     <button class="btn btn-primary" onclick="assessSave(this)"><i data-lucide="save"></i> Create Assessment</button>`, true);
+  if (typeof lucide !== 'undefined') lucide.createIcons();
+  // keep Term list in sync when Year changes
+  document.getElementById('asf-year')?.addEventListener('change', (e) => {
+    const yId = e.target.value;
+    const termSel = document.getElementById('asf-term');
+    if (!termSel) return;
+    const filtered = yId ? terms.filter(t => t.academic_year_id === yId) : terms;
+    termSel.innerHTML = '<option value="">Select term</option>' + filtered.map(t => `<option value="${t.id}">${Utils.escapeHtml(t.name)}</option>`).join('');
+  });
 }
 
 function assessTypeChanged() {
@@ -187,18 +234,38 @@ async function assessSave(btn) {
     name: document.getElementById('asf-name').value.trim(),
     assessment_type_id: document.getElementById('asf-type').value || null,
     unit: document.getElementById('asf-unit').value.trim() || null,
-    class_id: document.getElementById('asf-class').value,
-    subject_id: document.getElementById('asf-subject').value,
-    teacher_id: document.getElementById('asf-teacher').value,
-    academic_year_id: document.getElementById('asf-year').value,
-    term_id: document.getElementById('asf-term').value,
+    class_id: document.getElementById('asf-class').value || null,
+    subject_id: document.getElementById('asf-subject').value || null,
+    teacher_id: document.getElementById('asf-teacher').value || null,
+    academic_year_id: document.getElementById('asf-year').value || null,
+    term_id: document.getElementById('asf-term').value || null,
     maximum_mark: parseInt(document.getElementById('asf-max').value) || 30,
     weight: document.getElementById('asf-weight').value.trim() === '' ? null : parseFloat(document.getElementById('asf-weight').value),
-    assessment_date: document.getElementById('asf-date').value,
+    assessment_date: document.getElementById('asf-date').value || null,
     description: document.getElementById('asf-desc').value.trim() || null,
     status: 'draft'
   };
-  if (!d.name || !d.class_id || !d.subject_id || !d.teacher_id) return Utils.toast('Fill all required fields', 'error');
+  if (!d.name) { if (btn) { btn.disabled=false; btn.innerHTML='<i data-lucide="save"></i> Create Assessment'; } return Utils.toast('Enter assessment name', 'error'); }
+  if (!d.class_id || !d.subject_id || !d.teacher_id) { if (btn) { btn.disabled=false; btn.innerHTML='<i data-lucide="save"></i> Create Assessment'; } return Utils.toast('Select class, subject and teacher', 'error'); }
+  if (!d.academic_year_id || !d.term_id) { if (btn) { btn.disabled=false; btn.innerHTML='<i data-lucide="save"></i> Create Assessment'; } return Utils.toast('Select academic year and term', 'error'); }
+  if (!d.assessment_date) { if (btn) { btn.disabled=false; btn.innerHTML='<i data-lucide="save"></i> Create Assessment'; } return Utils.toast('Select assessment date', 'error'); }
+  if (!d.maximum_mark || d.maximum_mark < 1) { if (btn) { btn.disabled=false; btn.innerHTML='<i data-lucide="save"></i> Create Assessment'; } return Utils.toast('Enter a valid maximum mark', 'error'); }
+  // scope validation — prevent cross-level (Primary subject → Secondary class)
+  try {
+    const cls = classes.find(c => String(c.id) === String(d.class_id));
+    const subj = subjects.find(s => String(s.id) === String(d.subject_id));
+    if (scoped && cls && subj) {
+      if (!Scope.matchesClass(cls) || !Scope.matchesSubject(subj)) {
+        if (btn) { btn.disabled=false; btn.innerHTML='<i data-lucide="save"></i> Create Assessment'; if(typeof lucide!=='undefined') lucide.createIcons(); }
+        return Utils.toast('This class/subject combination is outside your education-level scope. Primary subjects cannot be assigned to Secondary classes, and vice versa.', 'error');
+      }
+    }
+  } catch (e) { /* ignore */ }
+  // student check — tell DOS if class has no active learners
+  try {
+    const { count: _classLearnerCount } = await sbClient.from('learners').select('id', { count: 'exact', head: true }).eq('class_id', d.class_id).eq('status', 'active');
+    if (!_classLearnerCount) { if (btn) { btn.disabled=false; btn.innerHTML='<i data-lucide="save"></i> Create Assessment'; if (typeof lucide!=='undefined') lucide.createIcons(); } return Utils.toast('There is no student in this class — register learners first before creating an assessment.', 'error'); }
+  } catch (e) { /* ignore count error, allow creation */ }
   try {
     await DB.insert('assessments', d);
     Modal.close(); Utils.toast('Assessment created', 'success'); renderAssessments();

@@ -20,19 +20,22 @@ const importFlow = {
 async function renderLearners() {
   setHeader('Learner Management', 'Register and manage learners individually or through bulk import');
   setContent(Utils.loading());
-  const [data, classes] = await Promise.all([
+  const [data, allClasses] = await Promise.all([
     DB.query('learners', '*', {}, { column: 'full_name', asc: true }),
     DB.get('classes')
   ]);
-  const filtered = data.filter(l => {
+  const classes = (typeof Scope !== 'undefined' && Scope.isScoped()) ? Scope.filterClasses(allClasses) : allClasses;
+  const classIds = new Set(classes.map(c => String(c.id)));
+  const visibleData = data.filter(l => classIds.has(String(l.class_id)));
+  const filtered = visibleData.filter(l => {
     const matchS = !learnersSearch || (l.full_name + ' ' + l.learner_code).toLowerCase().includes(learnersSearch.toLowerCase());
     const matchC = learnersClass === 'all' || l.class_id === learnersClass;
     const matchG = learnersGender === 'all' || l.gender === learnersGender;
     const matchSt = learnersStatus === 'all' || l.status === learnersStatus;
     return matchS && matchC && matchG && matchSt;
   });
-  const totalActive = data.filter(l => l.status === 'active').length;
-  const totalInactive = data.filter(l => l.status === 'inactive').length;
+  const totalActive = visibleData.filter(l => l.status === 'active').length;
+  const totalInactive = visibleData.filter(l => l.status === 'inactive').length;
 
   const rows = filtered.map(l => {
     const cls = classes.find(c => c.id === l.class_id);
@@ -54,7 +57,7 @@ async function renderLearners() {
     <div class="grid-3 mb-6">
       <div class="stat-card">
         <div class="stat-icon" style="background:var(--blue-50);color:var(--blue-600)"><i data-lucide="users"></i></div>
-        <div class="stat-value">${data.length}</div>
+        <div class="stat-value">${visibleData.length}</div>
         <div class="stat-label">Total Learners</div>
       </div>
       <div class="stat-card">
@@ -122,13 +125,14 @@ async function renderLearners() {
 }
 
 async function learnerForm() {
-  const [classes, years] = await Promise.all([DB.get('classes'), DB.get('academic_years')]);
+  const [allClasses, years] = await Promise.all([DB.get('classes'), DB.get('academic_years')]);
+  const classes = (typeof Scope !== 'undefined' && Scope.isScoped()) ? Scope.filterClasses(allClasses) : allClasses;
   const activeYear = (typeof getActiveYearId === 'function' ? years.find(y => y.id === getActiveYearId(years)) : null) || years.find(y => y.status === 'active') || null;
   Modal.show('Add Learner', `
     <div class="form-group">
-      <label>Student Number (11 Digits) <span class="required">*</span></label>
-      <input id="lf-code" class="input-field" placeholder="e.g., 54102325012" maxlength="11">
-      <p class="form-hint">Must be exactly 11 digits and unique in the system.</p>
+      <label>Student Number (11 or 12 Digits) <span class="required">*</span></label>
+      <input id="lf-code" class="input-field" placeholder="e.g., 54102325012 or 541023250123" maxlength="12">
+      <p class="form-hint">Must be 11 or 12 digits and unique in the system.</p>
     </div>
     <div class="form-group">
       <label>Full Name <span class="required">*</span></label>
@@ -172,7 +176,11 @@ async function learnerSave() {
   if (!name) return Utils.toast('Full name is required', 'error');
   if (!gender) return Utils.toast('Gender is required', 'error');
   if (!classId) return Utils.toast('Class is required', 'error');
-  if (!/^\d{11}$/.test(code)) return Utils.toast('Student number must be exactly 11 digits', 'error');
+  if (!/^\d{11,12}$/.test(code)) return Utils.toast('Student number must be 11 or 12 digits', 'error');
+  if (typeof Scope !== 'undefined' && Scope.isScoped()) {
+    const selectedClass = (await DB.get('classes', { id: classId }))[0];
+    if (!selectedClass || !Scope.matchesClass(selectedClass)) return Utils.toast('Selected class is outside your DOS scope', 'error');
+  }
 
   try {
     const existing = await DB.query('learners', 'id', { learner_code: code });
@@ -247,7 +255,8 @@ async function learnerView(l) {
 }
 
 async function learnerEdit(l) {
-  const [classes, years] = await Promise.all([DB.get('classes'), DB.get('academic_years')]);
+  const [allClasses, years] = await Promise.all([DB.get('classes'), DB.get('academic_years')]);
+  const classes = (typeof Scope !== 'undefined' && Scope.isScoped()) ? Scope.filterClasses(allClasses) : allClasses;
   Modal.show('Edit Learner', `
     <div class="form-group">
       <label>Student Number <span class="required">*</span></label>
@@ -296,7 +305,11 @@ async function learnerUpdate(id) {
   const yearId = document.getElementById('le-year')?.value || null;
   const status = document.getElementById('le-status')?.value;
   if (!code || !name || !classId) return Utils.toast('Fill all required fields', 'error');
-  if (!/^\d{11}$/.test(code)) return Utils.toast('Student number must be exactly 11 digits', 'error');
+  if (!/^\d{11,12}$/.test(code)) return Utils.toast('Student number must be 11 or 12 digits', 'error');
+  if (typeof Scope !== 'undefined' && Scope.isScoped()) {
+    const selectedClass = (await DB.get('classes', { id: classId }))[0];
+    if (!selectedClass || !Scope.matchesClass(selectedClass)) return Utils.toast('Selected class is outside your DOS scope', 'error');
+  }
   try {
     await DB.update('learners', id, {
       learner_code: code,
@@ -762,7 +775,8 @@ async function validateImportRows() {
     return;
   }
 
-  importFlow.classes = await DB.get('classes');
+  const allImportClasses = await DB.get('classes');
+  importFlow.classes = (typeof Scope !== 'undefined' && Scope.isScoped()) ? Scope.filterClasses(allImportClasses) : allImportClasses;
   const normalizeClassKey = str => String(str || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
   const classMap = {};
   importFlow.classes.forEach(c => {

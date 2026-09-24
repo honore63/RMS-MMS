@@ -21,6 +21,7 @@ const ImportSystem = (() => {
   const yearKey = v => String(v == null ? '' : v).replace(/\D/g, '');
   const lower = v => String(v == null ? '' : v).toLowerCase();
   const isCode11 = v => /^\d{11}$/.test(String(v == null ? '' : v).trim());
+  const isStudentCode = v => /^\d{11,12}$/.test(String(v == null ? '' : v).trim());
 
   function parseDateStr(v) {
     const s = String(v == null ? '' : v).trim();
@@ -394,13 +395,13 @@ const ImportSystem = (() => {
       { key: 'academic_year', label: 'Academic Year', req: false, type: 'year', aliases: ['academicyear', 'year', 'acyear', 'schoolyear'] }
     ],
     exampleRows: [
-      ['54102325012', 'GIFT WILSON', 'AGIRANEZA', '', 'MALE', '2015-04-12', 'P4', 'A', '2026-2027'],
-      ['54102325013', 'ANITHA', 'AMIZERO', '', 'FEMALE', '2015-09-03', 'P4', 'A', '2026-2027']
+      ['541023250123', 'GIFT WILSON', 'AGIRANEZA', '', 'MALE', '2015-04-12', 'P4', 'A', '2026-2027'],
+      ['541023250124', 'ANITHA', 'AMIZERO', '', 'FEMALE', '2015-09-03', 'P4', 'A', '2026-2027']
     ],
     instructions: [
       'Fill one row per student. Keep the exact column names.',
-      'Student Code MUST contain exactly 11 digits and must be formatted as TEXT.',
-      'Formatting the code as text is critical: it stops Excel from turning 54102325012 into 5.41023E+10.',
+      'Student Code may be 11 or 12 digits and must be formatted as TEXT.',
+      'Formatting the code as text is critical: it stops Excel from turning long numeric codes into scientific notation.',
       'Codes such as 12345, 5410232501 or ABC54102325012 are rejected.',
       'Use either "Student Name" alone OR "First Name" + "Last Name".',
       'Gender: MALE or FEMALE (M / F also accepted).',
@@ -425,9 +426,9 @@ const ImportSystem = (() => {
       const v = rec.values;
       const code = v.student_code.trim();
       if (!code) {
-        rec.errors.push({ field: 'student_code', message: 'Missing Student Code.', fix: 'Add the 11-digit student code.' });
-      } else if (!isCode11(code)) {
-        rec.errors.push({ field: 'student_code', message: 'Student Code must contain exactly 11 digits.', fix: 'Check the code. 12345, 5410232501 and ABC54102325012 are invalid.' });
+        rec.errors.push({ field: 'student_code', message: 'Missing Student Code.', fix: 'Add the student code.' });
+      } else if (!isStudentCode(code)) {
+        rec.errors.push({ field: 'student_code', message: 'Student Code must contain 11 or 12 digits.', fix: 'Check the code. 12345, 5410232501 or ABC54102325012 are invalid.' });
       }
       const combined = (v.first_name + ' ' + v.last_name).trim();
       const fullName = combined || v.student_name.trim();
@@ -922,13 +923,13 @@ const ImportSystem = (() => {
       { key: 'status', label: 'Status', req: false, type: 'status', aliases: ['status'] }
     ],
     exampleRows: [
-      ['Term 1 Mathematics Test', '2026-05-12', '54102325012', 24, 'draft'],
-      ['Term 1 Mathematics Test', '2026-05-12', '54102325013', 18.5, 'draft']
+      ['Term 1 Mathematics Test', '2026-05-12', '541023250123', 24, 'draft'],
+      ['Term 1 Mathematics Test', '2026-05-12', '541023250124', 18.5, 'draft']
     ],
     instructions: [
       'Assessment Name, Student Code and Mark are required. One row per student mark.',
       'Assessment Date is optional, but ADD it whenever more than one assessment shares the same name.',
-      'Student Code must be exactly 11 digits and belong to an RMS student.',
+      'Student Code must be 11 or 12 digits and belong to an RMS student.',
       'Mark: a number from 0 up to the assessment maximum (decimals allowed).',
       'A student is treated as an existing mark when that assessment + student already has a mark.',
       'Rows with errors are NEVER imported. Use Download Error Report to fix and re-upload.'
@@ -973,8 +974,8 @@ const ImportSystem = (() => {
       }
       const code = v.student_code.trim();
       let learner = null;
-      if (!code) rec.errors.push({ field: 'student_code', message: 'Missing Student Code.', fix: 'Add the 11-digit student code.' });
-      else if (!isCode11(code)) rec.errors.push({ field: 'student_code', message: 'Student Code must contain exactly 11 digits.', fix: 'Check the code.' });
+      if (!code) rec.errors.push({ field: 'student_code', message: 'Missing Student Code.', fix: 'Add the student code.' });
+      else if (!isStudentCode(code)) rec.errors.push({ field: 'student_code', message: 'Student Code must contain 11 or 12 digits.', fix: 'Check the code.' });
       else {
         learner = ctx.learnersByCode[lower(code)];
         if (!learner) rec.errors.push({ field: 'student_code', message: 'No student matches code ' + code + '.', fix: 'Import the student first, or fix the code.' });

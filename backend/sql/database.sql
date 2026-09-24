@@ -36,7 +36,8 @@ CREATE TABLE IF NOT EXISTS classes (
   id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
   name TEXT NOT NULL,
   level TEXT NOT NULL,
-  stream TEXT
+  stream TEXT,
+  class_teacher_id UUID REFERENCES teachers(id) ON DELETE SET NULL
 );
 
 CREATE TABLE IF NOT EXISTS subjects (

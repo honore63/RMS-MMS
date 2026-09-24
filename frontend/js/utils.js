@@ -256,7 +256,7 @@ const Scope = {
   matchesSubject(subj) {
     if (!this.isScoped()) return true;
     const s = String((subj && subj.level) || 'Both').trim().toUpperCase();
-    if (s === 'BOTH' || s === '') return true;
+    if (s === 'BOTH' || s === '' || s === 'NULL') return true;
     if (this.isPrimary()) return s === 'PRIMARY';
     if (this.isSecondary()) return ['SECONDARY', 'LOWER SECONDARY', 'UPPER SECONDARY'].includes(s);
     return true;

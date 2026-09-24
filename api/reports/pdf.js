@@ -3,6 +3,12 @@ const puppeteer = require('puppeteer');
 // Simple Vercel-style serverless handler that converts HTML -> PDF
 module.exports = async (req, res) => {
   try {
+    if (req.method === 'OPTIONS') {
+      res.setHeader('Access-Control-Allow-Origin', '*');
+      res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
+      res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+      return res.status(204).end();
+    }
     if (req.method !== 'POST') return res.status(405).send('Method Not Allowed');
     const body = req.body || {};
     const html = body.html;

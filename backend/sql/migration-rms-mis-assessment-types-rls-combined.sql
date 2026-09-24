@@ -94,6 +94,10 @@ ALTER TABLE public.assessments
 -- unit is now optional; only unit-based types need it.
 ALTER TABLE public.assessments ALTER COLUMN unit DROP NOT NULL;
 
+-- Backfill subject level for existing rows that were NULL (they predate the level column)
+UPDATE public.subjects SET level = 'Both' WHERE level IS NULL;
+UPDATE public.subjects SET education_level = level WHERE education_level IS NULL;
+
 CREATE INDEX IF NOT EXISTS idx_assessments_assessment_type_id
   ON public.assessments (assessment_type_id);
 

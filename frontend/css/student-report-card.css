@@ -90,13 +90,14 @@
 /* ---------- Student info panel ---------- */
 .src-info {
   display: flex;
+  flex-direction: row;
   border: 1.5px solid #1976d2;
   border-radius: 6px;
   background: #f0f7ff;
   margin-bottom: 8px;
   overflow: hidden;
 }
-.src-info-col { flex: 1; padding: 6px 10px; }
+.src-info-col { flex: 1; width: 50%; box-sizing: border-box; padding: 6px 10px; }
 .src-info-col + .src-info-col { border-left: 1.5px solid #1976d2; }
 .src-info-row { display: flex; gap: 6px; padding: 1.5px 0; font-size: 10.5px; }
 .src-info-lbl { font-weight: 700; color: #0d47a1; min-width: 108px; }
@@ -106,10 +107,14 @@
 /* ---------- Marks table ---------- */
 .src-table {
   width: 100%;
+  max-width: 100%;
   border-collapse: collapse;
+  table-layout: fixed;
   font-size: 10px;
   margin-bottom: 8px;
 }
+.src-table th:first-child,
+.src-table td:first-child { width: 30%; }
 .src-table th, .src-table td {
   border: 1px solid #64b5f6;
   padding: 4px 5px;
@@ -242,6 +247,23 @@
 /* ---------- Print ---------- */
 @media print {
   .src-sheet { font-size: 10px; }
+  .src-header {
+    flex-direction: row !important;
+    align-items: flex-start !important;
+    justify-content: space-between !important;
+    gap: 10px !important;
+  }
+  .src-head-left, .src-head-right {
+    width: 22% !important;
+    flex-direction: column !important;
+    align-items: center !important;
+    text-align: center !important;
+    gap: 2px !important;
+  }
+  .src-head-center {
+    flex: 1 !important;
+    text-align: center !important;
+  }
   .src-logo { height: 68px; }
   .src-table thead th {
     background: #111 !important;
@@ -285,3 +307,136 @@
   .src-signatures { flex-direction: column; }
   .src-comment { padding: 8px; }
 }
+
+@media print {
+  .src-info { flex-direction: row !important; }
+  .src-info-col {
+    width: 50% !important;
+    padding: 6px 10px !important;
+  }
+  .src-info-col + .src-info-col {
+    border-left: 1.5px solid #1976d2 !important;
+    border-top: none !important;
+  }
+  .src-panels {
+    flex-direction: row !important;
+    gap: 8px !important;
+  }
+  .src-summary {
+    flex: 0 0 30% !important;
+    width: auto !important;
+  }
+  .src-performance {
+    flex: 1 !important;
+    width: auto !important;
+  }
+  .src-charts {
+    flex-direction: row !important;
+    gap: 8px !important;
+  }
+  .src-chart-box {
+    flex: 1 !important;
+    width: auto !important;
+  }
+  .src-comments,
+  .src-signatures {
+    flex-direction: row !important;
+  }
+  .src-comment,
+  .src-sig {
+    width: 33.333% !important;
+  }
+}
+
+/* Student report monochrome theme */
+.src-sheet .src-logo-caption,
+.src-sheet .src-school-line,
+.src-sheet .src-school-meta,
+.src-sheet .src-info-lbl,
+.src-sheet .src-info-sep,
+.src-sheet .src-kv b,
+.src-sheet .src-chart-title,
+.src-sheet .src-comment h5,
+.src-sheet .src-sig h5,
+.src-sheet .src-footer-motto,
+.src-sheet .src-badge {
+  color: #111 !important;
+}
+.src-sheet .src-head-rule,
+.src-sheet .src-info,
+.src-sheet .src-info-col + .src-info-col,
+.src-sheet .src-title-sub,
+.src-sheet .src-table th,
+.src-sheet .src-table td,
+.src-sheet .src-panel,
+.src-sheet .src-chart-box,
+.src-sheet .src-comments,
+.src-sheet .src-comment + .src-comment,
+.src-sheet .src-signatures,
+.src-sheet .src-sig + .src-sig,
+.src-sheet .src-sig .sig-line,
+.src-sheet .src-badge {
+  border-color: #111 !important;
+}
+.src-sheet .src-title-main,
+.src-sheet .src-table thead th,
+.src-sheet .src-panel-title,
+.src-sheet .src-badge.solid {
+  background: #111 !important;
+  color: #fff !important;
+}
+.src-sheet .src-title-sub,
+.src-sheet .src-info,
+.src-sheet .src-table tfoot td,
+.src-sheet .src-comments {
+  background: #f1f1f1 !important;
+}
+.src-sheet .src-wave { background: #111 !important; }
+
+/* Dense cards stay on one A4 page when many subjects/components are present. */
+.src-sheet-compact { font-size: 9.5px; }
+.src-sheet-compact .src-logo { height: 62px; }
+.src-sheet-compact .src-school-line.small { font-size: 8.5px; }
+.src-sheet-compact .src-school-line.mid { font-size: 10px; }
+.src-sheet-compact .src-school-line.big { font-size: 14px; }
+.src-sheet-compact .src-info-row { font-size: 9px; padding: 1px 0; }
+.src-sheet-compact .src-info-lbl { min-width: 92px; }
+.src-sheet-compact .src-table { font-size: 8.5px; margin-bottom: 5px; }
+.src-sheet-compact .src-table th,
+.src-sheet-compact .src-table td { padding: 2px 3px; }
+.src-sheet-compact .src-panel-title,
+.src-sheet-compact .src-comment h5,
+.src-sheet-compact .src-sig h5 { font-size: 9px; }
+.src-sheet-compact .src-panel-body,
+.src-sheet-compact .src-comment,
+.src-sheet-compact .src-sig { padding: 4px 6px; }
+.src-sheet-compact .src-kv { font-size: 8.5px; padding: 2px 0; }
+.src-sheet-compact .src-chart-box { padding: 2px; }
+.src-sheet-compact .src-footer { font-size: 7.5px; }
+
+.src-sheet-ultra { font-size: 8.5px; }
+.src-sheet-ultra .src-logo { height: 52px; }
+.src-sheet-ultra .src-school-line.small { font-size: 7px; }
+.src-sheet-ultra .src-school-line.mid { font-size: 8px; }
+.src-sheet-ultra .src-school-line.big { font-size: 12px; }
+.src-sheet-ultra .src-head-rule { margin: 2px 0 4px; }
+.src-sheet-ultra .src-title-main { font-size: 12px; padding: 3px 5px; }
+.src-sheet-ultra .src-title-sub { font-size: 9px; padding: 2px 5px; margin-bottom: 4px; }
+.src-sheet-ultra .src-info { margin-bottom: 4px; }
+.src-sheet-ultra .src-info-col { padding: 3px 6px; }
+.src-sheet-ultra .src-info-row { font-size: 7.5px; padding: 0; }
+.src-sheet-ultra .src-info-lbl { min-width: 76px; }
+.src-sheet-ultra .src-table { font-size: 7px; margin-bottom: 4px; }
+.src-sheet-ultra .src-table th,
+.src-sheet-ultra .src-table td { padding: 1px 2px; }
+.src-sheet-ultra .src-panels { gap: 4px; margin-bottom: 4px; }
+.src-sheet-ultra .src-panel-title { font-size: 8px; padding: 2px 4px; }
+.src-sheet-ultra .src-panel-body,
+.src-sheet-ultra .src-comment,
+.src-sheet-ultra .src-sig { padding: 3px 4px; }
+.src-sheet-ultra .src-kv { font-size: 7px; padding: 1px 0; }
+.src-sheet-ultra .src-chart-title,
+.src-sheet-ultra .src-comment h5,
+.src-sheet-ultra .src-sig h5 { font-size: 7.5px; }
+.src-sheet-ultra .src-comments { margin-bottom: 4px; }
+.src-sheet-ultra .src-footer { font-size: 6.5px; }

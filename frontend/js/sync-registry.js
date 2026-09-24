@@ -29,7 +29,6 @@
   Realtime.route('admin/reports/school', ['assessments', 'assessment_types', 'marks', 'learners', 'classes', 'subjects', 'academic_years', 'terms', 'school_settings', 'grading_scales']);
 Realtime.route('admin/analytics', ['assessments', 'marks', 'learners', 'classes', 'subjects', 'grading_scales']);
    Realtime.route('admin/audit-logs', ['audit_logs']);
-  Realtime.route('admin/documents', ['documents']);
   Realtime.route('admin/settings', ['school_settings', 'grading_scales']);
 
   Realtime.route('teacher/dashboard', ['teacher_assignments', 'assessments', 'marks', 'classes', 'notifications']);
@@ -37,9 +36,6 @@ Realtime.route('admin/analytics', ['assessments', 'marks', 'learners', 'classes'
   Realtime.route('teacher/my-subjects', ['subjects', 'teacher_assignments']);
   Realtime.route('teacher/submitted-marks', ['assessments', 'marks']);
   Realtime.route('teacher/reports', ['assessments', 'assessment_types', 'marks', 'learners', 'classes', 'subjects', 'academic_years', 'terms', 'school_settings', 'grading_scales']);
-  Realtime.route('teacher/reports/cards', ['assessments', 'assessment_types', 'marks', 'learners', 'classes', 'subjects', 'academic_years', 'terms', 'school_settings', 'grading_scales']);
-  Realtime.route('teacher/reports/class', ['assessments', 'assessment_types', 'marks', 'learners', 'classes', 'subjects', 'academic_years', 'terms', 'school_settings', 'grading_scales']);
-  Realtime.route('teacher/reports/subject', ['assessments', 'assessment_types', 'marks', 'learners', 'classes', 'subjects', 'academic_years', 'terms', 'school_settings', 'grading_scales']);
 
   /* Marks entry: refresh the list live, but NEVER rebuild the page
      while the teacher is actively entering marks (guarded below). */
@@ -107,20 +103,6 @@ Realtime.route('teacher/analytics', ['assessments', 'assessment_types', 'marks',
       ReportUtils._cache.forEach((value, key) => {
         if (String(key).startsWith('classSubjects:')) ReportUtils.invalidate(key);
       });
-    }
-  });
-
-  /* While inside the marks entry screen, if the open assessment's
-     status changes from another user/device (submitted -> approved,
-     rejected, locked), re-fetch and re-render so the grid locks or
-     shows the rejection reason immediately. */
-  Realtime.on('assessments', payload => {
-    if (typeof marksView === 'undefined' || marksView !== 'entry') return;
-    if (typeof markAssessment === 'undefined' || !markAssessment) return;
-    const changed = payload.new || payload.old;
-    if (!changed || changed.id !== markAssessment.id) return;
-    if (changed.status !== markAssessment.status) {
-      renderEnterMarks();
     }
   });
 
