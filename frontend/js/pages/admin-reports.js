@@ -200,8 +200,17 @@ const ReportCenter = {
 
     const hubHtml = `
       <div class="rw-head rms-hub-head">
-        <div class="rw-head-icon"><i data-lucide="layout-grid" style="width:28px;height:28px"></i></div>
-        <div><div class="rw-head-title">Report Center</div><div class="rw-head-sub">Academic Reporting · ${defs.length} report types · every report supports Generate, Preview, Print, PDF, Excel</div></div>
+        <div class="rw-head-icon"><i data-lucide="layout-grid" style="width:26px;height:26px"></i></div>
+        <div class="rms-hub-head-main">
+          <div class="rw-head-title">Report Center</div>
+          <div class="rw-head-sub">Professional Academic Reporting — categories, dynamic filters, print-ready A4</div>
+          <div class="rms-hub-stats">
+            <span class="rms-hub-stat"><b>${defs.length}</b> report types</span>
+            <span class="rms-hub-stat"><b>${Object.keys(grouped).length}</b> categories</span>
+            <span class="rms-hub-stat"><b>A4</b> print-ready</span>
+            <span class="rms-hub-stat"><b>PDF · Excel</b> export</span>
+          </div>
+        </div>
         <span class="rw-scope-badge"><i data-lucide="shield-check" style="width:12px;height:12px"></i> ${Utils.escapeHtml(scopeBadge)}${scopeSub?' · '+Utils.escapeHtml(scopeSub):''}</span>
       </div>
       ${sections}

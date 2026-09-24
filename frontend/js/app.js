@@ -313,6 +313,7 @@ async function ensureHeaderYears(force = false) {
 
 function invalidateHeaderYears() {
   _headerYears = null;
+  if (typeof DB !== 'undefined' && DB.invalidate) DB.invalidate('academic_years');
 }
 
 // returns the ID of the year the user currently has selected for the app.
@@ -360,6 +361,12 @@ async function showApp() {
   Router.init();
   if (typeof Realtime !== 'undefined') Realtime.init();
   if (typeof refreshNotificationBadge === 'function') refreshNotificationBadge();
+  /* Cache-first: prewarm common reference data in the background so the
+     first dashboard → classes → subjects → teachers navigation is a HIT. */
+  if (typeof DB !== 'undefined' && DB.warm) {
+    DB.warm(['school_settings', 'grading_scales', 'academic_years', 'terms',
+      'subjects', 'classes', 'teachers', 'assessment_types']);
+  }
   ensureHeaderYears().then(list => {
     const sel = document.getElementById('global-year-select');
     if (!sel) return;
@@ -424,6 +431,7 @@ const App = {
   },
   logout: async () => {
     await Auth.signOut();
+    if (typeof DB !== 'undefined' && DB.clearUserCache) DB.clearUserCache();
     if (typeof Realtime !== 'undefined') Realtime.stop();
     window.location.hash = '';
     document.getElementById('app-layout').style.display = 'none';

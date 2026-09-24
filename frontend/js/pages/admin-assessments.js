@@ -359,6 +359,7 @@ async function deleteAssessmentWithMarks(id) {
     if (!/foreign key constraint/i.test(e.message || '')) throw e;
     let { error } = await sbClient.from('marks').delete().eq('assessment_id', id);
     if (error) throw error;
+    DB.invalidate('marks');
     await DB.remove('assessments', id);
   }
 }
@@ -396,6 +397,7 @@ async function notifyDosOnTeacherSubmission(assessmentId, teacherName, assessmen
       read: false
     }));
     if (rows.length) await sbClient.from('notifications').insert(rows);
+    if (rows.length && typeof DB !== 'undefined') DB.invalidate('notifications');
   } catch (e) {
     console.error('DOS notify error:', e);
   }

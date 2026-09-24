@@ -312,6 +312,8 @@ async function saveTeacherProfile(teacherId) {
     // Also update users table so sidebar shows correct name
     if (Auth.currentUser?.id) {
       await sbClient.from('users').update({ full_name, phone }).eq('id', Auth.currentUser.id);
+      DB.invalidate('users');
+      DB.invalidate('teachers');
       if (Auth.currentUser) Auth.currentUser.full_name = full_name;
     }
     Utils.toast('Profile updated successfully', 'success');
@@ -377,6 +379,8 @@ async function changeTeacherEmail(teacherId, btn) {
     // Sync in teachers and users tables
     await sbClient.from('teachers').update({ email: newEmail }).eq('id', teacherId);
     await sbClient.from('users').update({ email: newEmail }).eq('id', Auth.currentUser.id);
+    DB.invalidate('teachers');
+    DB.invalidate('users');
 
     Utils.toast('Email update requested. Check your new inbox for a confirmation link.', 'success');
     document.getElementById('sec-new-email').value = '';
@@ -395,6 +399,7 @@ async function changeTeacherPhone(teacherId, btn) {
   try {
     await DB.update('teachers', teacherId, { phone });
     await sbClient.from('users').update({ phone }).eq('id', Auth.currentUser.id);
+    DB.invalidate('users');
     if (Auth.currentUser) Auth.currentUser.phone = phone;
     Utils.toast('Phone number updated', 'success');
     await renderTeacherAccount();

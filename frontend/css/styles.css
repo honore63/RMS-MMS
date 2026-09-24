@@ -638,6 +638,14 @@ td {
   font-weight: 700;
   color: #fff;
   flex-shrink: 0;
+  overflow: hidden;
+}
+.user-avatar img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  border-radius: 50%;
+  display: block;
 }
 .user-info { flex: 1; min-width: 0; }
 .user-info .name {
@@ -1267,60 +1275,52 @@ td {
   display: flex;
   gap: 6px;
 }
-.assign-line {
-  display: flex;
-  align-items: baseline;
-  gap: 8px;
-  padding: 2px 0;
-}
-.assign-class {
-  flex-shrink: 0;
-  min-width: 64px;
-  font-weight: 700;
-  color: var(--gray-900);
-}
-.assign-subjects {
-  color: var(--gray-600);
-  font-size: 12.5px;
-  word-wrap: break-word;
-}
 
 /* ---------- Assignment teacher cards ---------- */
 .assign-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
-  gap: 16px;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+}
+.assign-card {
+  min-width: 0;
+}
+@media (max-width: 900px) {
+  .assign-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+@media (max-width: 560px) {
+  .assign-grid { grid-template-columns: 1fr; }
 }
 .assign-card {
   background: var(--white, #fff);
   border: 1px solid var(--gray-200);
-  border-radius: 14px;
-  box-shadow: 0 1px 3px rgba(15, 23, 42, 0.06);
+  border-radius: 10px;
+  box-shadow: 0 1px 3px rgba(15, 23, 42, 0.05);
   display: flex;
   flex-direction: column;
   overflow: hidden;
   transition: box-shadow 0.15s ease, transform 0.15s ease;
 }
 .assign-card:hover {
-  box-shadow: 0 8px 22px rgba(15, 23, 42, 0.12);
-  transform: translateY(-2px);
+  box-shadow: 0 6px 16px rgba(15, 23, 42, 0.1);
+  transform: translateY(-1px);
 }
 .assign-card-header {
   display: flex;
   align-items: center;
-  gap: 12px;
-  padding: 16px 16px 12px;
+  gap: 10px;
+  padding: 10px 12px 8px;
   border-bottom: 1px solid var(--gray-100);
   background: linear-gradient(135deg, rgba(37, 99, 235, 0.06), rgba(255, 255, 255, 0));
 }
 .assign-avatar {
-  width: 44px;
-  height: 44px;
-  border-radius: 12px;
+  width: 34px;
+  height: 34px;
+  border-radius: 9px;
   background: linear-gradient(135deg, var(--blue-600, #2563eb), var(--blue-400, #60a5fa));
   color: #fff;
   font-weight: 800;
-  font-size: 15px;
+  font-size: 12px;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -1332,7 +1332,7 @@ td {
 }
 .assign-card-meta h3 {
   margin: 0;
-  font-size: 15px;
+  font-size: 13px;
   font-weight: 700;
   color: var(--gray-900);
   white-space: nowrap;
@@ -1340,26 +1340,26 @@ td {
   text-overflow: ellipsis;
 }
 .assign-code {
-  font-size: 11.5px;
+  font-size: 10.5px;
   font-weight: 600;
   color: var(--gray-500);
   margin-top: 1px;
 }
 .assign-status {
-  margin-top: 4px;
+  margin-top: 3px;
 }
 .assign-card-body {
-  padding: 12px 16px;
+  padding: 8px 12px;
   flex: 1;
 }
 .assign-summary {
   display: flex;
   align-items: center;
-  gap: 8px;
-  font-size: 12px;
+  gap: 6px;
+  font-size: 11px;
   font-weight: 700;
   color: var(--gray-600);
-  margin-bottom: 8px;
+  margin-bottom: 6px;
 }
 .assign-summary i {
   width: 8px;
@@ -1367,28 +1367,50 @@ td {
   color: var(--gray-300);
 }
 .assign-year {
-  font-size: 10.5px;
+  font-size: 9.5px;
   font-weight: 800;
   text-transform: uppercase;
   letter-spacing: 0.06em;
   color: var(--blue-700, #1d4ed8);
-  margin: 6px 0 2px;
+  margin: 5px 0 1px;
 }
 .assign-year:first-child {
   margin-top: 0;
 }
+.assign-line {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  padding: 1px 0;
+}
+.assign-class {
+  flex-shrink: 0;
+  min-width: 52px;
+  font-weight: 700;
+  font-size: 11.5px;
+  color: var(--gray-900);
+}
+.assign-subjects {
+  color: var(--gray-600);
+  font-size: 11px;
+  word-wrap: break-word;
+}
 .assign-card-actions {
   display: flex;
-  gap: 8px;
-  padding: 12px 16px;
+  gap: 6px;
+  padding: 8px 12px;
   border-top: 1px solid var(--gray-100);
   background: var(--gray-50, #f8fafc);
+}
+.assign-card-actions .btn {
+  padding: 3px 10px;
+  font-size: 11.5px;
 }
 .assign-card-empty .assign-card-body {
   display: flex;
   align-items: center;
   justify-content: center;
-  padding: 20px 16px;
+  padding: 14px 12px;
 }
 .assign-card-empty .assign-card-actions {
   justify-content: center;
@@ -3031,7 +3053,83 @@ body.report-orientation-portrait .report-paper-container {
 
 /* ========== REPORT CENTER HUB ========== */
 
-.rms-hub-head { margin-bottom: 18px; }
+.rms-hub-head {
+  margin-bottom: 18px;
+  position: relative;
+  overflow: hidden;
+  padding: 20px 22px;
+  align-items: flex-start;
+  background: linear-gradient(135deg, #16324d 0%, #1e3a8a 55%, #2563eb 100%);
+  box-shadow: 0 8px 24px rgba(30, 58, 138, 0.35);
+}
+.rms-hub-head::before {
+  content: "";
+  position: absolute;
+  right: -50px;
+  top: -70px;
+  width: 240px;
+  height: 240px;
+  border-radius: 50%;
+  background: radial-gradient(circle, rgba(255, 255, 255, 0.16), transparent 70%);
+  pointer-events: none;
+}
+.rms-hub-head::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 5px;
+  background: linear-gradient(180deg, #60a5fa, #22d3ee);
+}
+.rms-hub-head .rw-head-icon {
+  width: 50px;
+  height: 50px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.22), 0 4px 12px rgba(0, 0, 0, 0.18);
+}
+.rms-hub-head-main {
+  min-width: 0;
+  flex: 1;
+}
+.rms-hub-head .rw-head-title {
+  font-size: 20px;
+  letter-spacing: 0.01em;
+}
+.rms-hub-head .rw-head-sub {
+  font-size: 12.5px;
+  opacity: 0.9;
+}
+.rms-hub-stats {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 10px;
+}
+.rms-hub-stat {
+  font-size: 11px;
+  font-weight: 600;
+  color: #fff;
+  background: rgba(255, 255, 255, 0.13);
+  border: 1px solid rgba(255, 255, 255, 0.22);
+  padding: 4px 10px;
+  border-radius: 999px;
+  white-space: nowrap;
+}
+.rms-hub-stat b {
+  font-weight: 800;
+}
+.rms-hub-head .rw-scope-badge {
+  align-self: center;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
+}
+@media (max-width: 760px) {
+  .rms-hub-head { flex-wrap: wrap; }
+  .rms-hub-head .rw-scope-badge { margin-left: 0; align-self: flex-start; }
+}
 .rms-hub-section { margin-bottom: 24px; }
 .rms-hub-cat { display: flex; align-items: center; gap: 8px; font-weight: 800; font-size: 14px; color: var(--gray-800, #1f2937); margin-bottom: 10px; text-transform: uppercase; letter-spacing: .4px; }
 .rms-hub-cat span:last-child { margin-left: auto; }

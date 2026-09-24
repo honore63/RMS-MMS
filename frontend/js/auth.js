@@ -23,7 +23,9 @@ const Auth = {
     }
 
     if (data?.user) {
+      if (typeof DB !== 'undefined' && DB.clearUserCache) DB.clearUserCache();
       await this.fetchOrCreateProfile(data.user);
+      if (typeof DB !== 'undefined' && DB.setUserScope) DB.setUserScope(data.user.id);
     }
     return data?.user;
   },
@@ -33,6 +35,7 @@ const Auth = {
     this.currentUser = null;
     this.userProfile = null;
     this.teacherProfile = null;
+    if (typeof DB !== 'undefined' && DB.clearUserCache) DB.clearUserCache();
   },
 
   generateTeacherCode() {
@@ -53,6 +56,7 @@ const Auth = {
         status: 'active'
       }]);
       if (!error) return code;
+      if (typeof DB !== 'undefined') DB.invalidate('teachers');
       if (!/duplicate|unique/i.test(error?.message || '')) break;
     }
     return null;
@@ -83,6 +87,8 @@ const Auth = {
         if (selectError) {
           console.error('PROFILE CREATE ERROR:', selectError.message);
           data = null;
+        } else if (typeof DB !== 'undefined') {
+          DB.invalidate('users');
         }
       } catch (err) {
         console.error('PROFILE SYNC ERROR:', err.message);
@@ -99,6 +105,7 @@ const Auth = {
         await this.ensureTeacherRow(data, authUser);
         const { data: t2 } = await sbClient.from('teachers').select('*').eq('user_id', authUser.id).maybeSingle();
         this.teacherProfile = t2 || null;
+        if (t2 && typeof DB !== 'undefined') DB.invalidate('teachers');
       } else {
         this.teacherProfile = t || null;
       }
@@ -114,6 +121,7 @@ const Auth = {
   async init() {
     const { data: { session } } = await sbClient.auth.getSession();
     if (session?.user) {
+      if (typeof DB !== 'undefined' && DB.setUserScope) DB.setUserScope(session.user.id);
       await this.fetchOrCreateProfile(session.user);
       return true;
     }

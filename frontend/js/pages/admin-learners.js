@@ -497,6 +497,7 @@ async function learnerDeleteConfirm() {
       const { error } = await sbClient.from('learners').delete().in('id', ids.slice(i, i + batchSize));
       if (error) throw error;
     }
+    DB.invalidate('learners');
     await DB.insert('audit_logs', {
       user_id: Auth.currentUser?.id,
       user_name: Auth.currentUser?.full_name,
@@ -1030,6 +1031,7 @@ async function executeImport() {
       if (txt) txt.textContent = `Importing ${imported} / ${readyRows.length}...`;
       if (bar) bar.style.width = pct + '%';
     }
+    DB.invalidate('learners');
 
     await DB.insert('audit_logs', {
       user_id: Auth.currentUser?.id,

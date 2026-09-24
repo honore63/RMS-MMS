@@ -187,8 +187,9 @@ async function rcFetchLearnerData({ learnerId, classId, yearId, termIds, allSubj
   let allMarks = [];
   const assessIds = allAssessments.map(a=>a.id);
   for (let i=0; i<assessIds.length; i+=50) {
-    const { data } = await sbClient.from('marks').select('*').in('assessment_id', assessIds.slice(i,i+50));
-    if (data) allMarks.push(...data);
+    /* Critical final report — force fresh marks read (still deduped). */
+    const rows = await DB.getFresh('marks', { assessment_id: assessIds.slice(i,i+50) });
+    if (rows && rows.length) allMarks.push(...rows);
   }
 
   // Pre-calculate positions

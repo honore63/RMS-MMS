@@ -94,7 +94,7 @@ async function renderTeachers() {
   let subjects;
   try {
     [teachers, assignments, classes, subjects] = await Promise.all([
-      DB.query('teachers', '*', {}, { column: 'full_name' }, null, { cache: false }),
+      DB.query('teachers', '*', {}, { column: 'full_name' }),
       DB.query('teacher_assignments', '*'),
       DB.get('classes'),
       DB.get('subjects')
@@ -162,8 +162,9 @@ async function renderTeachers() {
       .teacher-search-wrap { position: relative; display: flex; align-items: center; min-width: 220px; flex: 1 1 280px; max-width: 420px; }
       .teacher-search-wrap .search-icon { position: absolute; left: 12px; color: var(--gray-500); }
       .teacher-search-wrap input { padding-left: 38px; border-radius:10px; }
-      .teacher-filters { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; }
-      .teacher-filters .select-field { border-radius:10px; }
+      .teacher-filters { display: grid; grid-template-columns: repeat(4, minmax(150px, 1fr)) auto; gap: 10px; align-items: center; flex: 1 1 100%; }
+      .teacher-filters .select-field { border-radius:10px; width: 100%; min-width: 0; }
+      .teacher-filters .btn { white-space: nowrap; }
       .teacher-card-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(310px, 1fr)); gap: 20px; align-items: stretch; }
       .teacher-card { background: #fff; border: 1px solid #e5e7eb; border-radius: 16px; box-shadow: 0 4px 16px rgba(15,23,42,.06), 0 1px 3px rgba(15,23,42,.04); padding: 0; display: flex; flex-direction: column; gap: 0; min-width: 0; height: 100%; overflow: hidden; transition: transform .18s ease, box-shadow .18s ease, border-color .18s ease; }
       .teacher-card:hover { transform: translateY(-3px); box-shadow: 0 10px 28px rgba(15,23,42,.10), 0 2px 8px rgba(15,23,42,.06); border-color: #dbeafe; }
@@ -198,10 +199,13 @@ async function renderTeachers() {
       .teacher-chip.muted { background: #f8fafc; color: #64748b; border-color: #e2e8f0; border-style:dashed; }
       .teacher-card-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: auto; padding:12px 14px 14px; background:#fff; border-top:1px solid #f1f5f9; }
       .teacher-card-actions .btn { flex: 1 1 112px; min-width:0; justify-content:center; border-radius:10px; font-weight:700; font-size:12px; padding:8px 10px; }
+      @media (max-width: 1100px) {
+        .teacher-filters { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+      }
       @media (max-width: 640px) {
         .teacher-toolbar { align-items: stretch; }
-        .teacher-filters { width: 100%; }
-        .teacher-filters > * { flex: 1 1 100%; }
+        .teacher-filters { width: 100%; grid-template-columns: 1fr; }
+        .teacher-filters > * { grid-column: 1 / -1; }
         .teacher-info-list div { grid-template-columns: 1fr; gap: 4px; }
       }
     </style>
@@ -525,6 +529,8 @@ async function confirmTeacherDelete(id, userId) {
     if (userId) {
       const { error } = await sbClient.from('users').delete().eq('id', userId);
       if (error) throw error;
+      DB.invalidate('users');
+      DB.invalidate('teachers');
     } else {
       await DB.remove('teachers', id);
     }

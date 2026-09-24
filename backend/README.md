@@ -2,39 +2,55 @@
 
 The RMS backend is **Supabase** (fully managed PostgreSQL) — there is no separate application server. The frontend talks to Supabase directly through its REST + Realtime + Auth APIs, guarded by Row Level Security.
 
-This folder contains everything that defines the backend:
+This folder contains everything that defines the backend.
 
 ## Structure
 
 ```
 backend/
 └── sql/
-    ├── rms-full-setup.sql          # ONE-SHOT: full schema + RLS + default data
-    ├── database-schema.sql         # Tables, columns, keys
-    ├── rms-rls-policies.sql        # Row Level Security policies
-    ├── seed-data.sql               # Sample data for DOS + Teacher + learners
-    ├── rms-run-now.sql             # Quick reference setup script
-    ├── migration-school-settings.sql      # Settings schema (pass mark, grading)
-    ├── migration-learner-import-rls.sql   # Learner import RLS
-    ├── migration-rejection-reason.sql     # Assessment rejection reason column
-    ├── migration-fix-rls-users.sql        # RLS fix for user management
-    ├── migration-learner-availability.sql # Learner → roster availability (recent)
-    ├── migration-documents.sql       # Documents table + storage bucket (recent)
-    ├── migration-academic-year-management.sql  # Academic year lifecycle (recent)
-    ├── performance-indexes.sql    # Optimised indexes
-    └── Image/                     # Supporting images
+    ├── rms-full-setup.sql              # ONE-SHOT: full schema + RLS + default data
+    ├── database.sql                    # Tables, columns, keys
+    ├── rms-rls-policies.sql            # Row Level Security policies
+    ├── seed-data.sql                   # Sample data for DOS + Teacher + learners
+    ├── rms-run-now.sql                 # Quick reference setup script
+    ├── migration-documents.sql         # Documents table + storage bucket
+    ├── migration-academic-year-management.sql  # Academic year lifecycle
+    ├── migration-marks-import.sql      # Marks Excel import tables/columns
+    ├── migration-rms-mis-assessment-flexibility.sql  # Configurable assessment types
+    ├── migration-rms-mis-rls.sql       # Scoped RLS (types/assessments/assignments)
+    ├── migration-dos-education-level-scope.sql  # DOS Primary/Secondary scope helpers
+    ├── migration-subject-levels.sql    # subjects.level (Both/Primary/Secondary/…)
+    ├── migration-education-level-class-grouping.sql  # Class → education level
+    ├── migration-assignments-multi-subject-per-class.sql  # Multi-subject assignments
+    ├── migration-users-profile-photo.sql  # users.profile_photo_url + name fixes
+    ├── migration-fix-teacher-registration-rls.sql  # Teacher 409 / scoped teachers RLS
+    ├── migration-performance-comments.sql  # Performance comments bank
+    ├── migration-report-wizard-indexes.sql # Report performance indexes
+    ├── performance-indexes.sql         # Optimised indexes
+    └── Image/                          # Supporting images
 ```
+
+> Many other `migration-*.sql` files exist for incremental fixes (RLS recursion, 403/404, grading, class management, curriculum subjects, etc.). Run only what you need, in chronological order.
 
 ## Setup
 
 1. Open your Supabase project → **SQL Editor**.
-2. **New query** → paste → **Run**.
-3. Order:
+2. **New query** → paste the script → **Run**.
+3. Recommended order for a fresh install:
    1. `rms-full-setup.sql` — everything needed to start.
-   2. `migration-learner-availability.sql` — required for the student-registration → automatic availability feature (`academic_year_id` on learners, `assessment_roster_policy` setting, `roster_learner_ids` snapshot).
-   3. `migration-documents.sql` — required for the Documents page (uploads/downloads of images, Excel, Word, PDF via a public `documents` storage bucket).
-   4. `migration-academic-year-management.sql` — required for the Academic Year Management UI (start/end years, statuses, current-year rule, terms upgrade, year RLS).
-    5. `seed-data.sql` — optionally with `migration-learner-import-rls.sql` — sample data.
+   2. `migration-documents.sql` — Documents page (uploads/downloads via `documents` bucket).
+   3. `migration-academic-year-management.sql` — Academic Year Management UI.
+   4. `migration-marks-import.sql` — Marks Excel import.
+   5. `migration-rms-mis-assessment-flexibility.sql` — configurable assessment types.
+   6. `migration-rms-mis-rls.sql` — scoped RLS.
+   7. `migration-dos-education-level-scope.sql` — DOS level scope helpers.
+   8. `migration-subject-levels.sql` — subject education levels.
+   9. `migration-assignments-multi-subject-per-class.sql` — multi-subject assignments.
+   10. `migration-users-profile-photo.sql` — profile photos + account name fixes.
+   11. `seed-data.sql` — optional sample data.
+
+> All SQL is pasted and run **manually** in the SQL Editor — there is no migration runner. Prefer paste-ready queries with no placeholders.
 
 ## Authentication
 
@@ -45,23 +61,25 @@ Create users in Supabase → **Authentication → Users**:
 | DOS     | dos@rukara.edu      | dos123     | Yes          |
 | Teacher | teacher@rukara.edu  | teacher123 | Yes          |
 
-Then insert the matching `profiles` / `teachers` rows from `seed-data.sql`.
+Then insert the matching `users` / `teachers` rows from `seed-data.sql`. Set real names with the UPDATE examples in `migration-users-profile-photo.sql`.
 
 ## Schema Overview (tables)
 
-`users`/`profiles`, `academic_years`, `terms`, `classes`, `subjects`, `teachers`, `learners`, `teacher_assignments`, `assessments`, `marks`, `grading_scales`, `school_settings`, `audit_logs`, `notifications`, `documents`.
+`users`/`profiles`, `academic_years`, `terms`, `classes`, `subjects`, `teachers`, `learners`, `teacher_assignments`, `assessments`, `marks`, `grading_scales`, `school_settings`, `audit_logs`, `notifications`, `documents`, `assessment_types`, `performance_comments`.
 
 ### Key relationships
 - `learners` — `learner_code` is the unique **student number**; links to `classes` by `class_id`.
-- `teacher_assignments` — `teacher_id` + `class_id` + `subject_id` (+ year/term).
+- `teacher_assignments` — one row per (teacher, class, subject, academic_year, term); **multiple subjects per class are allowed** (non-unique index on teacher_id).
 - `assessments` — `teacher_id` + `class_id` + `subject_id`; `roster_learner_ids` snapshots the roster on submission.
 - `marks` — `assessment_id` + `learner_id`; UNIQUE(assessment_id, learner_id) prevents duplicate marks.
+- `subjects.level` / class education level — Primary vs Secondary separation enforced by RLS helpers (`rms_dos_can_level`, `rms_dos_can_subject`, `rms_teacher_in_scope`).
 
 ## Security
 
 - Row Level Security enabled on every table.
-- DOS role: full system access.
+- DOS role: full system access within its education-level scope.
 - Teacher role: only rows linked to their own assignments.
+- Scope helpers: `rms_is_dos`, `rms_dos_education_level`, `rms_dos_can_subject`, `rms_dos_can_level`, `rms_teacher_in_scope`, `rms_is_scoped_dos`.
 - Live subscriptions require Realtime enabled on the `learners`, `assessments`, `marks`, `classes`, `subjects`, `teacher_assignments` tables.
 
 ## Frontend config

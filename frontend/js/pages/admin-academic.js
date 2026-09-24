@@ -226,6 +226,7 @@ async function acadSetCurrent(id) {
       try {
         await sbClient.from('academic_years').update({ status: 'inactive', is_current: false }).neq('id', id);
         await DB.update('academic_years', id, { status: 'active', is_current: true });
+        DB.invalidate('academic_years');
         invalidateHeaderYears();
         refreshHeaderYearSelect();
         Utils.toast('Set as current year', 'success');
@@ -284,6 +285,7 @@ async function acadSetActiveTerm(id) {
   try {
     await sbClient.from('terms').update({ is_active: false }).eq('academic_year_id', term.academic_year_id).neq('id', id);
     await DB.update('terms', id, { is_active: true });
+    DB.invalidate('terms');
     Utils.toast('Term set as active', 'success');
     await loadAcadTab();
   } catch (e) { Utils.toast('Error: ' + e.message, 'error'); }

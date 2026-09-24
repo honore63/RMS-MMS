@@ -1392,6 +1392,7 @@ const ImportSystem = (() => {
         updated++;
         setProgress(imported + updated);
       }
+      if (typeof DB !== 'undefined') DB.invalidate(def.table);
       await API.recordAfter(def, insert.length, updated);
       API.renderResult(imported, updated);
     } catch (e) {

@@ -108,6 +108,13 @@ const Realtime = {
   },
 
   _fire(table, payload) {
+    /* Targeted cache invalidation — only the affected table, never the whole app. */
+    try {
+      if (typeof DB !== 'undefined' && typeof DB.invalidate === 'function') {
+        DB.invalidate(table);
+      }
+    } catch (e) { /* cache invalidation must never break handlers */ }
+
     const fns = this._handlers[table];
     if (fns) {
       fns.forEach(fn => {

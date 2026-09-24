@@ -47,7 +47,13 @@ const Sidebar = {
   render(role) {
     const menu = role === 'dos' ? this.adminMenu() : this.teacherMenu();
     const user = Auth.currentUser;
+    // Profile photo: account-level photo first, then the linked teacher
+    // record's photo (teachers can upload one from My Account); initials fallback.
+    const photoURL = user?.profile_photo_url || Auth.teacherProfile?.profile_photo_url || '';
     const initials = Utils.initials(user?.full_name);
+    const avatarHtml = photoURL
+      ? `<img src="${Utils.escapeHtml(photoURL)}" alt="${Utils.escapeHtml(user?.full_name || 'Profile photo')}" onerror="this.remove()">`
+      : initials;
     document.getElementById('sidebar').innerHTML = `
       <div class="sidebar-header">
         <div class="sidebar-logo">
@@ -61,7 +67,7 @@ const Sidebar = {
       </div>
       <nav class="sidebar-nav" id="sidebar-nav">${menu}</nav>
       <div class="sidebar-user">
-        <div class="user-avatar">${initials}</div>
+        <div class="user-avatar">${avatarHtml}</div>
         <div class="user-info">
           <div class="name">${Utils.escapeHtml(user?.full_name || '')}</div>
           <div class="role">${role === 'dos' && typeof Scope !== 'undefined' ? Utils.escapeHtml(Scope.label()) : Utils.escapeHtml(user?.role || '')}</div>

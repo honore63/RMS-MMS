@@ -46,14 +46,16 @@ Realtime.route('admin/analytics', ['assessments', 'marks', 'learners', 'classes'
 Realtime.route('teacher/analytics', ['assessments', 'assessment_types', 'marks', 'learners', 'classes', 'subjects', 'teacher_assignments', 'academic_years', 'terms', 'school_settings', 'grading_scales']);
    Realtime.route('teacher/notifications', ['notifications']);
 
-  /* ---------- Targeted in-place updates ---------- */
+  /* ---------- Targeted in-place updates ----------
+     Note: Realtime._fire already calls DB.invalidate(table) for every
+     shared table event. Handlers below add cross-table dependency
+     invalidation + report/analytics context resets. */
 
   /* Every marks/assessment change must invalidate all data caches
       so Analytics, Reports, DOS dashboards and teacher views see fresh
-      marks immediately — no 5-minute stale DB cache. */
+      marks immediately — no stale DB cache. */
   Realtime.on('marks', () => {
-    DB.invalidate('marks');
-    DB.invalidate('assessments');
+    DB.invalidateMany(['marks', 'assessments']);
     if (typeof AnalyticsEngine !== 'undefined') AnalyticsEngine.resetContext();
     if (typeof ReportUtils !== 'undefined') {
       ReportUtils.invalidate(); // clear any report caches that used marks
@@ -62,8 +64,7 @@ Realtime.route('teacher/analytics', ['assessments', 'assessment_types', 'marks',
     if (typeof Utils !== 'undefined' && Utils._gradingCache) Utils._gradingCache = null;
   });
   Realtime.on('assessments', () => {
-    DB.invalidate('assessments');
-    DB.invalidate('marks');
+    DB.invalidateMany(['assessments', 'marks']);
     if (typeof AnalyticsEngine !== 'undefined') AnalyticsEngine.resetContext();
     if (typeof ReportUtils !== 'undefined') ReportUtils.invalidate();
   });
@@ -75,6 +76,27 @@ Realtime.route('teacher/analytics', ['assessments', 'assessment_types', 'marks',
     DB.invalidate('classes');
     if (typeof AnalyticsEngine !== 'undefined') AnalyticsEngine.resetContext();
   });
+  Realtime.on('subjects', () => {
+    DB.invalidate('subjects');
+    if (typeof AnalyticsEngine !== 'undefined') AnalyticsEngine.resetContext();
+  });
+  Realtime.on('teachers', () => {
+    DB.invalidateMany(['teachers', 'teacher_assignments']);
+  });
+  Realtime.on('teacher_assignments', () => {
+    DB.invalidate('teacher_assignments');
+  });
+  Realtime.on('academic_years', () => {
+    DB.invalidate('academic_years');
+    if (typeof invalidateHeaderYears === 'function') invalidateHeaderYears();
+  });
+  Realtime.on('terms', () => DB.invalidate('terms'));
+  Realtime.on('users', () => DB.invalidate('users'));
+  Realtime.on('assessment_types', () => {
+    DB.invalidate('assessment_types');
+    if (typeof ReportUtils !== 'undefined') ReportUtils.invalidate('assessmentTypes');
+  });
+  Realtime.on('audit_logs', () => DB.invalidate('audit_logs'));
 
   /* School settings / grading scale changes invalidate report caches
       so reports always regenerate from fresh Supabase data. */
@@ -91,9 +113,6 @@ Realtime.route('teacher/analytics', ['assessments', 'assessment_types', 'marks',
   });
 
   /* Assessment type changes invalidate the shared types cache. */
-  Realtime.on('assessment_types', () => {
-    if (typeof ReportUtils !== 'undefined') ReportUtils.invalidate('assessmentTypes');
-  });
   Realtime.on('classes', () => {
     if (typeof ReportUtils !== 'undefined') ReportUtils.invalidate('classes');
   });
@@ -149,6 +168,7 @@ async function markNotificationsRead() {
   if (!userId) return;
   try {
     await sbClient.from('notifications').update({ read: true }).eq('user_id', userId).eq('read', false);
+    DB.invalidate('notifications');
     refreshNotificationBadge();
   } catch (e) {
     console.warn('[Sync] mark read:', e);

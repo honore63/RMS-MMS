@@ -1,5 +1,3 @@
-let teacherDashEduLevel = 'all';
-
 async function renderTeacherDashboard() {
   setHeader('Dashboard', `Welcome, ${Auth.currentUser?.full_name}`);
   setContent(`<div class="grid-4"><div class="card card-in"><div class="spinner" style="margin:0 auto;width:28px;height:28px"></div></div><div class="card card-in"></div><div class="card card-in"></div><div class="card card-in"></div></div>`);
@@ -14,7 +12,7 @@ async function renderTeacherDashboard() {
       DB.get('subjects')
     ]);
 
-    const filteredClassesIds = new Set(allClasses.filter(c => teacherDashEduLevel === 'all' || EducationLevels.getCategory(c) === teacherDashEduLevel).map(c => c.id));
+    const filteredClassesIds = new Set(allClasses.map(c => c.id));
     const filteredAssignments = assignments.filter(a => filteredClassesIds.has(a.class_id));
     const assessments = allAssessments.filter(a => filteredClassesIds.has(a.class_id));
 
@@ -50,24 +48,12 @@ async function renderTeacherDashboard() {
       </button>`).join('');
 
     setContent(`
-      <div class="card mb-6" style="padding:16px 20px; background:linear-gradient(135deg,rgba(59,130,246,0.1),rgba(37,99,235,0.05))">
-        <div style="display:flex;align-items:center;gap:16px">
-          <div style="font-weight:700;color:var(--blue-800)"><i data-lucide="filter" style="width:16px;height:16px;vertical-align:middle"></i> View Scope:</div>
-          <select class="select-field" style="width:250px;margin:0" onchange="teacherDashEduLevel=this.value;renderTeacherDashboard()">
-            <option value="all">🎓 All Assigned Levels</option>
-            <option value="Primary" ${teacherDashEduLevel==='Primary'?'selected':''}>📗 Primary Only</option>
-            <option value="Lower Secondary" ${teacherDashEduLevel==='Lower Secondary'?'selected':''}>📘 Lower Sec Only</option>
-            <option value="Upper Secondary" ${teacherDashEduLevel==='Upper Secondary'?'selected':''}>📙 Upper Sec Only</option>
-          </select>
-        </div>
-      </div>
-      
       <div class="grid-4 card-in-stagger mb-6">
         <div class="stat-card">
           <div class="stat-icon" style="background:var(--blue-50);color:var(--blue-600)"><i data-lucide="link"></i></div>
           <div class="stat-value">${filteredAssignments.length}</div>
           <div class="stat-label">My Assignments</div>
-          <div class="stat-desc"><i data-lucide="link"></i> Enrolled subjects via filter</div>
+          <div class="stat-desc"><i data-lucide="link"></i> Your assigned subjects</div>
         </div>
         <div class="stat-card">
           <div class="stat-icon" style="background:var(--amber-50);color:var(--amber-600)"><i data-lucide="file-edit"></i></div>
@@ -97,7 +83,7 @@ async function renderTeacherDashboard() {
         <div class="card-header">
           <div>
             <h3><i data-lucide="clipboard-list" style="width:18px;height:18px;color:var(--blue-600)"></i> Recent Assessments</h3>
-            <p class="card-subtitle">Your latest assessment work within this level</p>
+            <p class="card-subtitle">Your latest assessment work</p>
           </div>
           <button class="btn btn-sm btn-outline" onclick="Router.go('teacher/enter-marks')"><i data-lucide="arrow-right" style="width:14px;height:14px"></i> View All</button>
         </div>
