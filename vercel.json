@@ -1,32 +1,38 @@
 {
   "version": 2,
+  "framework": null,
+  "builds": [
+    { "src": "frontend/index.html", "use": "@vercel/static" }
+  ],
   "rewrites": [
     { "source": "/(.*)", "destination": "/frontend/$1" }
   ],
   "headers": [
     {
-      "source": "/index.html",
+      "source": "/manifest.webmanifest",
       "headers": [
-        { "key": "Cache-Control", "value": "no-store, no-cache, must-revalidate, max-age=0" },
+        { "key": "Content-Type", "value": "application/manifest+json" },
         { "key": "Access-Control-Allow-Origin", "value": "*" }
       ]
     },
     {
-      "source": "/public/(.*)",
+      "source": "/manifest.json",
       "headers": [
-        { "key": "Cache-Control", "value": "public, max-age=31536000, immutable" }
+        { "key": "Content-Type", "value": "application/manifest+json" },
+        { "key": "Access-Control-Allow-Origin", "value": "*" }
       ]
     },
     {
-      "source": "/js/(.*)",
+      "source": "/index.html",
       "headers": [
-        { "key": "Cache-Control", "value": "public, max-age=86400" }
+        { "key": "Cache-Control", "value": "no-store, no-cache, must-revalidate, max-age=0" }
       ]
     },
     {
-      "source": "/css/(.*)",
+      "source": "/sw.js",
       "headers": [
-        { "key": "Cache-Control", "value": "public, max-age=86400" }
+        { "key": "Content-Type", "value": "application/javascript" },
+        { "key": "Access-Control-Allow-Origin", "value": "*" }
       ]
     }
   ]
