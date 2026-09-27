@@ -285,18 +285,19 @@
       box-shadow: 0 -4px 20px rgba(0,0,0,.2);
     }
     .at-banner-content { display: flex; align-items: center; gap: 16px; flex: 1 1 auto; min-width: 200px; }
-    .at-banner-icon { width: 48px; height: 48px; background: rgba(255,255,255,.15); border-radius: 12px; display: grid; place-items: center; flex-shrink: 0; }
-    .at-banner-icon i { width: 24px; height: 24px; color: #fff; }
+.at-banner-icon { width: 52px; height: 52px; background: rgba(255,255,255,.15); border-radius: 14px; display: grid; place-items: center; flex-shrink: 0; }
+        .at-banner-icon i { width: 26px; height: 26px; color: #fff; }
     .at-banner-text strong { display: block; font-size: 15px; font-weight: 700; }
     .at-banner-text span { display: block; font-size: 12px; opacity: .8; margin-top: 2px; }
     .at-banner-actions { display: flex; gap: 10px; flex-shrink: 0; }
     .at-banner-install {
-      background: #fff; color: #0d2f6b; border: none; padding: 10px 24px;
-      border-radius: var(--radius); font-weight: 700; font-size: 14px;
+      background: #fff; color: #0d2f6b; border: none; padding: 12px 28px;
+      border-radius: var(--radius); font-weight: 700; font-size: 15px;
       cursor: pointer; font-family: 'Poppins', sans-serif;
       transition: all var(--transition); box-shadow: var(--shadow-md);
+      display: inline-flex; align-items: center; gap: 8px;
     }
-    .at-banner-install:hover { background: var(--blue-50); transform: translateY(-1px); }
+    .at-banner-install:hover { background: var(--blue-50); transform: translateY(-2px); box-shadow: var(--shadow-lg); }
     .at-banner-dismiss {
       background: transparent; color: rgba(255,255,255,.8); border: 1px solid rgba(255,255,255,.3);
       padding: 10px 18px; border-radius: var(--radius); font-weight: 500; font-size: 14px;
@@ -311,14 +312,14 @@
   </style>
   <div id="pwa-install-banner">
     <div class="at-banner-content">
-      <div class="at-banner-icon"><i data-lucide="smartphone"></i></div>
+      <div class="at-banner-icon"><i data-lucide="download-cloud"></i></div>
       <div class="at-banner-text">
         <strong>Install RMS-MIS</strong>
         <span>Add to home screen for the best mobile experience</span>
       </div>
     </div>
     <div class="at-banner-actions">
-      <button class="at-banner-install" id="pwa-install-btn"><i data-lucide="download" style="width:16px;height:16px;margin-right:6px"></i>Install</button>
+      <button class="at-banner-install" id="pwa-install-btn"><i data-lucide="download-cloud" style="width:20px;height:20px;margin-right:8px"></i>Install App</button>
       <button class="at-banner-dismiss" id="pwa-dismiss-btn">Later</button>
     </div>
   </div>
