@@ -5,16 +5,9 @@
   ],
   "headers": [
     {
-      "source": "/manifest.webmanifest",
+      "source": "/index.html",
       "headers": [
-        { "key": "Content-Type", "value": "application/manifest+json" },
-        { "key": "Access-Control-Allow-Origin", "value": "*" }
-      ]
-    },
-    {
-      "source": "/manifest.json",
-      "headers": [
-        { "key": "Content-Type", "value": "application/manifest+json" },
+        { "key": "Cache-Control", "value": "no-store, no-cache, must-revalidate, max-age=0" },
         { "key": "Access-Control-Allow-Origin", "value": "*" }
       ]
     },
