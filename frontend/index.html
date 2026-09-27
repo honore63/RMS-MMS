@@ -265,44 +265,6 @@
   <script src="js/pages/teacher-convert-marks.js?v=20260924-18"></script>
   <script src="js/marks-import.js?v=20260924-10"></script>
   <script src="js/sync-registry.js?v=20260924-10"></script>
-<script>
-    let deferredPrompt;
-    const BANNER_KEY = 'rms_pwa_banner_dismissed';
-    const isStandalone = window.matchMedia('(display-mode: standalone)').matches || window.navigator.standalone === true;
-
-    function showBanner() {
-      if (isStandalone) return;
-      const dismissed = localStorage.getItem(BANNER_KEY);
-      if (dismissed) return;
-      const banner = document.getElementById('pwa-install-banner');
-      if (banner) { banner.style.display = 'flex'; banner.classList.add('at-banner-visible'); }
-    }
-
-    window.addEventListener('beforeinstallprompt', (e) => {
-      e.preventDefault();
-      deferredPrompt = e;
-      showBanner();
-    });
-
-    window.addEventListener('appinstalled', () => {
-      deferredPrompt = null;
-      const banner = document.getElementById('pwa-install-banner');
-      if (banner) { banner.style.display = 'none'; banner.classList.remove('at-banner-visible'); }
-    });
-
-    if ('serviceWorker' in navigator) {
-      window.addEventListener('load', () => {
-        navigator.serviceWorker.register('/sw.js', { scope: '/' }).catch(err => {
-          console.warn('Service worker registration failed, trying local scope:', err);
-          navigator.serviceWorker.register('./sw.js', { scope: './' }).catch(err2 => {
-            console.warn('Service worker registration failed entirely:', err2);
-          });
-        });
-      });
-    }
-
-    showBanner();
-  </script>
   <style>
     #pwa-install-banner {
       display:none; position:fixed; bottom:0; left:0; right:0; z-index:9999;
