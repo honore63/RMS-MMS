@@ -37,7 +37,9 @@ const DB = {
     marks: 60 * 1000,
     audit_logs: 60 * 1000,
     import_history: 60 * 1000,
-    notifications: 30 * 1000
+    notifications: 30 * 1000,
+    announcements: 60 * 1000,
+    announcement_acknowledgements: 60 * 1000
   },
   DEFAULT_TTL: 5 * 60 * 1000,
 

@@ -408,6 +408,9 @@ function registerRoutes() {
   Router.register('admin/reports/grades', () => ReportCenter.open('grade-distribution'));
   Router.register('admin/analytics', renderAnalytics);
   Router.register('admin/audit-logs', renderAuditLogs);
+  Router.register('admin/announcements', () => Communications.renderAnnouncements());
+  Router.register('admin/messages', () => Communications.renderDosInbox());
+  Router.register('admin/notifications', renderNotifications);
   Router.register('admin/settings', (typeof renderSettings !== 'undefined' ? renderSettings : () => { setHeader('School Settings', 'Configure school settings'); setContent('<div class="card"><div class="card-body"><p>Settings module under development.</p></div></div>'); }));
 
   Router.register('teacher/dashboard', renderTeacherDashboard);
@@ -419,8 +422,25 @@ function registerRoutes() {
   Router.register('teacher/submitted-marks', renderSubmittedMarks);
   Router.register('teacher/reports', (typeof renderReportCenter !== 'undefined' ? renderReportCenter : () => ReportCenter.render()));
   Router.register('teacher/analytics', renderTeacherAnalytics);
+  Router.register('teacher/messages', () => Communications.renderTeacherMessages());
   Router.register('teacher/notifications', renderNotifications);
   Router.register('teacher/account', renderTeacherAccount);
+}
+
+function renderNotifications() {
+  const hash = window.location.hash || '';
+  if (!['#teacher/notifications', 'teacher/notifications', '#admin/notifications', 'admin/notifications'].includes(hash)) {
+    // Not currently on notifications page, just update badge
+    if (typeof NotificationCenter !== 'undefined') {
+      NotificationCenter.updateUnreadCount();
+    }
+    return;
+  }
+  
+  // We're on the notifications page
+  if (typeof NotificationCenter === 'undefined') return;
+  
+  NotificationCenter.renderNotifications();
 }
 
 const App = {
@@ -440,4 +460,452 @@ const App = {
   }
 };
 
-document.addEventListener('DOMContentLoaded', initApp);
+// ============================================================
+// NOTIFICATION CENTER HANDLER
+// ============================================================
+const NotificationCenter = {
+  /* State */
+  unreadCount: 0,
+  allNotifications: [],
+  filteredNotifications: [],
+
+  /* Initialize notification center */
+  init() {
+    this.bell = document.getElementById('notify-bell');
+    this.badge = document.getElementById('notify-badge');
+    this.headerTitle = document.getElementById('header-title');
+    this.dropdown = document.getElementById('notify-dropdown');
+    this.notifyList = document.getElementById('notify-list');
+    this.markAllRead = document.getElementById('mark-all-read');
+    this.viewAllBtn = document.getElementById('view-all-notifications');
+    this.notifyCenterPage = document.getElementById('notify-center-page');
+    this.cardsContainer = document.getElementById('notify-cards-container');
+    this.noNotifications = document.getElementById('no-notifications');
+    this.tabButtons = document.querySelectorAll('#notify-center-page .tab-btn');
+    this.filter = 'all';
+
+    if (!this.bell) return;
+
+    // Bell click → toggle dropdown
+    this.bell.addEventListener('click', (e) => {
+      e.stopPropagation();
+      this.toggleDropdown();
+    });
+
+    // Mark all as read
+    if (this.markAllRead) {
+      this.markAllRead.addEventListener('click', () => this.markAllAsRead());
+    }
+
+    // View all notifications
+    if (this.viewAllBtn) {
+      this.viewAllBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        this.showCenter();
+      });
+    }
+
+    // Close dropdown when clicking outside
+    document.addEventListener('click', (e) => {
+      if (!this.bell.contains(e.target) && !this.dropdown.contains(e.target)) {
+        this.hideDropdown();
+      }
+    });
+
+    // Tab filtering
+    this.tabButtons.forEach(btn => {
+      btn.addEventListener('click', () => {
+        this.tabButtons.forEach(b => b.classList.remove('active'));
+        btn.classList.add('active');
+        this.filter = btn.dataset.filter;
+        this.renderNotifications();
+        if (this.filter === 'all') {
+          this.showCenter();
+        }
+      });
+    });
+
+    // Load initial notifications
+    this.loadNotifications();
+  },
+
+  toggleDropdown() {
+    const isVisible = this.dropdown.style.display !== 'none';
+    this.hideDropdown();
+    if (!isVisible) this.showDropdown();
+  },
+
+  showDropdown() {
+    this.dropdown.style.display = 'block';
+    this.loadNotifications();
+  },
+
+  hideDropdown() {
+    this.dropdown.style.display = 'none';
+  },
+
+  showCenter() {
+    this.hideDropdown();
+    this.notifyCenterPage.style.display = 'block';
+    this.loadNotifications();
+    // Activate all tab
+    this.tabButtons.forEach(btn => btn.classList.add('active'));
+    this.filter = 'all';
+  },
+
+  hideCenter() {
+    this.notifyCenterPage.style.display = 'none';
+    this.tabButtons.forEach(btn => btn.classList.remove('active'));
+    this.filter = 'all';
+  },
+
+  /* Load notifications from Supabase */
+  async loadNotifications() {
+    try {
+      const userId = Auth.currentUser?.id;
+      if (!userId) return;
+
+      const { data, error } = await sbClient
+        .from('notifications')
+        .select('*')
+        .eq('recipient_user_id', userId)
+        .order('created_at', { ascending: false });
+
+      if (error) throw error;
+      this.allNotifications = data || [];
+      this.updateUnreadCount();
+      this.renderNotifications();
+    } catch (err) {
+      console.error('[NotificationCenter] load error:', err);
+    }
+  },
+
+  updateUnreadCount() {
+    const unread = this.allNotifications.filter(n => !n.is_read).length;
+    this.unreadCount = unread;
+    if (this.badge) {
+      this.badge.textContent = unread > 99 ? '99+' : String(unread);
+      this.badge.style.display = unread > 0 ? 'block' : 'none';
+    }
+    if (this.bell) {
+      const ariaLabel = unread > 0 ? `Notifications, ${unread} unread` : 'Notifications';
+      this.bell.setAttribute('aria-label', ariaLabel);
+    }
+    /* Also update sidebar nav badge */
+    if (typeof refreshNotificationBadge === 'function') {
+      refreshNotificationBadge();
+    }
+  },
+
+  renderNotifications() {
+    const notifications = this.filter === 'all' 
+      ? this.allNotifications 
+      : this.allNotifications.filter(n => this.matchesFilter(n));
+
+    if (notifications.length === 0) {
+      if (this.notifyList) this.notifyList.innerHTML = '';
+      if (this.cardsContainer) this.cardsContainer.innerHTML = '';
+      if (this.noNotifications) this.noNotifications.style.display = 'block';
+      return;
+    }
+
+    if (this.noNotifications) this.noNotifications.style.display = 'none';
+
+    // Render dropdown list
+    if (this.notifyList) {
+      this.notifyList.innerHTML = notifications.map(n => this.renderNotifyCard(n, true)).join('');
+    }
+
+    // Render center cards
+    if (this.cardsContainer) {
+      this.cardsContainer.innerHTML = notifications.map(n => this.renderNotifyCard(n, false)).join('');
+    }
+  },
+
+  matchesFilter(notification) {
+    if (this.filter === 'all') return true;
+    if (this.filter === 'unread') return !notification.is_read;
+    if (this.filter === 'important') {
+      return notification.priority === 'important' || notification.priority === 'urgent';
+    }
+    // Category filters
+    const categoryMap = {
+      marks: ['MARKS_SUBMITTED', 'MARKS_APPROVED', 'MARKS_REJECTED'],
+      assessments: ['ASSESSMENT_CREATED', 'ASSESSMENT_REOPENED', 'ASSESSMENT_LOCKED'],
+      announcements: ['ANNOUNCEMENT'],
+      timetable: ['TIMETABLE'],
+      system: ['SYSTEM'],
+      reports: ['REPORT'],
+      important: [] // handled separately
+    };
+    const types = categoryMap[this.filter];
+    if (!types) return true;
+    return types.includes(notification.notification_type);
+  },
+
+  renderNotifyCard(notification, isDropdown = false) {
+    const priorityClass = `priority-${notification.priority}`;
+    const isUnread = notification.is_read ? '' : 'unread';
+    const priorityClass2 = isUnread ? '' : 'read';
+    const typeIcons = {
+      MARKS_SUBMITTED: '📤',
+      MARKS_APPROVED: '✓',
+      MARKS_REJECTED: '⚠',
+      ASSESSMENT_CREATED: '📝',
+      ASSESSMENT_REOPENED: '🔓',
+      ASSESSMENT_LOCKED: '🔒',
+      ANNOUNCEMENT: '📢',
+      TIMETABLE: '📅',
+      MEETING: '📅',
+      EXAMINATION: '📝',
+      CPD: '🎓',
+      SYSTEM: 'ℹ️',
+      REPORT: '📊'
+    };
+
+    const icon = typeIcons[notification.notification_type] || 'ℹ️';
+    const category = notification.category || 'system';
+    const priority = notification.priority || 'normal';
+    const timeAgo = this.timeAgo(notification.created_at);
+    const actionBtn = notification.action_url 
+      ? `<button class="btn btn-sm notify-action" style="background:transparent;border:none;color:var(--blue-600);font-size:11px;text-decoration:underline;margin-top:4px;display:block;">View</button>`
+      : '';
+
+    return `
+      <div class="notify-card ${isUnread ? 'unread' : 'read'} ${priorityClass}" 
+           data-id="${notification.id}" 
+           data-type="${notification.notification_type}"
+           tabindex="0" role="button" 
+           onmouseover="this.classList.add('hover')" onmouseout="this.classList.remove('hover')"
+           onclick="NotificationCenter.openNotification('${notification.id}')">
+        <span class="notify-icon">${icon}</span>
+        <div style="flex:1">
+          <div class="notify-title">${Utils.escapeHtml(notification.title)}</div>
+          <div class="notify-message">${Utils.escapeHtml(notification.message)}</div>
+          <div class="notify-meta">
+            <span class="notify-sender">${Utils.escapeHtml(notification.sender_user_name || '')}</span>
+            <span class="notify-time">${timeAgo}</span>
+          </div>
+        </div>
+        ${actionBtn}
+      </div>
+    `;
+  },
+
+  timeAgo(isoString) {
+    if (!isoString) return 'just now';
+    const date = new Date(isoString);
+    const now = new Date();
+    const diffSec = Math.floor((now - date) / 1000);
+    const diffMin = Math.floor(diffSec / 60);
+    const diffHour = Math.floor(diffMin / 60);
+    const diffDay = Math.floor(diffHour / 24);
+
+    if (diffDay > 0) return `${diffDay}d ago`;
+    if (diffHour > 0) return `${diffHour}h ago`;
+    if (diffMin > 0) return `${diffMin}min ago`;
+    return `${diffSec}s ago`;
+  },
+
+  /* Open and mark a single notification as read */
+  async openNotification(notificationId) {
+    const notif = this.allNotifications.find(n => n.id === notificationId);
+    if (!notif) return;
+
+    // Mark as read
+    await this.markRead(notificationId);
+
+    if (notif.entity_type === 'teacher_message') {
+      Router.go(Auth.isAdmin() ? 'admin/messages' : 'teacher/messages');
+      return;
+    }
+
+    // Handle action based on type
+    switch (notif.notification_type) {
+      case 'MARKS_SUBMITTED':
+        // Navigate to submitted marks
+        Router.go('teacher/submitted-marks');
+        break;
+      case 'MARKS_APPROVED':
+        // Navigate to assessment
+        if (notif.entity_id) Router.go(`assessment/${notif.entity_id}`);
+        break;
+      case 'MARKS_REJECTED':
+        // Navigate to assessment for correction
+        if (notif.entity_id) Router.go(`assessment/${notif.entity_id}`);
+        break;
+      case 'ASSESSMENT_REOPENED':
+        if (notif.entity_id) Router.go(`assessment/${notif.entity_id}`);
+        break;
+      case 'ANNOUNCEMENT':
+        if (notif.action_url) window.location.href = notif.action_url;
+        break;
+      case 'TIMETABLE':
+        if (notif.action_url) window.location.href = notif.action_url;
+        break;
+      default:
+        Router.go(Auth.isAdmin() ? 'admin/notifications' : 'teacher/notifications');
+    }
+
+    // Re-render to update unread count
+    this.updateUnreadCount();
+    this.renderNotifications();
+  },
+
+  async markRead(notificationId) {
+    try {
+      await sbClient
+        .from('notifications')
+        .update({ is_read: true, read_at: new Date().toISOString() })
+        .eq('id', notificationId);
+      
+      // Update local state
+      const idx = this.allNotifications.findIndex(n => n.id === notificationId);
+      if (idx !== -1) {
+        this.allNotifications[idx].is_read = true;
+        this.allNotifications[idx].read_at = new Date().toISOString();
+      }
+      this.updateUnreadCount();
+      this.renderNotifications();
+    } catch (err) {
+      console.error('[NotificationCenter] mark read error:', err);
+    }
+  },
+
+  async markAllAsRead() {
+    const unread = this.allNotifications.filter(n => !n.is_read);
+    if (unread.length === 0) return;
+
+    const { error } = await sbClient
+      .from('notifications')
+      .update({ is_read: true, read_at: new Date().toISOString() })
+      .in('id', unread.map(n => n.id));
+
+    if (error) throw error;
+
+    // Update local state
+    unread.forEach(n => {
+      const idx = this.allNotifications.findIndex(x => x.id === n.id);
+      if (idx !== -1) {
+        this.allNotifications[idx].is_read = true;
+        this.allNotifications[idx].read_at = new Date().toISOString();
+      }
+    });
+    this.updateUnreadCount();
+    this.renderNotifications();
+  },
+
+  async deleteNotification(notificationId) {
+    try {
+      await sbClient
+        .from('notifications')
+        .delete()
+        .eq('id', notificationId);
+
+      // Update local state
+      this.allNotifications = this.allNotifications.filter(n => n.id !== notificationId);
+      this.updateUnreadCount();
+      this.renderNotifications();
+    } catch (err) {
+      console.error('[NotificationCenter] delete error:', err);
+    }
+  }
+};
+
+// Register the NotificationCenter init with Realtime
+if (typeof Realtime !== 'undefined') {
+  Realtime.on('notifications', (payload) => {
+    const newNotification = payload?.new;
+    if (newNotification?.recipient_user_id === Auth.currentUser?.id) {
+      NotificationCenter.handleNewNotification(newNotification);
+    }
+  });
+}
+
+/* Handle new notification from realtime */
+NotificationCenter.handleNewNotification = async function(newNotification) {
+  if (!newNotification || newNotification.recipient_user_id !== Auth.currentUser?.id) return;
+  // Check if this notification already exists (duplicate prevention)
+  if (this.allNotifications.some(n => n.id === newNotification.id)) return;
+  
+  // Add to the beginning of the list (most recent first)
+  this.allNotifications.unshift({ ...newNotification, is_read: !!newNotification.is_read });
+  
+  // Update UI
+  this.updateUnreadCount();
+  this.renderNotifications();
+  
+  // Show toast for new notifications
+  if (!newNotification.is_read) {
+    this.showToast(newNotification);
+  }
+};
+
+/* Show toast for new notifications */
+NotificationCenter.showToast = function(notification) {
+  const toastContainer = document.getElementById('toast-container');
+  if (!toastContainer) return;
+  
+  const typeMap = {
+    MARKS_SUBMITTED: 'success',
+    MARKS_APPROVED: 'success',
+    MARKS_REJECTED: 'error',
+    ASSESSMENT_CREATED: 'info',
+    ASSESSMENT_REOPENED: 'warning',
+    ASSESSMENT_LOCKED: 'warning',
+    ANNOUNCEMENT: 'info',
+    TIMETABLE: 'info',
+    MEETING: 'info',
+    EXAMINATION: 'info',
+    CPD: 'info',
+    SYSTEM: 'info',
+    REPORT: 'info'
+  };
+  
+  const type = typeMap[notification.notification_type] || 'info';
+  const priorityClass = notification.priority || 'normal';
+  
+  const urgentBadge = priorityClass === 'urgent' ? '<span class="font-bold text-red-600">URGENT</span>' : '';
+  
+  toastContainer.innerHTML += `
+    <div class="toast toast-${type}" role="alert" aria-live="polite" aria-atomic="true">
+      <i data-lucide="${type === 'success' ? 'check-circle' : type === 'error' ? 'alert-circle' : 'info'}" style="width:16px;height:16px"></i>
+      <div style="flex:1">
+        <div style="font-weight:600;color:white">${Utils.escapeHtml(notification.title)}</div>
+        <div style="color:rgba(255,255,255,0.8);font-size:12px">${Utils.escapeHtml(notification.message)}</div>
+      </div>
+      ${urgentBadge}
+      <button class="btn btn-sm btn-ghost text-white opacity-70 ml-auto close-toast" aria-label="Close">×</button>
+    </div>
+  `;
+  
+  // Re-init lucide icons
+  if (typeof lucide !== 'undefined') lucide.createIcons();
+  
+  // Auto-dismiss after 5 seconds, but persistent for urgent
+  const timeout = priorityClass === 'urgent' ? null : 5000;
+  const toastEl = toastContainer.lastElementChild;
+  if (toastEl) {
+    setTimeout(() => {
+      if (toastEl.parentNode) {
+        toastEl.style.transition = 'opacity .3s';
+        toastEl.style.opacity = '0';
+        setTimeout(() => toastEl.remove?.(), 300);
+      }
+    }, timeout);
+  }
+  
+  // Close button
+  const closeBtn = toastEl?.querySelector('.close-toast');
+  if (closeBtn) {
+    closeBtn.addEventListener('click', () => {
+      toastEl.style.opacity = '0';
+      setTimeout(() => toastEl.remove?.(), 300);
+    });
+  }
+};
+
+document.addEventListener('DOMContentLoaded', () => {
+  NotificationCenter.init();
+  if (typeof Realtime !== 'undefined') Realtime.init();
+});

@@ -5,10 +5,11 @@ async function renderAdminDashboard() {
   setContent(`<div class="grid-4"><div class="card card-in"><div class="spinner" style="margin:0 auto;width:28px;height:28px"></div></div><div class="card card-in"></div><div class="card card-in"></div><div class="card card-in"></div></div>`);
 
   try {
-    const [teachers, allClasses, allAssessments] = await Promise.all([
-      DB.count('teachers'),
+    const [allTeachers, allClasses, allAssessments, assignments] = await Promise.all([
+      DB.get('teachers'),
       DB.get('classes'),
-      DB.get('assessments', {}, { select: 'id,class_id,subject_id,teacher_id,status,created_at,description,period_label,period_type' })
+      DB.get('assessments', {}, { select: 'id,class_id,subject_id,teacher_id,status,created_at,description,period_label,period_type' }),
+      DB.get('teacher_assignments', {}, { select: 'teacher_id,class_id' })
     ]);
 
     // Apply Education Level Filter (scoped DOS is locked to its level)
@@ -20,6 +21,15 @@ async function renderAdminDashboard() {
       classes = allClasses.filter(c => EducationLevels.getCategory(c) === adminDashboardEduLevel);
     }
     const classIds = classes.map(c => c.id);
+    const teacherAssignments = assignments || [];
+    const teachers = scoped
+      ? (allTeachers || []).filter(teacher => {
+          const ownAssignments = teacherAssignments.filter(a =>
+            String(a.teacher_id) === String(teacher.id) && a.class_id
+          );
+          return ownAssignments.length === 0 || ownAssignments.some(a => classIds.includes(a.class_id));
+        }).length
+      : (allTeachers || []).length;
 
     // Filter assessments based on filtered classes (helpers live only on Convert Marks page)
     const assessments = (allAssessments || []).filter(a => {

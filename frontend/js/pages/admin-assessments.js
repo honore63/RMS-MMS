@@ -537,13 +537,17 @@ async function notifyDosOnTeacherSubmission(assessmentId, teacherName, assessmen
   try {
     const { data: dosUsers } = await sbClient.from('users').select('id').eq('role', 'dos');
     if (!dosUsers || !dosUsers.length) return;
+    const teacherId = Auth.currentUser?.id;
     const rows = dosUsers.map(dos => ({
       recipient_user_id: dos.id,
+      sender_user_id: teacherId,
       title: 'Marks Submitted for Approval',
       message: `${teacherName || 'A teacher'} submitted ${assessmentName || 'marks'} for ${className || 'a class'} / ${subjectName || 'subject'} and it is awaiting your approval.`,
       notification_type: 'MARKS_SUBMITTED',
       category: 'marks',
       priority: 'normal',
+      entity_type: 'assessments',
+      entity_id: assessmentId,
       is_read: false
     }));
     if (rows.length) await sbClient.from('notifications').insert(rows);

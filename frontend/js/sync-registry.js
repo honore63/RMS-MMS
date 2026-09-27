@@ -30,6 +30,8 @@
 Realtime.route('admin/analytics', ['assessments', 'marks', 'learners', 'classes', 'subjects', 'grading_scales']);
    Realtime.route('admin/audit-logs', ['audit_logs']);
   Realtime.route('admin/settings', ['school_settings', 'grading_scales']);
+  Realtime.route('admin/announcements', ['announcements', 'notifications']);
+  Realtime.route('admin/messages', ['messages', 'notifications', 'classes', 'teachers']);
 
   Realtime.route('teacher/dashboard', ['teacher_assignments', 'assessments', 'marks', 'classes', 'notifications']);
   Realtime.route('teacher/my-classes', ['learners', 'classes', 'teacher_assignments']);
@@ -50,6 +52,8 @@ Realtime.route('admin/analytics', ['assessments', 'marks', 'learners', 'classes'
 
 Realtime.route('teacher/analytics', ['assessments', 'assessment_types', 'marks', 'learners', 'classes', 'subjects', 'teacher_assignments', 'academic_years', 'terms', 'school_settings', 'grading_scales']);
    Realtime.route('teacher/notifications', ['notifications']);
+  Realtime.route('admin/notifications', ['notifications']);
+  Realtime.route('teacher/messages', ['messages', 'notifications', 'classes', 'teacher_assignments']);
 
   /* ---------- Targeted in-place updates ----------
      Note: Realtime._fire already calls DB.invalidate(table) for every
@@ -130,17 +134,10 @@ Realtime.route('teacher/analytics', ['assessments', 'assessment_types', 'marks',
     }
   });
 
-  /* Keep the sidebar unread-notification badge live and surface new
-     notification rows as in-app toast alerts for the current user. */
+  /* Keep the unread-notification badge live. NotificationCenter owns the
+     toast and in-page list to avoid duplicate realtime alerts. */
   Realtime.on('notifications', payload => {
     refreshNotificationBadge();
-    const row = payload && payload.new ? payload.new : null;
-    if (!row || !Auth.currentUser?.id || row.recipient_user_id !== Auth.currentUser.id) return;
-    if (row.is_read) return;
-    if (typeof Utils !== 'undefined' && Utils.toast) {
-      const msg = row.title ? `${row.title} — ${row.message}` : row.message;
-      Utils.toast(msg, row.notification_type || row.type || 'info');
-    }
   });
 
   /* ---------- Initial badge load (after login) ---------- */

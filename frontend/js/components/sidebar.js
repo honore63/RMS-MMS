@@ -82,6 +82,7 @@ const Sidebar = {
     }
     this.restoreGroups();
     this.highlight();
+    if (role === 'dos' && typeof Communications !== 'undefined') Communications.refreshBadges();
   },
 
   adminMenu() {
@@ -147,7 +148,17 @@ const Sidebar = {
           <i data-lucide="trending-up"></i> Analytics</a>
         <a class="nav-link" data-route="admin/audit-logs" onclick="Router.go('admin/audit-logs')">
           <i data-lucide="history"></i> Audit Logs</a>
-      </div>`;
+      </div>
+      <div class="sidebar-section">
+        <div class="sidebar-section-title">Communication</div>
+        <a class="nav-link" data-route="admin/announcements" onclick="Router.go('admin/announcements')">
+          <i data-lucide="megaphone"></i> Announcements <span class="nav-badge" id="announcement-badge" style="display:none"></span></a>
+        <a class="nav-link" data-route="admin/messages" onclick="Router.go('admin/messages')">
+          <i data-lucide="mail"></i> Teacher Inbox <span class="nav-badge" id="message-badge" style="display:none"></span></a>
+      </div>
+      <a class="nav-link" data-route="admin/notifications" onclick="Router.go('admin/notifications')" id="nav-notifications-link">
+        <i data-lucide="bell"></i> Notifications <span class="nav-badge" id="notif-badge"></span></a>
+    </div>`;
   },
 
   teacherMenu() {
@@ -166,6 +177,11 @@ const Sidebar = {
           <i data-lucide="school"></i> My Classes</a>
         <a class="nav-link" data-route="teacher/my-subjects" onclick="Router.go('teacher/my-subjects')">
           <i data-lucide="book-marked"></i> My Subjects</a>
+      </div>
+      <div class="sidebar-section">
+        <div class="sidebar-section-title">Communication</div>
+        <a class="nav-link" data-route="teacher/messages" onclick="Router.go('teacher/messages')">
+          <i data-lucide="mail"></i> Message DOS</a>
       </div>
       <div class="sidebar-section">
         <div class="sidebar-section-title">My Reports</div>

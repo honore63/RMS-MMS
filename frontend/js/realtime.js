@@ -35,6 +35,9 @@ const Realtime = {
     'grading_scales',
     'school_settings',
     'notifications',
+    'announcements',
+    'messages',
+    'announcement_acknowledgements',
     'audit_logs'
   ],
 

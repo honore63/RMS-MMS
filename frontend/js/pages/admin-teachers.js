@@ -127,9 +127,22 @@ async function renderTeachers() {
     }
   });
 
-  // RLS determines which teacher records the DOS may read. Keep unassigned
-  // teachers visible so a newly registered teacher can be assigned next.
-  const allowedTeachers = teachers || [];
+  // Keep teachers with an in-scope assignment, plus unassigned teachers who
+  // can still be assigned. RLS remains the authoritative access boundary.
+  const assignmentsByTeacher = new Map();
+  (assignments || []).forEach(assignment => {
+    if (!assignment.class_id) return;
+    const key = String(assignment.teacher_id);
+    if (!assignmentsByTeacher.has(key)) assignmentsByTeacher.set(key, []);
+    assignmentsByTeacher.get(key).push(assignment);
+  });
+  const allowedTeachers = (teachers || []).filter(teacher => {
+    const ownAssignments = assignmentsByTeacher.get(String(teacher.id)) || [];
+    return ownAssignments.length === 0 || ownAssignments.some(assignment => {
+      const classRecord = classMap.get(String(assignment.class_id));
+      return teacherMatchesScope(classRecord);
+    });
+  });
 
   const filtered = allowedTeachers.filter(t => {
     const meta = teacherMeta.get(String(t.id)) || { classNames: new Set(), subjectNames: new Set(), levels: new Set() };
