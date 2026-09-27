@@ -309,6 +309,14 @@
       .at-banner-content { flex-direction: column; }
       .at-banner-actions { width: 100%; justify-content: center; }
     }
+    #pwa-fab:hover { transform: scale(1.1); box-shadow: 0 6px 24px rgba(13,47,107,.5); }
+    #pwa-snackbar { border-radius: 12px; }
+    #pwa-snackbar-install:hover { background: var(--blue-50); }
+    #pwa-snackbar-dismiss:hover { color: #fff; }
+    @media (max-width: 600px) {
+      #pwa-snackbar { max-width: 90vw; font-size: 13px; }
+      #pwa-fab { bottom: 16px; right: 16px; width: 48px; height: 48px; }
+    }
   </style>
   <div id="pwa-install-banner">
     <div class="at-banner-content">
@@ -323,22 +331,93 @@
       <button class="at-banner-dismiss" id="pwa-dismiss-btn">Later</button>
     </div>
   </div>
+  <!-- Persistent floating install button -->
+  <button id="pwa-fab" style="display:none;position:fixed;bottom:24px;right:24px;z-index:9998;width:56px;height:56px;border-radius:50%;background:linear-gradient(135deg,#0d2f6b,#2563eb);color:#fff;border:none;cursor:pointer;box-shadow:0 4px 16px rgba(13,47,107,.4);transition:all .3s;align-items:center;justify-content:center" aria-label="Install App">
+    <i data-lucide="download-cloud" style="width:26px;height:26px"></i>
+  </button>
+  <!-- Snackbar notification -->
+  <div id="pwa-snackbar" style="display:none;position:fixed;bottom:90px;left:50%;transform:translateX(-50%);z-index:9998;background:#333;color:#fff;padding:14px 24px;border-radius:8px;font-family:'Poppins',sans-serif;font-size:14px;box-shadow:0 4px 12px rgba(0,0,0,.2);align-items:center;gap:12px;max-width:400px">
+    <i data-lucide="smartphone" style="width:20px;height:20px;flex-shrink:0"></i>
+    <span>Install RMS-MIS for the best experience</span>
+    <button id="pwa-snackbar-install" style="background:#fff;color:#0d2f6b;border:none;padding:6px 16px;border-radius:6px;font-weight:700;font-size:13px;cursor:pointer;font-family:'Poppins',sans-serif;white-space:nowrap">Install</button>
+    <button id="pwa-snackbar-dismiss" style="background:transparent;color:rgba(255,255,255,.6);border:none;padding:6px 8px;cursor:pointer;font-size:13px;font-family:'Poppins',sans-serif">Dismiss</button>
+  </div>
   <script>
-    document.getElementById('pwa-install-btn')?.addEventListener('click', () => {
-      if (deferredPrompt) {
-        deferredPrompt.prompt();
-        deferredPrompt.userChoice.then(() => {
-          deferredPrompt = null;
-          const banner = document.getElementById('pwa-install-banner');
-          if (banner) { banner.style.display = 'none'; banner.classList.remove('at-banner-visible'); }
-        });
-      }
+    let deferredPrompt;
+    const BANNER_KEY = 'rms_pwa_banner_dismissed';
+    const isStandalone = window.matchMedia('(display-mode: standalone)').matches || window.navigator.standalone === true;
+
+    function showBanner() {
+      if (isStandalone) return;
+      const dismissed = localStorage.getItem(BANNER_KEY);
+      if (dismissed) return;
+      const banner = document.getElementById('pwa-install-banner');
+      if (banner) { banner.style.display = 'flex'; banner.classList.add('at-banner-visible'); }
+      // Show FAB after 1 second
+      setTimeout(() => {
+        const fab = document.getElementById('pwa-fab');
+        if (fab) fab.style.display = 'flex';
+      }, 1000);
+      // Show snackbar after 3 seconds
+      setTimeout(() => {
+        const snack = document.getElementById('pwa-snackbar');
+        if (snack) { snack.style.display = 'flex'; lucide.createIcons(); }
+      }, 3000);
+    }
+
+    window.addEventListener('beforeinstallprompt', (e) => {
+      e.preventDefault();
+      deferredPrompt = e;
+      showBanner();
     });
-    document.getElementById('pwa-dismiss-btn')?.addEventListener('click', () => {
+
+    window.addEventListener('appinstalled', () => {
+      deferredPrompt = null;
       const banner = document.getElementById('pwa-install-banner');
       if (banner) { banner.style.display = 'none'; banner.classList.remove('at-banner-visible'); }
+      const fab = document.getElementById('pwa-fab');
+      if (fab) fab.style.display = 'none';
+      const snack = document.getElementById('pwa-snackbar');
+      if (snack) snack.style.display = 'none';
+    });
+
+    // Always try to show install prompt even if beforeinstallprompt already fired
+    window.addEventListener('load', () => {
+      if (!deferredPrompt && !localStorage.getItem(BANNER_KEY)) {
+        showBanner();
+      }
+    });
+
+    if ('serviceWorker' in navigator) {
+      window.addEventListener('load', () => {
+        navigator.serviceWorker.register('/sw.js', { scope: '/' }).catch(err => {
+          console.warn('Service worker registration failed, trying local scope:', err);
+          navigator.serviceWorker.register('./sw.js', { scope: './' }).catch(err2 => {
+            console.warn('Service worker registration failed entirely:', err2);
+          });
+        });
+      });
+    }
+
+    // Install button handlers
+    document.getElementById('pwa-install-btn')?.addEventListener('click', () => {
+      if (deferredPrompt) { deferredPrompt.prompt(); deferredPrompt.userChoice.then(() => { deferredPrompt = null; const b = document.getElementById('pwa-install-banner'); if(b){b.style.display='none';b.classList.remove('at-banner-visible');} const f=document.getElementById('pwa-fab'); if(f) f.style.display='none'; }); }
+    });
+    document.getElementById('pwa-dismiss-btn')?.addEventListener('click', () => {
+      const b = document.getElementById('pwa-install-banner'); if(b){b.style.display='none';b.classList.remove('at-banner-visible');}
+      const f = document.getElementById('pwa-fab'); if(f) f.style.display = 'none';
       localStorage.setItem('rms_pwa_banner_dismissed', 'true');
     });
+    document.getElementById('pwa-fab')?.addEventListener('click', () => {
+      if (deferredPrompt) { deferredPrompt.prompt(); deferredPrompt.userChoice.then(() => { deferredPrompt = null; const f=document.getElementById('pwa-fab'); if(f) f.style.display='none'; }); }
+    });
+    document.getElementById('pwa-snackbar-install')?.addEventListener('click', () => {
+      if (deferredPrompt) { deferredPrompt.prompt(); deferredPrompt.userChoice.then(() => { deferredPrompt = null; const s=document.getElementById('pwa-snackbar'); if(s) s.style.display='none'; }); }
+    });
+    document.getElementById('pwa-snackbar-dismiss')?.addEventListener('click', () => {
+      const s = document.getElementById('pwa-snackbar'); if(s) s.style.display = 'none';
+    });
+
     if (typeof lucide !== 'undefined') lucide.createIcons();
   </script>
 </body>
