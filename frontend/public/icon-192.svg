@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-label="RMS-MIS icon">
+  <defs>
+    <linearGradient id="bg" x1="0" x2="1" y1="0" y2="1">
+      <stop offset="0%" stop-color="#0d2f6b"/>
+      <stop offset="100%" stop-color="#1d4ed8"/>
+    </linearGradient>
+  </defs>
+  <rect width="512" height="512" rx="96" fill="url(#bg)"/>
+  <circle cx="256" cy="156" r="94" fill="#f5f7ff" opacity="0.95"/>
+  <path d="M168 372c16-58 60-90 88-90s72 32 88 90" fill="none" stroke="#f5f7ff" stroke-width="26" stroke-linecap="round"/>
+  <path d="M160 246h192" stroke="#f5f7ff" stroke-width="20" stroke-linecap="round" opacity="0.7"/>
+  <path d="M214 120h84v44h-84z" fill="#0d2f6b" opacity="0.9"/>
+  <text x="256" y="442" text-anchor="middle" font-size="54" font-family="Arial, sans-serif" fill="#ffffff" font-weight="700">RMS</text>
+</svg>

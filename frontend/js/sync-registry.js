@@ -43,6 +43,11 @@ Realtime.route('admin/analytics', ['assessments', 'marks', 'learners', 'classes'
     return typeof marksView === 'undefined' || marksView !== 'entry';
   });
 
+  /* Bulk Convert: never auto-rebuild the page mid-conversion. */
+  Realtime.route('teacher/convert-marks', ['assessments', 'assessment_types', 'marks'], () => {
+    return typeof bulkApplying === 'undefined' || !bulkApplying;
+  });
+
 Realtime.route('teacher/analytics', ['assessments', 'assessment_types', 'marks', 'learners', 'classes', 'subjects', 'teacher_assignments', 'academic_years', 'terms', 'school_settings', 'grading_scales']);
    Realtime.route('teacher/notifications', ['notifications']);
 
@@ -130,11 +135,11 @@ Realtime.route('teacher/analytics', ['assessments', 'assessment_types', 'marks',
   Realtime.on('notifications', payload => {
     refreshNotificationBadge();
     const row = payload && payload.new ? payload.new : null;
-    if (!row || !Auth.currentUser?.id || row.user_id !== Auth.currentUser.id) return;
-    if (row.read) return;
+    if (!row || !Auth.currentUser?.id || row.recipient_user_id !== Auth.currentUser.id) return;
+    if (row.is_read) return;
     if (typeof Utils !== 'undefined' && Utils.toast) {
       const msg = row.title ? `${row.title} — ${row.message}` : row.message;
-      Utils.toast(msg, row.type || 'info');
+      Utils.toast(msg, row.notification_type || row.type || 'info');
     }
   });
 
@@ -151,7 +156,7 @@ Realtime.route('teacher/analytics', ['assessments', 'assessment_types', 'marks',
 async function refreshNotificationBadge() {
   if (typeof Auth === 'undefined' || !Auth.currentUser?.id) return;
   try {
-    const n = await DB.count('notifications', { user_id: Auth.currentUser.id, read: false });
+    const n = await DB.count('notifications', { recipient_user_id: Auth.currentUser.id, is_read: false });
     const badge = document.getElementById('notif-badge');
     if (badge) {
       badge.textContent = n > 99 ? '99+' : String(n);
@@ -167,7 +172,7 @@ async function markNotificationsRead() {
   const userId = Auth.currentUser?.id;
   if (!userId) return;
   try {
-    await sbClient.from('notifications').update({ read: true }).eq('user_id', userId).eq('read', false);
+    await sbClient.from('notifications').update({ is_read: true }).eq('recipient_user_id', userId).eq('is_read', false);
     DB.invalidate('notifications');
     refreshNotificationBadge();
   } catch (e) {

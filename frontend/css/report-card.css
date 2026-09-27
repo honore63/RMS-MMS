@@ -197,18 +197,34 @@
 
 /* Headers */
 .rc-data-table thead th {
-  background-color: var(--rc-light-blue);
-  color: var(--rc-dark-blue);
-  font-weight: bold;
+  background-color: var(--rc-dark-blue);
+  color: #ffffff;
+  font-weight: 700;
 }
 .rc-th-sub {
-  min-width: 160px;
+  min-width: 170px;
+  text-align: left !important;
+  padding-left: 8px !important;
 }
 .rc-th-top {
   padding: 5px !important;
 }
-.rc-th-row2 th {
+.rc-th-row2 th,
+.rc-weight-row th {
   font-size: 7pt;
+  background-color: #e7eef8;
+  color: var(--rc-dark-blue);
+}
+.rc-weight-row th {
+  background: #dfeaf7;
+}
+
+.rc-all-subjects-row td {
+  background: #c7c7c7;
+  color: #111827;
+  font-weight: 700;
+  text-align: left !important;
+  padding-left: 12px !important;
 }
 
 /* Weight / Conduct / Total rows */

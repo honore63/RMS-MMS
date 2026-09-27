@@ -1207,7 +1207,7 @@ const ImportSystem = (() => {
     if (dz) dz.style.display = 'none';
 
     const marksBanner = STATE.type === 'marks' && STATE.selection.assessmentId
-      ? `<div class="alert alert-info" style="margin-bottom:10px"><i data-lucide="target"></i> Importing into assessment: <strong>${es(STATE.ctx.assessment ? (STATE.ctx.assessment.name + (STATE.ctx.assessment.unit ? ' · ' + STATE.ctx.assessment.unit : '')) : 'selected')}</strong> (max mark ${STATE.ctx.assessment ? STATE.ctx.assessment.maximum_mark : '-'})</div>`
+      ? `<div class="alert alert-info" style="margin-bottom:10px"><i data-lucide="target"></i> Importing into assessment: <strong>${es(STATE.ctx.assessment ? (STATE.ctx.assessment.display_name || STATE.ctx.assessment.name + (STATE.ctx.assessment.period_label ? ' · ' + STATE.ctx.assessment.period_label : (STATE.ctx.assessment.unit ? ' · ' + STATE.ctx.assessment.unit : ''))) : 'selected')}</strong> (max mark ${STATE.ctx.assessment ? STATE.ctx.assessment.maximum_mark : '-'})</div>`
       : '';
 
     const filtered = API.filterRecords();

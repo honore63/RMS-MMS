@@ -414,6 +414,7 @@ function registerRoutes() {
   Router.register('teacher/my-classes', renderMyClasses);
   Router.register('teacher/my-subjects', renderMySubjects);
   Router.register('teacher/enter-marks', renderEnterMarks);
+  Router.register('teacher/convert-marks', renderConvertMarks);
   Router.register('teacher/import-marks', () => { setHeader('Import Marks', 'Bulk import learner marks from Excel, CSV, Word or PDF'); MarksImport.open(); });
   Router.register('teacher/submitted-marks', renderSubmittedMarks);
   Router.register('teacher/reports', (typeof renderReportCenter !== 'undefined' ? renderReportCenter : () => ReportCenter.render()));

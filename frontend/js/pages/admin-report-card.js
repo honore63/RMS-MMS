@@ -182,7 +182,7 @@ async function rcFetchLearnerData({ learnerId, classId, yearId, termIds, allSubj
     DB.query('assessments','*',{ class_id: classId, academic_year_id: yearId || undefined, status:'approved' }),
     DB.query('assessments','*',{ class_id: classId, academic_year_id: yearId || undefined, status:'locked' })
   ]);
-  const allAssessments = [...lockedA, ...approvedA];
+  const allAssessments = [...lockedA, ...approvedA].filter(a => !(Utils.isConversionHelper && Utils.isConversionHelper(a)));
   
   let allMarks = [];
   const assessIds = allAssessments.map(a=>a.id);
@@ -250,8 +250,9 @@ function rcGrade(pct, scale) {
     return GradingEngine.calculateGradeSync(pct, scale).grade;
   }
   if (!scale || !scale.length) return 'N/R';
-  for (const s of scale) {
-    if (pct >= Number(s.minimum_percentage) && pct <= Number(s.maximum_percentage)) return s.grade;
+  const ordered = [...scale].sort((a, b) => Number(b.minimum_percentage) - Number(a.minimum_percentage));
+  for (const s of ordered) {
+    if (Number(pct) >= Number(s.minimum_percentage)) return s.grade;
   }
   return 'F';
 }
@@ -301,361 +302,221 @@ function rcRenderCard(learner, d) {
   const levelLbl = rcLevelLabel(d.cls?.level);
   const mMarks = d.allMarks.filter(m => m.learner_id === learner.id);
   const passMark = d.settings.pass_mark || 50;
-  
-  // Calculate max possible values dynamically across ALL assessments for the MAXIMUM column
+  const schoolName = d.settings.school_name || 'RUKARA MODEL SCHOOL';
+  const schoolEmail = d.settings.school_email || 'info@rukaramodelschool.rw';
+  const schoolPhone = d.settings.school_phone || '+250 788 123 456';
+
   const subjMaxVals = {};
   d.activeSubjects.forEach(s => {
-    let smeu=0, smet=0;
-    d.allAssessments.filter(a=>a.subject_id===s.id).forEach(a=>{
-      if (rcIsET(a.name) || rcIsET(a.unit)) smet += Number(a.maximum_mark)||0;
-      else smeu += Number(a.maximum_mark)||0;
+    let smeu = 0;
+    let smet = 0;
+    d.allAssessments.filter(a => String(a.subject_id) === String(s.id)).forEach(a => {
+      if (rcIsET(a.name) || rcIsET(a.unit)) smet += Number(a.maximum_mark) || 0;
+      else smeu += Number(a.maximum_mark) || 0;
     });
-    subjMaxVals[s.id] = { eu: smeu, et: smet, tot: smeu+smet };
+    subjMaxVals[s.id] = { eu: smeu, et: smet, tot: smeu + smet };
   });
 
-  /* ───── HEADER ───── */
-  const header = `
-    <div class="rc-header">
-      <div class="rc-title-group">
-        <div class="rc-main-title">RUKARA MODEL SCHOOL</div>
-        <div class="rc-sub-title">RMS-MIS</div>
-        <div class="rc-tagline">Rukara Model School Marks Information System</div>
-        <div class="rc-contact-info">
-          <div>P.O. Box 1234, Rukara, Rwanda</div>
-          <div>Email: ${Utils.escapeHtml(d.settings.school_email || 'info@rukaramodelschool.rw')}</div>
-          <div>Phone: ${Utils.escapeHtml(d.settings.school_phone || '+250 788 123 456')}</div>
-        </div>
-      </div>
-      
-      <div class="rc-center-badge">
-        <div class="rc-badge-top">STUDENT REPORT CARD</div>
-        <div class="rc-badge-bottom">${levelLbl}</div>
-      </div>
-      
-      <div class="rc-logo-group">
-        <div class="rc-logo-wrap">
-          <img src="${Utils.escapeHtml(logoUrl)}" class="rc-logo-img" onerror="this.style.display='none'">
-        </div>
-        <div class="rc-logo-text">Knowledge <span style="font-size:12px;margin:0 2px">•</span> Skills <span style="font-size:12px;margin:0 2px">•</span> Future</div>
-        <div class="rc-logo-rms">RMS-MIS</div>
-      </div>
-    </div>
-    <div class="rc-divider"></div>`;
+  const termCols = (d.selectedTerms || []).map(t => ({ id: t.id, name: t.name }));
+  const showAnn = Boolean(d.annualMode);
+  const termHeading = termCols.map(t => `<th colspan="5" class="rc-th-top">${Utils.escapeHtml(t.name)}</th>`).join('');
+  const termBody = termCols.map(() => '<th>EU</th><th>ET</th><th>TOT</th><th>%</th><th>GR</th>').join('');
+  const termWeight = termCols.map(() => '<th>50%</th><th>50%</th><th>100%</th><th></th><th></th>').join('');
 
-  /* ───── STUDENT PROPS ───── */
-  const studentInfo = `
-    <div class="rc-student-block">
-      <div class="rc-stu-col1">
-        <div><span class="rc-lbl-blue">Name:</span> <strong style="font-size:14px; margin-left:4px">${Utils.escapeHtml(learner.full_name)}</strong></div>
-        <div><span class="rc-lbl-blue">Student Unique Identifier:</span> <span style="margin-left:4px">${Utils.escapeHtml(learner.learner_code||'-')}</span></div>
-      </div>
-      <div class="rc-stu-col2">
-        <div><span class="rc-lbl-blue">Academic Year:</span> <span style="margin-left:4px">${Utils.escapeHtml(d.year?.name||'-')}</span></div>
-        <div><span class="rc-lbl-blue">Level:</span> <span style="margin-left:4px">${levelLbl}</span></div>
-        <div><span class="rc-lbl-blue">Class:</span> <span style="margin-left:4px">${Utils.escapeHtml(d.cls?.name||'-')}</span></div>
-      </div>
-    </div>`;
-
-  /* ───── TABLE HEADER ───── */
-  const termCols = d.selectedTerms.map(t =>({ id: t.id, name: t.name }));
-  const showAnn = d.annualMode;
-  
-  let th1 = `<tr>
-    <th rowspan="4" class="rc-th-sub rc-align-left">SUBJECT</th>
-    <th colspan="3" class="rc-th-top">MAXIMUM</th>
-    ${termCols.map(t => `<th colspan="5" class="rc-th-top">${Utils.escapeHtml(t.name)}</th>`).join('')}
-    ${showAnn ? `<th colspan="4" class="rc-th-top">Annual Total</th>` : ''}
-  </tr>`;
-  
-  let th2 = `<tr class="rc-th-row2">
-    <th>EU</th><th>ET</th><th>TOT</th>
-    ${termCols.map(() => `<th>EU</th><th>ET</th><th>TOT</th><th>%</th><th>GR</th>`).join('')}
-    ${showAnn ? `<th>TOT</th><th>MAX</th><th>%</th><th>GR</th>` : ''}
-  </tr>`;
-
-  let th3Weight = `<tr>
-    <th class="rc-align-left rc-blue-text">WEIGHT</th>
-    <th>50%</th><th>30%</th><th>100%</th>
-    ${termCols.map(() => `<th>50%</th><th>30%</th><th>100%</th><th class="rc-empty-cell"></th><th class="rc-empty-cell"></th>`).join('')}
-    ${showAnn ? `<th class="rc-empty-cell"></th><th class="rc-empty-cell"></th><th class="rc-empty-cell"></th><th class="rc-empty-cell"></th>` : ''}
-  </tr>`;
-
-  // Conduct (stubbed to 40 max as per reference, if not dynamic)
-  let th4Conduct = `<tr>
-    <th class="rc-align-left rc-blue-text">Conduct</th>
-    <th class="rc-empty-cell"></th><th class="rc-empty-cell"></th><th>40</th>
-    ${termCols.map(() => `<th class="rc-empty-cell"></th><th class="rc-empty-cell"></th><th>40/40</th><th class="rc-empty-cell"></th><th class="rc-empty-cell"></th>`).join('')}
-    ${showAnn ? `<th>39/40</th><th class="rc-empty-cell"></th><th class="rc-empty-cell"></th><th class="rc-empty-cell"></th>` : ''}
-  </tr>`;
-
-  let th5All = `<tr class="rc-all-subjects-row"><td colspan="${showAnn?4+termCols.length*5+4:4+termCols.length*5}">All Subjects</td></tr>`;
-
-  // Pre-calculate per-term subject data
-  const tData = {}; 
-  termCols.forEach(t=>{
-    const ta = d.allAssessments.filter(a=>a.term_id===t.id);
+  const tData = {};
+  termCols.forEach(t => {
+    const ta = d.allAssessments.filter(a => a.term_id === t.id);
     tData[t.id] = d.activeSubjects.map(s => rcCalcSubject(s, ta, mMarks, d.scale, passMark)).filter(Boolean);
   });
 
-  /* ───── TABLE BODY ───── */
   let tbody = '';
-  // Grand totals
-  let maxTotEU=0, maxTotET=0, maxTotTOT=0;
-  let termTotals = {}; termCols.forEach(t=>{ termTotals[t.id] = { eu:0,et:0,tot:0, hasData:false }; });
-  
-  // Group Subjects by Level
-  const cat = EducationLevels.getCategory(d.cls);
-  let groupedSubjects = [];
-  
-  if (cat.includes('Primary')) {
-    groupedSubjects = [{ groupName: 'All Subjects', subjects: d.activeSubjects }];
-  } else if (cat.includes('Lower Secondary')) {
-    const core = d.activeSubjects.filter(s => ['Mathematics', 'English', 'Kinyarwanda', 'Physics', 'Biology', 'Chemistry'].some(n => s.name.includes(n)));
-    const elective = d.activeSubjects.filter(s => !core.includes(s));
-    groupedSubjects = [
-      { groupName: 'Core Subjects', subjects: core },
-      { groupName: 'Elective Subjects', subjects: elective }
-    ].filter(g => g.subjects.length > 0);
-  } else {
-    // Upper Secondary
-    const stream = (d.cls?.stream || '').toUpperCase();
-    let majorKeywords = [];
-    if (stream.includes('PCM')) majorKeywords = ['Physics', 'Chemistry', 'Mathematics'];
-    else if (stream.includes('MCB')) majorKeywords = ['Mathematics', 'Chemistry', 'Biology'];
-    else if (stream.includes('MEG')) majorKeywords = ['Mathematics', 'Economics', 'Geography'];
-    else if (stream.includes('HEG')) majorKeywords = ['History', 'Economics', 'Geography'];
+  let maxTotEU = 0;
+  let maxTotET = 0;
+  let maxTotTOT = 0;
+  const termTotals = {};
+  termCols.forEach(t => {
+    termTotals[t.id] = { eu: 0, et: 0, tot: 0, hasData: false };
+  });
 
-    const major = d.activeSubjects.filter(s => majorKeywords.some(k => s.name.toLowerCase().includes(k.toLowerCase())));
-    const minor = d.activeSubjects.filter(s => !major.includes(s));
-    
-    groupedSubjects = [
-      { groupName: 'Major Subjects', subjects: major },
-      { groupName: 'Minor / Subsidiary Subjects', subjects: minor }
-    ].filter(g => g.subjects.length > 0);
-  }
+  const availableSubjects = d.activeSubjects.filter(s => {
+    const subjectAssessments = d.allAssessments.filter(a => String(a.subject_id) === String(s.id));
+    return subjectAssessments.length > 0 || (d.selectedTerms || []).length > 0;
+  });
 
-  const colspanAll = showAnn ? 4 + termCols.length * 5 + 4 : 4 + termCols.length * 5;
+  tbody += `<tr class="rc-all-subjects-row"><td colspan="${showAnn ? 4 + termCols.length * 5 + 4 : 4 + termCols.length * 5}">All Subjects</td></tr>`;
 
-  groupedSubjects.forEach(group => {
-    tbody += `<tr class="rc-all-subjects-row"><td colspan="${colspanAll}" style="text-align:left;padding-left:12px;background:var(--blue-50);color:var(--blue-900)">${group.groupName}</td></tr>`;
-    
-    group.subjects.forEach(s => {
-      const sm = subjMaxVals[s.id];
-      let row = `<tr><td class="rc-align-left rc-blue-text" style="font-weight:600">${Utils.escapeHtml(s.name)}</td>`;
-      row += `<td>${sm.eu||''}</td><td>${sm.et||''}</td><td>${sm.tot||''}</td>`;
-      maxTotEU += sm.eu; maxTotET += sm.et; maxTotTOT += sm.tot;
+  availableSubjects.forEach(s => {
+    const sm = subjMaxVals[s.id] || { eu: 0, et: 0, tot: 0 };
+    maxTotEU += sm.eu || 0;
+    maxTotET += sm.et || 0;
+    maxTotTOT += sm.tot || 0;
 
-      let annObt=0, annMax=0, hasAnn=false;
-      
-      termCols.forEach(t => {
-        const td = tData[t.id].find(x => x.subjectId === s.id);
-        if (td && td.hasMarks) {
-          row += `
-            <td>${td.euObt!=null?td.euObt:''}</td>
-            <td>${td.etObt!=null?td.etObt:''}</td>
-            <td style="font-weight:700">${td.totObt}</td>
-            <td>${td.pct!=null?td.pct.toFixed(1)+'%':''}</td>
-            <td style="font-weight:700">${td.gr}</td>`;
-          termTotals[t.id].eu += (td.euObt||0);
-          termTotals[t.id].et += (td.etObt||0);
-          termTotals[t.id].tot += td.totObt;
-          termTotals[t.id].hasData = true;
-          annObt += td.totObt; annMax += td.totMax; hasAnn = true;
-        } else {
-          row += `<td class="rc-empty-cell"></td><td class="rc-empty-cell"></td><td class="rc-empty-cell"></td><td class="rc-empty-cell"></td><td class="rc-empty-cell"></td>`;
-        }
-      });
+    let row = `<tr><td class="rc-align-left rc-blue-text" style="font-weight:600">${Utils.escapeHtml(s.name)}</td>`;
+    row += `<td>${sm.eu || ''}</td><td>${sm.et || ''}</td><td>${sm.tot || ''}</td>`;
 
-      if (showAnn) {
-        if (hasAnn && annMax>0) {
-          const apct = Math.round((annObt/annMax)*1000)/10;
-          const agr = rcGrade(apct, d.scale);
-          row += `<td>${annObt}</td><td>${annMax}</td><td>${apct.toFixed(1)}%</td><td style="font-weight:700">${agr}</td>`;
-        } else {
-          row += `<td class="rc-empty-cell"></td><td class="rc-empty-cell"></td><td class="rc-empty-cell"></td><td class="rc-empty-cell"></td>`;
-        }
+    let annualObt = 0;
+    let annualMax = 0;
+    let hasAnnual = false;
+
+    termCols.forEach(t => {
+      const td = (tData[t.id] || []).find(x => x.subjectId === s.id);
+      if (td && td.hasMarks) {
+        row += `
+          <td>${td.euObt != null ? td.euObt : ''}</td>
+          <td>${td.etObt != null ? td.etObt : ''}</td>
+          <td style="font-weight:700">${td.totObt != null ? td.totObt : ''}</td>
+          <td>${td.pct != null ? td.pct.toFixed(1) + '%' : ''}</td>
+          <td style="font-weight:700">${td.gr || ''}</td>`;
+
+        termTotals[t.id].eu += Number(td.euObt || 0);
+        termTotals[t.id].et += Number(td.etObt || 0);
+        termTotals[t.id].tot += Number(td.totObt || 0);
+        termTotals[t.id].hasData = true;
+        annualObt += Number(td.totObt || 0);
+        annualMax += Number(td.totMax || 0);
+        hasAnnual = true;
+      } else {
+        row += '<td class="rc-empty-cell"></td><td class="rc-empty-cell"></td><td class="rc-empty-cell"></td><td class="rc-empty-cell"></td><td class="rc-empty-cell"></td>';
       }
-      row += `</tr>`;
-      tbody += row;
     });
+
+    if (showAnn) {
+      if (hasAnnual && annualMax > 0) {
+        const annualPct = Math.round((annualObt / annualMax) * 1000) / 10;
+        row += `<td>${annualObt}</td><td>${annualMax}</td><td>${annualPct.toFixed(1)}%</td><td style="font-weight:700">${rcGrade(annualPct, d.scale)}</td>`;
+      } else {
+        row += '<td class="rc-empty-cell"></td><td class="rc-empty-cell"></td><td class="rc-empty-cell"></td><td class="rc-empty-cell"></td>';
+      }
+    }
+
+    row += '</tr>';
+    tbody += row;
   });
 
-  /* ───── TOTAL ROW ───── */
-  let tfTotal = `<tr><td class="rc-align-left rc-blue-bg-text font-bold">Total</td>`;
+  let totalAnnObt = 0;
+  let totalAnnMax = 0;
+  let hasTotalAnnual = false;
+
+  let tfTotal = '<tr><td class="rc-align-left rc-blue-bg-text font-bold">Total</td>';
   tfTotal += `<td>${maxTotEU}</td><td>${maxTotET}</td><td>${maxTotTOT}</td>`;
-  
-  let gAnnObt=0, gAnnMax=0, hasGAnn=false;
-  
+
   termCols.forEach(t => {
     const tt = termTotals[t.id];
-    let tMax=0;
-    d.activeSubjects.forEach(s=>{
-      const ta = d.allAssessments.filter(a=>a.term_id===t.id && a.subject_id===s.id);
-      tMax += ta.reduce((su,a)=>su+(Number(a.maximum_mark)||0),0);
-    });
-    if (tt.hasData) {
-      const pct = Math.round((tt.tot/tMax)*1000)/10;
-      tfTotal += `<td>${tt.eu}</td><td>${tt.et}</td><td>${tt.tot}</td><td>${pct.toFixed(1)}%</td><td class="rc-empty-cell"></td>`;
-      gAnnObt += tt.tot; gAnnMax += tMax; hasGAnn = true;
+    const termMax = (d.allAssessments || []).filter(a => a.term_id === t.id).reduce((sum, a) => sum + (Number(a.maximum_mark) || 0), 0);
+    if (tt.hasData && termMax > 0) {
+      const pct = Math.round((tt.tot / termMax) * 1000) / 10;
+      tfTotal += `<td>${tt.eu}</td><td>${tt.et}</td><td>${tt.tot}</td><td>${pct.toFixed(1)}%</td><td>${rcGrade(pct, d.scale)}</td>`;
+      totalAnnObt += tt.tot;
+      totalAnnMax += termMax;
+      hasTotalAnnual = true;
     } else {
-      tfTotal += `<td class="rc-empty-cell"></td><td class="rc-empty-cell"></td><td class="rc-empty-cell"></td><td class="rc-empty-cell"></td><td class="rc-empty-cell"></td>`;
+      tfTotal += '<td class="rc-empty-cell"></td><td class="rc-empty-cell"></td><td class="rc-empty-cell"></td><td class="rc-empty-cell"></td><td class="rc-empty-cell"></td>';
     }
   });
 
   if (showAnn) {
-    if (hasGAnn && gAnnMax>0) {
-      const pct = Math.round((gAnnObt/gAnnMax)*1000)/10;
-      tfTotal += `<td>${gAnnObt}</td><td>${gAnnMax}</td><td>${pct.toFixed(1)}%</td><td class="rc-empty-cell"></td>`;
+    if (hasTotalAnnual && totalAnnMax > 0) {
+      const pct = Math.round((totalAnnObt / totalAnnMax) * 1000) / 10;
+      tfTotal += `<td>${totalAnnObt}</td><td>${totalAnnMax}</td><td>${pct.toFixed(1)}%</td><td>${rcGrade(pct, d.scale)}</td>`;
     } else {
-      tfTotal += `<td class="rc-empty-cell"></td><td class="rc-empty-cell"></td><td class="rc-empty-cell"></td><td class="rc-empty-cell"></td>`;
+      tfTotal += '<td class="rc-empty-cell"></td><td class="rc-empty-cell"></td><td class="rc-empty-cell"></td><td class="rc-empty-cell"></td>';
     }
   }
-  tfTotal += `</tr>`;
+  tfTotal += '</tr>';
 
-  /* ───── PERCENTAGE ROW ───── */
-  let tfPct = `<tr><td class="rc-align-left rc-blue-text font-bold">Percentage</td><td colspan="3" class="rc-empty-cell"></td>`;
-  termCols.forEach(t => {
-    const tt = termTotals[t.id];
-    let tMax = d.allAssessments.filter(a=>a.term_id===t.id).reduce((s,a)=>s+(Number(a.maximum_mark)||0),0);
-    if (tt.hasData && tMax>0) tfPct += `<td colspan="5">${(Math.round((tt.tot/tMax)*1000)/10).toFixed(1)}%</td>`;
-    else tfPct += `<td colspan="5" class="rc-empty-cell"></td>`;
-  });
-  if (showAnn) tfPct += `<td colspan="4">${hasGAnn && gAnnMax>0 ? (Math.round((gAnnObt/gAnnMax)*1000)/10).toFixed(1)+'%' : ''}</td>`;
-  tfPct += `</tr>`;
+  const tableHeader = `
+    <tr>
+      <th rowspan="3" class="rc-th-sub rc-align-left">SUBJECT</th>
+      <th colspan="3" class="rc-th-top">MAXIMUM</th>
+      ${termHeading}
+      ${showAnn ? '<th colspan="4" class="rc-th-top">Total</th>' : ''}
+    </tr>
+    <tr class="rc-th-row2">
+      <th>EU</th><th>ET</th><th>TOT</th>
+      ${termBody}
+      ${showAnn ? '<th>TOT</th><th>MAX</th><th>%</th><th>GR</th>' : ''}
+    </tr>
+    <tr class="rc-weight-row">
+      <th class="rc-align-left rc-blue-text">WEIGHT</th>
+      <th>50%</th><th>50%</th><th>100%</th>
+      ${termWeight}
+      ${showAnn ? '<th></th><th></th><th></th><th></th>' : ''}
+    </tr>`;
 
-  /* ───── POSITION ROW ───── */
-  let tfPos = `<tr><td class="rc-align-left rc-blue-text font-bold">Position</td><td colspan="3" class="rc-empty-cell"></td>`;
-  termCols.forEach(t => {
-    if (d.posData && d.posData[t.id]) {
-      const pd = d.posData[t.id];
-      const pos = pd.positions[learner.id];
-      tfPos += `<td colspan="5">${pos ? pos + ' out of ' + pd.total : ''}</td>`;
-    } else tfPos += `<td colspan="5" class="rc-empty-cell"></td>`;
-  });
-  if (showAnn) {
-    // Annual position requires across all terms
-    const scores = d.learnersList.map(l => {
-      let lObt=0, lMax=0;
-      d.allAssessments.forEach(a=>{
-         lMax += Number(a.maximum_mark)||0;
-         const m = d.allMarks.find(mk=>mk.assessment_id===a.id && mk.learner_id===l.id);
-         if(m&&m.mark!=null) lObt+=Number(m.mark);
-      });
-      return { id: l.id, pct: lMax>0 ? lObt/lMax*100 : null };
-    }).filter(x=>x.pct!=null);
-    let annPos = '';
-    if (scores.length) {
-      scores.sort((a,b)=>b.pct-a.pct);
-      let r=1, pr=null, prr=1;
-      scores.forEach((s,i)=>{
-        if(i===0){pr=s.pct; prr=1;} else if(s.pct!==pr){r=i+1; pr=s.pct; prr=r;}
-        if(s.id===learner.id) annPos = prr + ' out of ' + scores.length;
-      });
-    }
-    tfPos += `<td colspan="4">${annPos}</td>`;
-  }
-  tfPos += `</tr>`;
+  const studentSummary = [
+    { label: 'Total Subjects', value: String(d.activeSubjects.length || 0) },
+    { label: 'Subjects Passed', value: String((d.posData?.[termCols[0]?.id]?.positions && learner.id in d.posData?.[termCols[0]?.id]?.positions) ? d.activeSubjects.length : 0) },
+    { label: 'Overall Average', value: '—' },
+    { label: 'Class Position', value: '—' }
+  ];
 
-  /* ───── COMMENT ROW ───── */
-  // Use centralized GradingEngine for automatic comments from database grading scale
-  const getComment = (pct) => {
-    if (typeof GradingEngine !== 'undefined' && d.scale && d.scale.length) {
-      const info = GradingEngine.calculateGradeSync(pct, d.scale);
-      if (info.comment) return info.comment;
-      // Fallback to descriptor if no custom comment
-      return info.descriptor || info.grade;
-    }
-    // Legacy fallback
-    if (pct >= 80) return "Excellent progress! Keep it up.";
-    if (pct >= 65) return "Good performance. Keep up the good work.";
-    if (pct >= 50) return "Fair performance. You can do better next time.";
-    return "You need to work harder. Seek help from teachers.";
-  };
-
-  let tfCom = `<tr><td class="rc-align-left rc-blue-text font-bold">Comment</td><td colspan="3" class="rc-empty-cell"></td>`;
-  termCols.forEach(t => {
-    const tt = termTotals[t.id];
-    let tMax = d.allAssessments.filter(a=>a.term_id===t.id).reduce((s,a)=>s+(Number(a.maximum_mark)||0),0);
-    if (tt.hasData && tMax>0) {
-      const p = (tt.tot/tMax)*100;
-      tfCom += `<td colspan="5" class="rc-comment-td">${getComment(p)}</td>`;
-    } else {
-      tfCom += `<td colspan="5" class="rc-empty-cell"></td>`;
-    }
-  });
-  if (showAnn) {
-    let cp = '';
-    if (hasGAnn && gAnnMax>0) cp = getComment((gAnnObt/gAnnMax)*100);
-    tfCom += `<td colspan="4" class="rc-comment-td">${cp}</td>`;
-  }
-  tfCom += `</tr>`;
-
-  /* ───── SIGNATURE ROW ───── */
-  const teacherSig = `<div>${d.settings.dos_name || 'EMMANUEL UWIMANA'}</div><img src="public/sig_teacher.png" onerror="this.outerHTML='<div class=&quot;rc-sig-stub&quot;></div>'" class="rc-sig-img">`;
-  const parentSig = `<img src="public/sig_parent.png" onerror="this.outerHTML='<div class=&quot;rc-sig-stub&quot;></div>'" class="rc-sig-img">`;
-  
-  let tfSig = `<tr>
-    <td colspan="4" class="rc-align-left rc-blue-text font-bold" style="border-right:none; padding-top:15px; padding-bottom:15px; line-height:2.2">
-      Class Teacher's Signature  <br> 
-      Parent's Signature 
-    </td>
-    <td colspan="${showAnn?termCols.length*5+4:termCols.length*5}" style="border-left:none" class="rc-sig-area">
-      <div style="display:flex; justify-content:space-around; width:100%">
-         <div style="text-align:center">${termCols.length>0 ? teacherSig : ''}</div>
-         <div style="text-align:center">${termCols.length>1 ? parentSig : ''}</div>
-         ${showAnn ? `<div style="text-align:center">${termCols.length>0 ? '' : ''}</div>` : ''}
-      </div>
-    </td>
-  </tr>`;
-
-  // Scale table
-  const sRow1 = d.scale.length ? d.scale.sort((a,b)=>Number(b.minimum_percentage)-Number(a.minimum_percentage)).map(s=>`<td>${s.maximum_percentage}-${s.minimum_percentage}</td>`).join('') : '';
-  const sRow2 = d.scale.length ? d.scale.map(s=>`<td>${s.grade}</td>`).join('') : '';
-  const sRow3 = d.scale.length ? d.scale.map((s,i)=>`<td>${Math.max(6-i,0)}</td>`).join('') : '';
-  
   const finalDesc = `
-    <div class="rc-footer-panels">
-      <div class="rc-scale-panel">
-        <table class="rc-scale-tbl">
-          <tr><td rowspan="3" class="rc-scale-title">Grading scale</td> <td class="rc-scale-blue">Final Grade</td> ${sRow1}</tr>
-          <tr><td class="rc-scale-blue">Letter Grade</td> ${sRow2}</tr>
-          <tr><td class="rc-scale-blue">Grade Value</td> ${sRow3}</tr>
-        </table>
+    <div class="rc-student-block" style="margin-top:8px; padding:8px 12px;">
+      <div class="rc-stu-col1" style="gap:8px">
+        <div><span class="rc-lbl-blue">Name:</span> <strong style="font-size:14px; margin-left:4px">${Utils.escapeHtml(learner.full_name || '-')}</strong></div>
+        <div><span class="rc-lbl-blue">Student Code:</span> <span style="margin-left:4px">${Utils.escapeHtml(learner.learner_code || '-')}</span></div>
       </div>
-      <div class="rc-desc-panel">
-        <div class="rc-desc-box">
-          <div class="rc-desc-label">Final Decision</div>
-        </div>
-        <div class="rc-desc-box">
-          <div class="rc-desc-label">Abbreviations</div>
-          <div style="font-size:10px; margin-top:2px;">
-            EU: End of Unit Assessment<br>
-            ET: End of Term Assessment<br>
-            GR: Grade<br>
-            TOT: Total<br>
-            MAX: Maximum
-          </div>
-        </div>
-        <div class="rc-desc-box" style="align-items:center; text-align:center;">
-           <div class="rc-desc-label">Class Teacher</div>
-           <div style="margin:2px 0 6px 0; font-weight:600">${Utils.escapeHtml(d.settings.dos_name || 'EMMANUEL UWIMANA')}</div>
-        </div>
-        <div class="rc-desc-box" style="align-items:center; border:none; text-align:center;">
-           <div class="rc-desc-label">Signature</div>
-           <img class="rc-sig-img" style="margin-top:2px" src="public/sig_teacher.png" onerror="this.outerHTML='<div class=&quot;rc-sig-stub-sm&quot;></div>'">
-        </div>
+      <div class="rc-stu-col2" style="gap:8px">
+        <div><span class="rc-lbl-blue">Academic Year:</span> <span style="margin-left:4px">${Utils.escapeHtml(d.year?.name || '-')}</span></div>
+        <div><span class="rc-lbl-blue">Class:</span> <span style="margin-left:4px">${Utils.escapeHtml(d.cls?.name || '-')}</span></div>
       </div>
+      <div class="rc-stu-col2" style="gap:8px">
+        <div><span class="rc-lbl-blue">Term(s):</span> <span style="margin-left:4px">${(termCols.map(t => t.name).join(', ') || '—')}</span></div>
+        <div><span class="rc-lbl-blue">Level:</span> <span style="margin-left:4px">${levelLbl}</span></div>
+      </div>
+    </div>
+    <div style="display:grid; grid-template-columns:repeat(4, minmax(0, 1fr)); gap:8px; margin-top:8px;">
+      ${studentSummary.map(item => `
+        <div style="border:1px solid var(--rc-dark-blue); border-radius:6px; background:#f5f9ff; padding:7px 8px; text-align:center;">
+          <div style="font-size:7.5pt; color:var(--rc-dark-blue); font-weight:700; text-transform:uppercase;">${Utils.escapeHtml(item.label)}</div>
+          <div style="font-size:12pt; font-weight:800; color:var(--rc-dark-blue); margin-top:4px;">${Utils.escapeHtml(item.value)}</div>
+        </div>
+      `).join('')}
     </div>`;
 
   return `
     <div class="rc-paper">
-      ${header}
-      ${studentInfo}
+      <div class="rc-header">
+        <div class="rc-title-group">
+          <div class="rc-main-title">${Utils.escapeHtml(schoolName)}</div>
+          <div class="rc-sub-title">RMS-MIS</div>
+          <div class="rc-tagline">Rukara Model School Marks Information System</div>
+          <div class="rc-contact-info">
+            <div>P.O. Box 1234, Rukara, Rwanda</div>
+            <div>Email: ${Utils.escapeHtml(schoolEmail)}</div>
+            <div>Phone: ${Utils.escapeHtml(schoolPhone)}</div>
+          </div>
+        </div>
+
+        <div class="rc-center-badge">
+          <div class="rc-badge-top">STUDENT REPORT CARD</div>
+          <div class="rc-badge-bottom">${levelLbl}</div>
+        </div>
+
+        <div class="rc-logo-group">
+          <div class="rc-logo-wrap">
+            <img src="${Utils.escapeHtml(logoUrl)}" class="rc-logo-img" onerror="this.style.display='none'">
+          </div>
+          <div class="rc-logo-text">Knowledge <span style="font-size:12px;margin:0 2px">•</span> Skills <span style="font-size:12px;margin:0 2px">•</span> Future</div>
+          <div class="rc-logo-rms">RMS-MIS</div>
+        </div>
+      </div>
+      <div class="rc-divider"></div>
+      <div class="rc-student-block">
+        <div class="rc-stu-col1">
+          <div><span class="rc-lbl-blue">Name:</span> <strong style="font-size:14px; margin-left:4px">${Utils.escapeHtml(learner.full_name || '-')}</strong></div>
+          <div><span class="rc-lbl-blue">Student Unique Identifier:</span> <span style="margin-left:4px">${Utils.escapeHtml(learner.learner_code || '-')}</span></div>
+        </div>
+        <div class="rc-stu-col2">
+          <div><span class="rc-lbl-blue">Academic Year:</span> <span style="margin-left:4px">${Utils.escapeHtml(d.year?.name || '-')}</span></div>
+          <div><span class="rc-lbl-blue">Level:</span> <span style="margin-left:4px">${levelLbl}</span></div>
+          <div><span class="rc-lbl-blue">Class:</span> <span style="margin-left:4px">${Utils.escapeHtml(d.cls?.name || '-')}</span></div>
+        </div>
+      </div>
       <div class="rc-table-wrapper">
         <table class="rc-data-table">
-          <thead>${th1}${th2}${th3Weight}${th4Conduct}${th5All}</thead>
-          <tbody>${tbody}</tbody>
-          <tfoot>${tfTotal}${tfPct}${tfPos}${tfCom}${tfSig}</tfoot>
+          <thead>${tableHeader}</thead>
+          <tbody>${tbody}${tfTotal}</tbody>
         </table>
       </div>
       ${finalDesc}

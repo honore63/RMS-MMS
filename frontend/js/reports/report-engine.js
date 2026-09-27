@@ -25,7 +25,8 @@ function filterReportSubjects(subjects, cls = null) {
 
 function filterReportAssessments(assessments, subjects, cls = null) {
   const allowedSubjectIds = new Set(filterReportSubjects(subjects, cls).map(subject => String(subject.id)));
-  return (assessments || []).filter(assessment => allowedSubjectIds.has(String(assessment.subject_id)));
+  /* Bulk-combine conversion helpers never feed official reports. */
+  return (assessments || []).filter(assessment => allowedSubjectIds.has(String(assessment.subject_id)) && !(Utils.isConversionHelper && Utils.isConversionHelper(assessment)));
 }
 
 function applyTeacherAssessmentScope(filter) {
@@ -199,7 +200,7 @@ const ReportEngine = {
     if (yearScope) assessFilter.academic_year_id = yearScope;
     if (term && term.id) assessFilter.term_id = term.id;
     const assessments = await DB.query('assessments', '*', assessFilter, { column: 'assessment_date', asc: false });
-    const validAssessments = assessments.filter(a => levelSubjects.some(s => s.id === a.subject_id));
+    const validAssessments = assessments.filter(a => levelSubjects.some(s => s.id === a.subject_id) && !(Utils.isConversionHelper && Utils.isConversionHelper(a)));
     const assessIds = validAssessments.map(a => a.id);
 
     let allMarks = [];
@@ -486,6 +487,7 @@ const ReportEngine = {
     if (assessmentIds && assessmentIds.length) qf.id = assessmentIds;
     if (subjectIds && subjectIds.length) qf.subject_id = subjectIds;
     let assessments = await DB.query('assessments', '*', qf, { column: 'created_at', asc: false });
+    assessments = (assessments || []).filter(a => !(Utils.isConversionHelper && Utils.isConversionHelper(a)));
     if (termIds && termIds.length){ const tSet=new Set(termIds.map(String)); assessments=assessments.filter(a=> !a.term_id || tSet.has(String(a.term_id))); }
     if (assessmentIds && assessmentIds.length){ const aSet=new Set(assessmentIds.map(String)); assessments=assessments.filter(a=> aSet.has(String(a.id))); }
 
@@ -509,7 +511,7 @@ const ReportEngine = {
         if (completionPct < 50) status = 'MISSING';
         else if (completionPct < 100) status = 'PARTIALLY COMPLETE';
 
-        rows.push({ class: cls.name, subject: subj.name, teacher: teacher?.full_name || '-', assessment: subjAssessments.map(a => a.name).join(', '), expectedCount, marksEntered, missingCount: Math.max(0, missingCount), completionPct, status });
+        rows.push({ class: cls.name, subject: subj.name, teacher: teacher?.full_name || '-', assessment: subjAssessments.map(a => a.display_name || a.name).join(', '), expectedCount, marksEntered, missingCount: Math.max(0, missingCount), completionPct, status });
       }
     }
 
@@ -720,6 +722,7 @@ const ReportEngine = {
     if (termIds && termIds.length) { const tSet = new Set(termIds.map(String)); raw = raw.filter(a => !a.term_id || tSet.has(String(a.term_id))); }
     if (assessmentIds && assessmentIds.length) { const aSet = new Set(assessmentIds.map(String)); raw = raw.filter(a => aSet.has(String(a.id))); }
     if (assessmentTypeId) raw = raw.filter(a => String(a.assessment_type_id) === String(assessmentTypeId));
+    raw = (raw || []).filter(a => !(Utils.isConversionHelper && Utils.isConversionHelper(a)));
     return raw || [];
   },
 

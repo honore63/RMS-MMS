@@ -1,5 +1,6 @@
 let assessFilter = 'all';
 let assessEduLevel = 'all';
+let asfTypes = [];
 
 async function renderAssessments() {
   setHeader('Assessment Approval', 'Review, approve, or reject teacher-submitted assessments');
@@ -12,6 +13,8 @@ async function renderAssessments() {
   
   const scoped = (typeof Scope !== 'undefined' && Scope.isScoped());
   const filtered = assessments.filter(a => {
+    /* Conversion helpers live only on the Convert Marks page. */
+    if (Utils.isConversionHelper && Utils.isConversionHelper(a)) return false;
     if (assessFilter !== 'all' && a.status !== assessFilter) return false;
     const cls = classes.find(c => c.id === a.class_id);
     if (scoped) {
@@ -38,11 +41,11 @@ async function renderAssessments() {
       canApprove = true;
     }
     return `<tr>
-      <td class="col-name">${Utils.escapeHtml(a.name)}</td>
+      <td class="col-name">${Utils.escapeHtml(Utils.buildAssessmentDisplayName(a, types))}</td>
       <td>${Utils.escapeHtml(assessmentTypeName(types, a.assessment_type_id, 'End-of-Unit Assessment'))}</td>
       <td><span style="font-size:10px;font-weight:700;color:var(--gray-500);text-transform:uppercase;display:block;margin-bottom:2px">${cat}</span>${Utils.escapeHtml(c?.name || '-')}</td>
       <td>${Utils.escapeHtml(s?.name || '-')}</td>
-      <td>${Utils.escapeHtml(a.unit || '-')}</td><td>${Utils.escapeHtml(t?.full_name || '-')}</td>
+      <td>${Utils.escapeHtml(a.period_label || a.unit_name || a.unit || '-')}</td><td>${Utils.escapeHtml(t?.full_name || '-')}</td>
       <td class="text-center font-semibold">${marksInfo}</td>
       <td>${a.maximum_mark}</td>
       <td><span class="badge ${Utils.statusColor(a.status)}"><i data-lucide="${Utils.statusIcon(a.status)}"></i> ${a.status}</span></td>
@@ -126,7 +129,7 @@ async function assessView(id) {
   const total = learners.length;
 
   Modal.show(`${Utils.escapeHtml(sub?.[0]?.name || '')} — ${Utils.escapeHtml(cls?.[0]?.name || '')}`, `
-    <p class="text-sm text-muted mb-3"><strong style="color:var(--gray-800)">${Utils.escapeHtml(assessmentTypeName(types, assessment.assessment_type_id, 'Assessment'))}:</strong> ${Utils.escapeHtml(assessment.name)}${assessment.unit ? ' — ' + Utils.escapeHtml(assessment.unit) : ''}</p>
+    <p class="text-sm text-muted mb-3"><strong style="color:var(--gray-800)">${Utils.escapeHtml(assessmentTypeName(types, assessment.assessment_type_id, 'Assessment'))}:</strong> ${Utils.escapeHtml(Utils.buildAssessmentDisplayName(assessment, types))}${assessment.converted_from_maximum ? ` <span class="status-pill" style="background:var(--blue-50);color:var(--blue-700)">Converted from ${Utils.escapeHtml(assessment.converted_from_maximum)} to ${Utils.escapeHtml(assessment.maximum_mark)}</span>` : ''}${Utils.isConversionHelper && Utils.isConversionHelper(assessment) ? ` <span class="status-pill" style="background:#fffbeb;color:#b45309">Conversion helper — excluded from official reports</span>` : ''}</p>
     <div style="background:var(--gray-50);border:1px solid var(--gray-200);border-radius:var(--radius);padding:14px 16px;margin-bottom:16px;display:grid;grid-template-columns:1fr 1fr;gap:8px 16px">
       <div><span class="text-xs text-muted">Created by</span><div class="text-sm font-semibold">${Utils.escapeHtml(teacher?.[0]?.full_name || '-')}</div></div>
       <div><span class="text-xs text-muted">Maximum Mark</span><div class="text-sm font-semibold">${assessment.maximum_mark}</div></div>
@@ -152,7 +155,7 @@ async function assessForm() {
     DB.query('subjects', '*', { status: 'active' }), DB.get('academic_years'), DB.get('terms'),
     getAssessmentTypes()
   ]);
-  const activeTypes = types.filter(t => t.status === 'active');
+  asfTypes = types.filter(t => t.status === 'active');
   const scoped = typeof Scope !== 'undefined' && Scope.isScoped();
   const scopedClasses = scoped ? Scope.filterClasses(classes) : classes;
   const scopedSubjects = scoped ? Scope.filterSubjects(subjects) : subjects;
@@ -175,13 +178,14 @@ async function assessForm() {
       .asf-section-title::after { content:""; flex:1; height:1px; background:#e2e8f0; }
       .asf-section .form-group { margin-bottom:10px; }
       .asf-section .form-group:last-child { margin-bottom:0; }
+      .asf-preview { margin-top:10px; padding:10px 12px; border:1px dashed var(--blue-200); border-radius:8px; background:var(--blue-50); color:var(--blue-800); font-size:12px; }
     </style>
     ${scoped ? `<div class="alert alert-info" style="margin-bottom:12px"><i data-lucide="shield-check"></i> Creating for <strong>${Utils.escapeHtml(Scope.label())}</strong> — only ${scoped ? Scope.label() : ''} classes/subjects are listed.</div>` : ''}
     <div class="asf-section">
-      <div class="asf-section-title"><i data-lucide="file-text" style="width:14px;height:14px"></i> 1 — Basic Info</div>
-      <div class="form-group"><label>Assessment Name <span class="required">*</span></label><input id="asf-name" class="input-field" placeholder="e.g., Unit 3 Quiz, Terminal Exam S2, PRACTICAL 1"></div>
-      <div class="form-group"><label>Assessment Type <span class="required">*</span></label><select id="asf-type" class="select-field" onchange="assessTypeChanged()">${activeTypes.map((t, i) => `<option value="${t.id}" data-default-max="${t.default_maximum_mark ?? ''}" ${i === 0 ? 'selected' : ''}>${Utils.escapeHtml(t.name)}${t.weight != null ? ' (w=' + t.weight + ')' : ''}</option>`).join('')}</select></div>
-      <div class="form-group"><label>Unit <span class="text-muted">— only for End-of-Unit types</span></label><input id="asf-unit" class="input-field" placeholder="e.g., Unit 3 - Whole Numbers"></div>
+      <div class="asf-section-title"><i data-lucide="file-text" style="width:14px;height:14px"></i> 1 — What is the assessment?</div>
+      <div class="form-group"><label>Assessment Type <span class="required">*</span></label><select id="asf-type" class="select-field" onchange="assessTypeChanged()">${asfTypes.map((t, i) => `<option value="${t.id}" data-default-max="${t.default_maximum_mark ?? ''}" ${i === 0 ? 'selected' : ''}>${Utils.escapeHtml(t.name)}${t.weight != null ? ' (w=' + t.weight + ')' : ''}</option>`).join('')}</select></div>
+      <div id="asf-period-fields"></div>
+      <div class="asf-preview"><i data-lucide="eye" style="width:13px;height:13px;vertical-align:middle;margin-right:4px"></i>Will display as: <strong id="asf-display-preview"></strong></div>
     </div>
     <div class="asf-section">
       <div class="asf-section-title"><i data-lucide="users" style="width:14px;height:14px"></i> 2 — Class • Subject • Teacher</div>
@@ -192,9 +196,9 @@ async function assessForm() {
     <div class="asf-section">
       <div class="asf-section-title"><i data-lucide="calendar" style="width:14px;height:14px"></i> 3 — Period & Scoring</div>
       <div class="form-row"><div class="form-group"><label>Academic Year <span class="required">*</span></label><select id="asf-year" class="select-field"><option value="">Select year</option>${years.map(y => `<option value="${y.id}" ${y.id === selYear ? 'selected' : ''}>${Utils.escapeHtml(y.name)}</option>`).join('')}</select></div>
-      <div class="form-group"><label>Term <span class="required">*</span></label><select id="asf-term" class="select-field"><option value="">Select term</option>${yearTerms.map(t => `<option value="${t.id}" ${t.id === selTerm ? 'selected' : ''}>${Utils.escapeHtml(t.name)}</option>`).join('')}</select></div></div>
+      <div class="form-group"><label>Term <span class="required">*</span></label><select id="asf-term" class="select-field" onchange="asfUpdatePreview()"><option value="">Select term</option>${yearTerms.map(t => `<option value="${t.id}" ${t.id === selTerm ? 'selected' : ''}>${Utils.escapeHtml(t.name)}</option>`).join('')}</select></div></div>
       <div class="form-row">
-        <div class="form-group"><label>Maximum Mark <span class="required">*</span></label><input id="asf-max" type="number" class="input-field" value="${activeTypes[0]?.default_maximum_mark ?? 30}" min="1" max="100"></div>
+        <div class="form-group"><label>Maximum Mark <span class="required">*</span></label><input id="asf-max" type="number" class="input-field" value="${asfTypes[0]?.default_maximum_mark ?? 30}" min="1" max="100"></div>
         <div class="form-group"><label>Weight <span class="text-muted">(optional, blank = type default)</span></label><input id="asf-weight" type="number" min="0" step="any" class="input-field" placeholder="e.g., 0.3"></div>
       </div>
       <div class="form-group"><label>Date <span class="required">*</span></label><input id="asf-date" type="date" class="input-field" value="${new Date().toISOString().split('T')[0]}"></div>
@@ -206,6 +210,7 @@ async function assessForm() {
     `<button class="btn btn-secondary" onclick="Modal.close()">Cancel</button>
      <button class="btn btn-primary" onclick="assessSave(this)"><i data-lucide="save"></i> Create Assessment</button>`, true);
   if (typeof lucide !== 'undefined') lucide.createIcons();
+  assessTypeChanged();
   // keep Term list in sync when Year changes
   document.getElementById('asf-year')?.addEventListener('change', (e) => {
     const yId = e.target.value;
@@ -213,6 +218,7 @@ async function assessForm() {
     if (!termSel) return;
     const filtered = yId ? terms.filter(t => t.academic_year_id === yId) : terms;
     termSel.innerHTML = '<option value="">Select term</option>' + filtered.map(t => `<option value="${t.id}">${Utils.escapeHtml(t.name)}</option>`).join('');
+    asfUpdatePreview();
   });
 }
 
@@ -223,55 +229,195 @@ function assessTypeChanged() {
   if (sel && max && opt && opt.dataset.defaultMax) {
     max.value = opt.dataset.defaultMax;
   }
+  asfRenderPeriodFields();
+}
+
+function asfSelectedType() {
+  const sel = document.getElementById('asf-type');
+  return asfTypes.find(t => String(t.id) === String(sel && sel.value)) || null;
+}
+
+function asfUnitNumberValue() {
+  const sel = document.getElementById('asf-unit-number');
+  const v = sel && sel.value;
+  if (v && v !== '' && v !== 'custom') return v;
+  if (v === 'custom') return (document.getElementById('asf-unit-custom')?.value || '').trim();
+  return '';
+}
+
+function asfUnitNumberChanged() {
+  const sel = document.getElementById('asf-unit-number');
+  const wrap = document.getElementById('asf-unit-custom-wrap');
+  if (wrap) wrap.style.display = (sel && sel.value === 'custom') ? '' : 'none';
+  asfUpdatePreview();
+}
+
+function asfTermName() {
+  const sel = document.getElementById('asf-term');
+  return (sel && sel.selectedOptions[0]) ? sel.selectedOptions[0].textContent : '';
+}
+
+function asfRenderPeriodFields() {
+  const container = document.getElementById('asf-period-fields');
+  if (!container) return;
+  const type = asfSelectedType();
+  const hint = Utils.getTypePeriodHint(type);
+  let html = '';
+  if (hint === 'week') {
+    html = `<div class="form-group"><label>Week Number <span class="required">*</span></label><select id="asf-week" class="select-field" onchange="asfUpdatePreview()"><option value="">Select week</option>${Array.from({ length: 16 }, (_, i) => i + 1).map(w => `<option value="${w}">Week ${w}</option>`).join('')}</select></div>`;
+  } else if (hint === 'month') {
+    html = `<div class="form-group"><label>Month <span class="required">*</span></label><select id="asf-month" class="select-field" onchange="asfUpdatePreview()"><option value="">Select month</option>${Utils.MONTH_LONG.map((m, i) => `<option value="${i + 1}">${m}</option>`).join('')}</select></div>`;
+  } else if (hint === 'term') {
+    html = `<div class="form-group"><label>Term <span class="required">*</span></label><div class="text-sm font-semibold" id="asf-term-readout" style="padding:8px 12px;background:var(--gray-50);border:1px solid var(--gray-200);border-radius:8px">${asfTermName() || 'Select a term in section 3 below.'}</div><p class="form-hint">The term chosen in section 3 is applied automatically.</p></div>`;
+  } else if (hint === 'unit') {
+    html = `<div class="form-row">
+      <div class="form-group"><label>Unit Number <span class="required">*</span></label>
+        <select id="asf-unit-number" class="select-field" onchange="asfUnitNumberChanged()"><option value="">Select unit number</option>${[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15].map(n => `<option value="${n}">Unit ${n}</option>`).join('')}<option value="custom">Unit 16 and above...</option></select>
+        <div id="asf-unit-custom-wrap" style="display:none;margin-top:8px"><input id="asf-unit-custom" type="number" min="16" class="input-field" placeholder="Unit number, e.g. 18" oninput="asfUpdatePreview()"></div>
+      </div>
+      <div class="form-group"><label>Unit Name <span class="required">*</span></label><input id="asf-unit-name" class="input-field" placeholder="e.g., Fractions and Decimals" oninput="asfUpdatePreview()"></div>
+    </div>`;
+  } else if (hint === 'other') {
+    html = `<div class="form-group"><label>Assessment Name <span class="required">*</span></label><input id="asf-other-name" class="input-field" placeholder="Free-text name (only the Other type allows this)" oninput="asfUpdatePreview()"></div>`;
+  } else {
+    html = `<div class="form-group"><label>Label <span class="text-muted">(optional — e.g. 1, 2, Session A)</span></label><input id="asf-label" class="input-field" placeholder="e.g., 1, 2, Session A" oninput="asfUpdatePreview()"></div>`;
+  }
+  container.innerHTML = html;
+  asfUpdatePreview();
+}
+
+function asfUpdatePreview() {
+  const el = document.getElementById('asf-display-preview');
+  if (!el) return;
+  const type = asfSelectedType();
+  const hint = Utils.getTypePeriodHint(type);
+  const typeName = type ? type.name : 'End-of-Unit Assessment';
+  let label = typeName;
+  if (hint === 'week') {
+    const w = document.getElementById('asf-week')?.value;
+    label = w ? typeName + ' — Week ' + w : typeName + ' — (week not set)';
+  } else if (hint === 'month') {
+    const m = document.getElementById('asf-month')?.value;
+    label = m ? typeName + ' — ' + Utils.monthLabel(m) : typeName + ' — (month not set)';
+  } else if (hint === 'term') {
+    const t = asfTermName();
+    label = t ? typeName + ' — ' + t : typeName + ' — (term not set)';
+  } else if (hint === 'unit') {
+    const un = asfUnitNumberValue();
+    const uName = (document.getElementById('asf-unit-name')?.value || '').trim();
+    if (un && uName) label = typeName + ' — Unit ' + un + ': ' + uName;
+    else if (un) label = typeName + ' — Unit ' + un;
+    else if (uName) label = typeName + ' — ' + uName;
+    else label = typeName + ' — (unit not set)';
+  } else if (hint === 'other') {
+    label = (document.getElementById('asf-other-name')?.value || '').trim() || '(name required for Other)';
+  } else {
+    const lb = (document.getElementById('asf-label')?.value || '').trim();
+    label = lb ? typeName + ' — ' + lb : typeName;
+  }
+  el.textContent = label;
 }
 
 async function assessSave(btn) {
-  if (btn) {
-    btn.disabled = true;
-    btn.innerHTML = 'Creating...';
+  if (btn) { btn.disabled = true; btn.innerHTML = 'Creating...'; }
+  const fail = (msg) => {
+    if (btn) { btn.disabled = false; btn.innerHTML = '<i data-lucide="save"></i> Create Assessment'; if (typeof lucide !== 'undefined') lucide.createIcons(); }
+    Utils.toast(msg, 'error');
+  };
+  const type = asfSelectedType();
+  const hint = Utils.getTypePeriodHint(type);
+  const typeName = type ? type.name : 'End-of-Unit Assessment';
+
+  let periodType = null, periodValue = null, periodLabel = null, unitNumber = null, unitName = null;
+  let label = '';
+  const termId = document.getElementById('asf-term').value || null;
+
+  if (hint === 'week') {
+    periodType = 'week';
+    periodValue = parseInt(document.getElementById('asf-week')?.value) || null;
+    if (!periodValue) return fail('Select the week number');
+    periodLabel = 'Week ' + periodValue;
+    label = typeName + ' — Week ' + periodValue;
+  } else if (hint === 'month') {
+    periodType = 'month';
+    periodValue = parseInt(document.getElementById('asf-month')?.value) || null;
+    if (!periodValue) return fail('Select the month');
+    periodLabel = Utils.monthLabel(periodValue);
+    label = typeName + ' — ' + periodLabel;
+  } else if (hint === 'term') {
+    periodType = 'term';
+    if (!termId) return fail('Select a term');
+    periodLabel = asfTermName();
+    label = typeName + ' — ' + periodLabel;
+  } else if (hint === 'unit') {
+    periodType = 'unit';
+    unitNumber = asfUnitNumberValue();
+    unitName = (document.getElementById('asf-unit-name')?.value || '').trim();
+    if (!unitNumber) return fail('Enter the unit number');
+    if (!unitName) return fail('Enter the unit name');
+    periodValue = parseInt(unitNumber) || null;
+    periodLabel = 'Unit ' + unitNumber;
+    label = typeName + ' — Unit ' + unitNumber + ': ' + unitName;
+  } else if (hint === 'other') {
+    periodType = 'other';
+    label = (document.getElementById('asf-other-name')?.value || '').trim();
+    if (!label) return fail('Enter the assessment name');
+  } else {
+    label = typeName;
+    const lb = (document.getElementById('asf-label')?.value || '').trim();
+    if (lb) label = typeName + ' — ' + lb;
   }
+
   const d = {
-    name: document.getElementById('asf-name').value.trim(),
+    name: label,
+    display_name: label,
     assessment_type_id: document.getElementById('asf-type').value || null,
-    unit: document.getElementById('asf-unit').value.trim() || null,
+    period_type: periodType,
+    period_value: periodValue,
+    period_label: periodLabel,
+    unit_number: (hint === 'unit') ? periodValue : null,
+    unit_name: (hint === 'unit') ? unitName : null,
+    unit: (hint === 'unit') ? ('Unit ' + unitNumber + (unitName ? ' - ' + unitName : '')) : null,
     class_id: document.getElementById('asf-class').value || null,
     subject_id: document.getElementById('asf-subject').value || null,
     teacher_id: document.getElementById('asf-teacher').value || null,
     academic_year_id: document.getElementById('asf-year').value || null,
-    term_id: document.getElementById('asf-term').value || null,
+    term_id: termId,
     maximum_mark: parseInt(document.getElementById('asf-max').value) || 30,
     weight: document.getElementById('asf-weight').value.trim() === '' ? null : parseFloat(document.getElementById('asf-weight').value),
     assessment_date: document.getElementById('asf-date').value || null,
     description: document.getElementById('asf-desc').value.trim() || null,
     status: 'draft'
   };
-  if (!d.name) { if (btn) { btn.disabled=false; btn.innerHTML='<i data-lucide="save"></i> Create Assessment'; } return Utils.toast('Enter assessment name', 'error'); }
-  if (!d.class_id || !d.subject_id || !d.teacher_id) { if (btn) { btn.disabled=false; btn.innerHTML='<i data-lucide="save"></i> Create Assessment'; } return Utils.toast('Select class, subject and teacher', 'error'); }
-  if (!d.academic_year_id || !d.term_id) { if (btn) { btn.disabled=false; btn.innerHTML='<i data-lucide="save"></i> Create Assessment'; } return Utils.toast('Select academic year and term', 'error'); }
-  if (!d.assessment_date) { if (btn) { btn.disabled=false; btn.innerHTML='<i data-lucide="save"></i> Create Assessment'; } return Utils.toast('Select assessment date', 'error'); }
-  if (!d.maximum_mark || d.maximum_mark < 1) { if (btn) { btn.disabled=false; btn.innerHTML='<i data-lucide="save"></i> Create Assessment'; } return Utils.toast('Enter a valid maximum mark', 'error'); }
+  if (!d.class_id || !d.subject_id || !d.teacher_id) return fail('Select class, subject and teacher');
+  if (!d.academic_year_id || !d.term_id) return fail('Select academic year and term');
+  if (!d.assessment_date) return fail('Select assessment date');
+  if (!d.maximum_mark || d.maximum_mark < 1) return fail('Enter a valid maximum mark');
   // scope validation — prevent cross-level (Primary subject → Secondary class)
   try {
-    const cls = classes.find(c => String(c.id) === String(d.class_id));
-    const subj = subjects.find(s => String(s.id) === String(d.subject_id));
-    if (scoped && cls && subj) {
+    const [dbClasses, dbSubjects] = await Promise.all([DB.get('classes'), DB.get('subjects')]);
+    const cls = dbClasses.find(c => String(c.id) === String(d.class_id));
+    const subj = dbSubjects.find(s => String(s.id) === String(d.subject_id));
+    if (typeof Scope !== 'undefined' && Scope.isScoped() && cls && subj) {
       if (!Scope.matchesClass(cls) || !Scope.matchesSubject(subj)) {
-        if (btn) { btn.disabled=false; btn.innerHTML='<i data-lucide="save"></i> Create Assessment'; if(typeof lucide!=='undefined') lucide.createIcons(); }
-        return Utils.toast('This class/subject combination is outside your education-level scope. Primary subjects cannot be assigned to Secondary classes, and vice versa.', 'error');
+        return fail('This class/subject combination is outside your education-level scope. Primary subjects cannot be assigned to Secondary classes, and vice versa.');
       }
     }
   } catch (e) { /* ignore */ }
   // student check — tell DOS if class has no active learners
   try {
     const { count: _classLearnerCount } = await sbClient.from('learners').select('id', { count: 'exact', head: true }).eq('class_id', d.class_id).eq('status', 'active');
-    if (!_classLearnerCount) { if (btn) { btn.disabled=false; btn.innerHTML='<i data-lucide="save"></i> Create Assessment'; if (typeof lucide!=='undefined') lucide.createIcons(); } return Utils.toast('There is no student in this class — register learners first before creating an assessment.', 'error'); }
+    if (!_classLearnerCount) return fail('There is no student in this class — register learners first before creating an assessment.');
   } catch (e) { /* ignore count error, allow creation */ }
   try {
-    await DB.insert('assessments', d);
+    const { data: inserted, error } = await sbClient.from('assessments').insert(d).select().single();
+    if (error) throw error;
+    DB.invalidate('assessments');
+    if (typeof AnalyticsEngine !== 'undefined') AnalyticsEngine.resetContext();
+    if (typeof ReportUtils !== 'undefined') ReportUtils.invalidate();
     Modal.close(); Utils.toast('Assessment created', 'success'); renderAssessments();
-  } catch (e) { 
-    if (btn) { btn.disabled = false; btn.innerHTML = '<i data-lucide="save"></i> Create'; if (typeof lucide !== 'undefined') lucide.createIcons(); }
-    Utils.toast('Error: ' + e.message, 'error'); 
+  } catch (e) {
+    fail('Error: ' + e.message);
   }
 }
 
@@ -375,11 +521,13 @@ async function notifyTeacher(assessId, title, message, type) {
     const finalMessage = message || `Assessment ${a.name || 'mark entry'} for ${cls?.name || 'your class'} in ${sub?.name || 'the subject'} has an update.`;
     if (t.user_id) {
       await DB.insert('notifications', {
-        user_id: t.user_id,
+        recipient_user_id: t.user_id,
         title,
         message: finalMessage,
-        type: type || 'info',
-        read: false
+        notification_type: type || 'SYSTEM',
+        category: 'assessment',
+        priority: 'normal',
+        is_read: false
       });
     }
   } catch (e) { console.error('Notify error:', e); }
@@ -390,11 +538,13 @@ async function notifyDosOnTeacherSubmission(assessmentId, teacherName, assessmen
     const { data: dosUsers } = await sbClient.from('users').select('id').eq('role', 'dos');
     if (!dosUsers || !dosUsers.length) return;
     const rows = dosUsers.map(dos => ({
-      user_id: dos.id,
+      recipient_user_id: dos.id,
       title: 'Marks Submitted for Approval',
       message: `${teacherName || 'A teacher'} submitted ${assessmentName || 'marks'} for ${className || 'a class'} / ${subjectName || 'subject'} and it is awaiting your approval.`,
-      type: 'info',
-      read: false
+      notification_type: 'MARKS_SUBMITTED',
+      category: 'marks',
+      priority: 'normal',
+      is_read: false
     }));
     if (rows.length) await sbClient.from('notifications').insert(rows);
     if (rows.length && typeof DB !== 'undefined') DB.invalidate('notifications');

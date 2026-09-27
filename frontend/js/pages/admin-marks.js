@@ -27,8 +27,9 @@ async function renderAdminMarks() {
     setContent(`<div class="alert alert-danger"><strong>Marks could not be loaded.</strong><br>${Utils.escapeHtml(e.message || 'Database request failed')}</div>`);
     return;
   }
-  const learnerMap = new Map(learners.map(l => [l.id, l]));
-  const classMap = new Map(classes.map(c => [c.id, c]));
+  /* Conversion helpers live only on the Convert Marks page. */
+  assessments = (assessments || []).filter(a => !(Utils.isConversionHelper && Utils.isConversionHelper(a)));
+  const learnerMap = new Map(learners.map(l => [l.id, l]));  const classMap = new Map(classes.map(c => [c.id, c]));
   const levelMap = new Map();
   learners.forEach(l => { if (l.class_id) levelMap.set(l.id, EducationLevels.getCategory(classes.find(c => c.id === l.class_id))); });
   const scoped = (typeof Scope !== 'undefined' && Scope.isScoped());
@@ -58,7 +59,7 @@ async function renderAdminMarks() {
     const pf = Utils.passFail(pct);
     rows += `<tr>
       <td>${Utils.escapeHtml(cls?.name || '-')}</td>
-      <td class="col-name">${Utils.escapeHtml(a?.name||'-')}<div class="text-xs text-muted">${Utils.escapeHtml(assessmentTypeName(types, a?.assessment_type_id, 'End-of-Unit Assessment'))}${a?.unit ? ' - ' + Utils.escapeHtml(a.unit) : ''}</div></td>
+      <td class="col-name">${Utils.escapeHtml(Utils.buildAssessmentDisplayName(a, types))}<div class="text-xs text-muted">${Utils.escapeHtml(assessmentTypeName(types, a?.assessment_type_id, 'End-of-Unit Assessment'))}${a?.period_label ? ' - ' + Utils.escapeHtml(a.period_label) : (a?.unit ? ' - ' + Utils.escapeHtml(a.unit) : '')}</div></td>
       <td>${Utils.escapeHtml(l?.full_name||'-')}</td>
       <td>${m.mark != null ? m.mark + '/' + (a?.maximum_mark||30) : '-'}</td>
       <td class="font-semibold">${pct}%</td>
@@ -76,7 +77,7 @@ async function renderAdminMarks() {
         </select>
         <select class="select-field" style="max-width:420px" onchange="marksAssessFilter=this.value;renderAdminMarks()">
           <option value="all">All Assessments</option>
-          ${assessments.map(a=>`<option value="${a.id}" ${marksAssessFilter===a.id?'selected':''}>${a.name} (${Utils.escapeHtml(assessmentTypeName(types, a.assessment_type_id, 'End-of-Unit Assessment'))})${a.unit ? ' - ' + Utils.escapeHtml(a.unit) : ''}</option>`).join('')}
+          ${assessments.map(a=>`<option value="${a.id}" ${marksAssessFilter===a.id?'selected':''}>${Utils.escapeHtml(Utils.buildAssessmentDisplayName(a, types))} (${Utils.escapeHtml(assessmentTypeName(types, a.assessment_type_id, 'End-of-Unit Assessment'))})${a.period_label ? ' - ' + Utils.escapeHtml(a.period_label) : (a.unit ? ' - ' + Utils.escapeHtml(a.unit) : '')}</option>`).join('')}
         </select>
         <select class="select-field" style="max-width:260px" onchange="marksTypeFilter=this.value;renderAdminMarks()">
            <option value="all">All Types</option>

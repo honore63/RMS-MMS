@@ -8,7 +8,7 @@ async function renderAdminDashboard() {
     const [teachers, allClasses, allAssessments] = await Promise.all([
       DB.count('teachers'),
       DB.get('classes'),
-      DB.get('assessments', {}, { select: 'id,class_id,subject_id,teacher_id,status,created_at' })
+      DB.get('assessments', {}, { select: 'id,class_id,subject_id,teacher_id,status,created_at,description,period_label,period_type' })
     ]);
 
     // Apply Education Level Filter (scoped DOS is locked to its level)
@@ -21,8 +21,9 @@ async function renderAdminDashboard() {
     }
     const classIds = classes.map(c => c.id);
 
-    // Filter assessments based on filtered classes
+    // Filter assessments based on filtered classes (helpers live only on Convert Marks page)
     const assessments = (allAssessments || []).filter(a => {
+      if (Utils.isConversionHelper && Utils.isConversionHelper(a)) return false;
       if (!scoped && adminDashboardEduLevel === 'all') return true;
       return classIds.includes(a.class_id);
     });

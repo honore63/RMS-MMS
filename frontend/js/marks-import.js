@@ -784,7 +784,8 @@ const MarksImport = (() => {
     const filters = { class_id: S.ctx.class ? S.ctx.class.id : undefined, subject_id: S.ctx.subject ? S.ctx.subject.id : undefined };
     if (S.ctx.year) filters.academic_year_id = S.ctx.year.id;
     DB.query('assessments', '*', filters, { column: 'assessment_date', asc: false }).then(list => {
-      let items = list || [];
+      /* Conversion helpers live only on the Convert Marks page. */
+      let items = (list || []).filter(a => !(Utils.isConversionHelper && Utils.isConversionHelper(a)));
       if (!S.isAdmin) items = items.filter(a => a.teacher_id === S.teacherId || allowedAssignment(a));
       S._assessments = items;
       sel.innerHTML = '<option value="">Select assessment</option>' + items.map(a =>
@@ -1130,7 +1131,7 @@ const MarksImport = (() => {
     const body = `
       <p class="text-sm text-muted" style="margin-bottom:12px">You are about to save marks for the assessment below. This writes to Supabase immediately.</p>
       <div style="background:var(--gray-50);border:1px solid var(--gray-200);border-radius:var(--radius);padding:14px 16px;margin-bottom:6px">
-        <div class="flex justify-between mb-1"><span class="text-sm text-muted">Assessment</span><span class="text-sm font-semibold">${esc(S.ctx.assessment.name)}${S.ctx.assessment.unit ? ' - ' + esc(S.ctx.assessment.unit) : ''}</span></div>
+        <div class="flex justify-between mb-1"><span class="text-sm text-muted">Assessment</span><span class="text-sm font-semibold">${esc(S.ctx.assessment.display_name || S.ctx.assessment.name)}${S.ctx.assessment.period_label ? ' - ' + esc(S.ctx.assessment.period_label) : (S.ctx.assessment.unit ? ' - ' + esc(S.ctx.assessment.unit) : '')}</span></div>
         <div class="flex justify-between mb-1"><span class="text-sm text-muted">Class / Subject</span><span class="text-sm font-semibold">${esc(S.ctx.class.name)} / ${esc(S.ctx.subject.name)}</span></div>
         <div class="flex justify-between"><span class="text-sm text-muted">Maximum Mark</span><span class="text-sm font-semibold">${S.ctx.assessment.maximum_mark}</span></div>
       </div>
@@ -1286,7 +1287,7 @@ const MarksImport = (() => {
         <div class="import-stat is-amber"><div class="is-value">${skipped}</div><div class="is-label">Skipped</div></div>
         <div class="import-stat is-red"><div class="is-value">${c.errors}</div><div class="is-label">Errors</div></div>
       </div>
-      <p class="text-sm text-muted" style="margin-top:8px">File: <strong>${esc(S.fileName)}</strong> &middot; ${esc(S.ctx.class.name)} - ${esc(S.ctx.subject.name)} &middot; ${esc(S.ctx.assessment.name)}</p>`;
+      <p class="text-sm text-muted" style="margin-top:8px">File: <strong>${esc(S.fileName)}</strong> &middot; ${esc(S.ctx.class.name)} - ${esc(S.ctx.subject.name)} &middot; ${esc(S.ctx.assessment.display_name || S.ctx.assessment.name)}</p>`;
     const footer = `<button class="btn btn-secondary" onclick="Modal.close()">Done</button>
       ${c.errors ? `<button class="btn btn-secondary" onclick="MarksImport.downloadErrorReport()"><i data-lucide="file-warning"></i> Download Error Report</button>` : ''}
       <button class="btn btn-primary" onclick="Modal.close();Router.go('${viewRoute}')"><i data-lucide="eye"></i> View Marks</button>`;
@@ -1356,7 +1357,7 @@ const MarksImport = (() => {
         ? [TEMPLATE_HEADERS].concat(rosterForTemplate.map(l=> [l.learner_code || '', l.full_name || '', '']))
         : [TEMPLATE_HEADERS, ['', '', '']];
       const templateFileBase = (S.ctx && S.ctx.assessment)
-        ? `marks-template-${(S.ctx.class? S.ctx.class.name : 'Class').replace(/[^a-zA-Z0-9]/g,'_')}-${S.ctx.assessment.name.replace(/[^a-zA-Z0-9]/g,'_')}`
+        ? `marks-template-${(S.ctx.class? S.ctx.class.name : 'Class').replace(/[^a-zA-Z0-9]/g,'_')}-${(S.ctx.assessment.display_name || S.ctx.assessment.name).replace(/[^a-zA-Z0-9]/g,'_')}`
         : (typeof markAssessment !== 'undefined' && markAssessment ? `marks-template-${markAssessment.id.slice(0,8)}` : 'marks-template');
       if (kind === 'csv') {
         const csv = templateRows.map(r => r.map(c => /[",\n]/.test(String(c)) ? '"' + String(c).replace(/"/g, '""') + '"' : String(c)).join(',')).join('\r\n');

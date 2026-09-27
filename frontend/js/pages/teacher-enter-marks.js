@@ -8,6 +8,9 @@ let activeTerm = null;
 let listSearch = '';
 let listFilter = 'all';
 let markSettings = { pass_mark: 50, decimal_marks_enabled: false };
+let casTypes = [];
+let casTerms = [];
+let convertState = null;
 
 async function renderEnterMarks() {
   const urlParams = new URLSearchParams(window.location.hash.split('?')[1] || '');
@@ -70,12 +73,14 @@ async function renderAssessmentList() {
   }
 
   const filtered = assessments.filter(a => {
+    /* Conversion helpers live only on the Convert Marks page. */
+    if (Utils.isConversionHelper && Utils.isConversionHelper(a)) return false;
     if (listFilter !== 'all' && a.status !== listFilter) return false;
     if (!listSearch) return true;
     const q = listSearch.toLowerCase();
     const cls = classes.find(c => c.id === a.class_id);
     const sub = subjects.find(s => s.id === a.subject_id);
-    return (a.name + ' ' + (a.unit || '') + ' ' + assessmentTypeName(types, a.assessment_type_id, '') + ' ' + (cls?.name || '') + ' ' + (sub?.name || '')).toLowerCase().includes(q);
+    return (a.name + ' ' + (a.unit || '') + ' ' + Utils.buildAssessmentDisplayName(a, types) + ' ' + assessmentTypeName(types, a.assessment_type_id, '') + ' ' + (cls?.name || '') + ' ' + (sub?.name || '')).toLowerCase().includes(q);
   });
 
   const grouped = {};
@@ -139,7 +144,7 @@ async function renderAssessmentList() {
         <td class="col-name">${Utils.escapeHtml(sub?.name || '-')}</td>
         <td class="text-muted">${Utils.escapeHtml(cls?.name || '-')}</td>
         <td>${Utils.escapeHtml(assessmentTypeName(types, a.assessment_type_id, 'End-of-Unit Assessment'))}</td>
-        <td><span class="font-semibold">${Utils.escapeHtml(a.unit || a.name)}</span><div class="text-xs text-muted">${Utils.escapeHtml(a.name)}</div></td>
+        <td><span class="font-semibold">${Utils.escapeHtml(Utils.buildAssessmentDisplayName(a, types))}</span><div class="text-xs text-muted">${Utils.escapeHtml(a.name)}</div></td>
         <td class="text-center font-semibold">${a.maximum_mark}</td>
         <td class="text-muted">${Utils.dateStr(a.assessment_date)}</td>
         <td>${progressCell(a)}</td>
@@ -198,68 +203,49 @@ async function getLearnerCountForAssessments(assessments) {
 async function openCreateAssessment() {
   const ok = await loadTeacherContext();
   if (!ok) return Utils.toast('No teacher profile found', 'error');
-  if (!teacherAssignments.length) {
-    Utils.toast('You have no class/subject assignments. Contact the DOS.', 'error');
-    return;
-  }
-  if (!activeYear) {
-    Utils.toast('No active academic year set. Contact the DOS.', 'error');
-    return;
-  }
-
-const [classes, subjects, types] = await Promise.all([DB.get('classes'), DB.get('subjects'), getAssessmentTypes()]);
+  if (!teacherAssignments.length) return Utils.toast('You have no class/subject assignments. Contact the DOS.', 'error');
+  if (!activeYear) return Utils.toast('No active academic year set. Contact the DOS.', 'error');
+  const [classes, subjects, types, years, terms] = await Promise.all([DB.get('classes'), DB.get('subjects'), getAssessmentTypes(), DB.get('academic_years'), DB.get('terms')]);
+  casTypes = types.filter(t => t.status === 'active');
+  casTerms = terms.filter(t => String(t.academic_year_id) === String(activeYear.id));
   const assignedSubjectIds = [...new Set(teacherAssignments.map(a => a.subject_id))];
-  const subjectOptions = subjects.filter(s => assignedSubjectIds.includes(s.id) && (!Scope.isScoped() || Scope.matchesSubject(s)));
-  const activeTypes = types.filter(t => t.status === 'active');
-  casAutoName = '';
-
+  const subjectOptions = subjects.filter(s => assignedSubjectIds.includes(s.id));
   const dateStr = new Date().toISOString().split('T')[0];
+  const selectedTerm = activeTerm || casTerms.find(t => t.is_active) || casTerms[0];
 
-  Modal.show('Create Assessment', `
-    <div class="form-group">
-      <label>Subject <span class="required">*</span></label>
-      <select id="cas-subject" class="select-field" onchange="casSubjectChanged()">
-        <option value="">Select subject</option>
-        ${subjectOptions.map(s => `<option value="${s.id}">${Utils.escapeHtml(s.name)}</option>`).join('')}
-      </select>
-      <p class="form-hint">Only subjects assigned to you are shown.</p>
+  Modal.show('Create Assessment — All Steps on One Page', `
+    <style>
+      .cas-section { background:#f8fafc; border:1px solid #e2e8f0; border-radius:12px; padding:14px; margin-bottom:14px; }
+      .cas-section-title { font-size:11px; font-weight:800; text-transform:uppercase; letter-spacing:.08em; color:#475569; margin-bottom:10px; display:flex; align-items:center; gap:8px; }
+      .cas-section-title::after { content:""; flex:1; height:1px; background:#e2e8f0; }
+      .cas-section .form-group { margin-bottom:10px; }
+      .cas-section .form-group:last-child { margin-bottom:0; }
+      .cas-preview { margin-top:10px; padding:10px 12px; border:1px dashed var(--blue-200); border-radius:8px; background:var(--blue-50); color:var(--blue-800); font-size:12px; }
+    </style>
+    <div class="cas-section">
+      <div class="cas-section-title"><i data-lucide="file-text" style="width:14px;height:14px"></i> 1 — What is the assessment?</div>
+      <div class="form-group"><label>Assessment Type <span class="required">*</span></label><select id="cas-type" class="select-field" onchange="casTypeChanged()">${casTypes.map((t, i) => `<option value="${t.id}" data-default-max="${t.default_maximum_mark ?? ''}" ${i === 0 ? 'selected' : ''}>${Utils.escapeHtml(t.name)}${t.weight != null ? ' (w=' + t.weight + ')' : ''}</option>`).join('')}</select></div>
+      <div id="cas-period-fields"></div>
+      <div class="cas-preview"><i data-lucide="eye" style="width:13px;height:13px;vertical-align:middle;margin-right:4px"></i>Will display as: <strong id="cas-display-preview"></strong></div>
     </div>
-    <div class="form-group">
-      <label>Class <span class="required">*</span></label>
-      <select id="cas-class" class="select-field" onchange="casSuggestName()">
-        <option value="">Select class</option>
-      </select>
-      <p class="form-hint">Only classes assigned to you for the selected subject are shown.</p>
+    <div class="cas-section">
+      <div class="cas-section-title"><i data-lucide="users" style="width:14px;height:14px"></i> 2 — Where is it taught?</div>
+      <div class="form-group"><label>Subject <span class="required">*</span></label><select id="cas-subject" class="select-field" onchange="casSubjectChanged()"><option value="">Select subject</option>${subjectOptions.map(s => `<option value="${s.id}">${Utils.escapeHtml(s.name)}</option>`).join('')}</select><p class="form-hint">Only subjects assigned to you.</p></div>
+      <div class="form-group"><label>Class <span class="required">*</span></label><select id="cas-class" class="select-field"><option value="">Select class first</option></select><p class="form-hint">Only classes for the chosen subject.</p></div>
     </div>
-    <div class="form-group">
-      <label>Assessment Type <span class="required">*</span></label>
-      <select id="cas-type" class="select-field" onchange="casTypeChanged()">
-        ${activeTypes.map((t, i) => `<option value="${t.id}" data-default-max="${t.default_maximum_mark ?? ''}" ${i === 0 ? 'selected' : ''}>${Utils.escapeHtml(t.name)}${t.weight != null ? ' (w=' + t.weight + ')' : ''}</option>`).join('')}
-      </select>
+    <div class="cas-section">
+      <div class="cas-section-title"><i data-lucide="calendar" style="width:14px;height:14px"></i> 3 — When & how much?</div>
+      <div class="form-row"><div class="form-group"><label>Academic Year</label><input class="input-field" value="${Utils.escapeHtml(years.find(y => String(y.id) === String(activeYear.id))?.name || activeYear.name || '')}" disabled></div><div class="form-group"><label>Term <span class="required">*</span></label><select id="cas-term" class="select-field">${casTerms.map(t => `<option value="${t.id}" ${selectedTerm && String(t.id) === String(selectedTerm.id) ? 'selected' : ''}>${Utils.escapeHtml(t.name)}</option>`).join('')}</select></div></div>
+      <div class="form-row"><div class="form-group"><label>Assessment Date <span class="required">*</span></label><input id="cas-date" type="date" class="input-field" value="${dateStr}"></div><div class="form-group"><label>Maximum Marks <span class="required">*</span></label><select id="cas-max" class="select-field">${[10, 20, 30, 40, 50, 100].map(m => `<option value="${m}" ${m === (casTypes[0]?.default_maximum_mark ?? 30) ? 'selected' : ''}>${m}</option>`).join('')}</select></div></div>
+      <div class="form-group"><label>Weight <span class="text-muted">(optional, blank = type default)</span></label><input id="cas-weight" type="number" min="0" step="any" class="input-field" placeholder="e.g., 0.3"></div>
     </div>
-    <div class="form-group">
-      <label>Unit <span class="text-muted">(only for unit-based types)</span></label>
-      <input id="cas-unit" class="input-field" placeholder="e.g., Unit 4 - Fractions" oninput="casSuggestName()">
+    <div class="cas-section" style="margin-bottom:0">
+      <div class="cas-section-title"><i data-lucide="align-left" style="width:14px;height:14px"></i> 4 — Notes (optional)</div>
+      <div class="form-group"><textarea id="cas-desc" class="textarea-field" rows="3" placeholder="Optional notes about this assessment"></textarea></div>
     </div>
-    <div class="form-group">
-      <label>Assessment Name <span class="required">*</span></label>
-      <input id="cas-name" class="input-field" placeholder="e.g., Unit 4 Quiz">
-      <p class="form-hint">Auto-suggested from type and unit. You can edit it.</p>
-    </div>
-    <div class="form-row">
-      <div class="form-group"><label>Assessment Date <span class="required">*</span></label><input id="cas-date" type="date" class="input-field" value="${dateStr}"></div>
-      <div class="form-group"><label>Maximum Marks <span class="required">*</span></label>
-        <select id="cas-max" class="select-field">${[10, 20, 30, 40, 50, 100].map(m => `<option value="${m}" ${m === (activeTypes[0]?.default_maximum_mark ?? 30) ? 'selected' : ''}>${m}</option>`).join('')}</select>
-      </div>
-    </div>
-    <div class="form-row">
-      <div class="form-group"><label>Weight <span class="text-muted">(optional)</span></label><input id="cas-weight" type="number" min="0" step="any" class="input-field" placeholder="blank = use type default"></div>
-      <div class="form-group"><label>Academic Year</label><input class="input-field" value="${Utils.escapeHtml(activeYear?.name || '')}" disabled></div>
-    </div>
-    <div class="form-group"><label>Description</label><textarea id="cas-desc" class="textarea-field" placeholder="Optional notes about this assessment"></textarea></div>`,
-    `<button class="btn btn-secondary" onclick="Modal.close()">Cancel</button>
-     <button class="btn btn-secondary" onclick="casSave('draft', this)"><i data-lucide="save"></i> Save Draft</button>
-     <button class="btn btn-primary" onclick="casSave('enter', this)"><i data-lucide="arrow-right"></i> Create & Enter Marks</button>`);
+  `, `<button class="btn btn-secondary" onclick="Modal.close()">Cancel</button><button class="btn btn-secondary" onclick="casSave('draft', this)"><i data-lucide="save"></i> Save Draft</button><button class="btn btn-primary" onclick="casSave('enter', this)"><i data-lucide="arrow-right"></i> Create & Enter Marks</button>`, true);
+  casTypeChanged();
+  if (typeof lucide !== 'undefined') lucide.createIcons();
 }
 
 function casSubjectChanged() {
@@ -271,7 +257,6 @@ function casSubjectChanged() {
     const opts = classes.filter(c => myClassIds.includes(c.id));
     classSelect.innerHTML = '<option value="">Select class</option>' + opts.map(c => `<option value="${c.id}">${c.name}</option>`).join('');
   });
-  casSuggestName();
 }
 
 function casTypeChanged() {
@@ -279,129 +264,194 @@ function casTypeChanged() {
   const opt = sel && sel.selectedOptions[0];
   const maxEl = document.getElementById('cas-max');
   if (maxEl && opt && opt.dataset.defaultMax) maxEl.value = opt.dataset.defaultMax;
-  casSuggestName();
+  casRenderPeriodFields();
 }
 
-let casAutoName = '';
-
-function casSuggestName() {
+function casSelectedType() {
   const sel = document.getElementById('cas-type');
-  const typeName = (sel && sel.selectedOptions[0]) ? sel.selectedOptions[0].textContent.trim() : 'End-of-Unit Assessment';
-  const unit = document.getElementById('cas-unit')?.value.trim() || '';
-  const nameField = document.getElementById('cas-name');
-  if (!nameField) return;
-  const current = nameField.value.trim();
-  const auto = unit ? typeName + ' - ' + unit : '';
-  if (!current || current === casAutoName) {
-    nameField.value = auto;
-    casAutoName = auto;
-  }
+  return casTypes.find(t => String(t.id) === String(sel && sel.value)) || null;
 }
 
-// TEACHER — single-page assessment creation (all steps on one page)
-async function openCreateAssessment() {
-  const ok = await loadTeacherContext();
-  if (!ok) return Utils.toast('No teacher profile found', 'error');
-  if (!teacherAssignments.length) return Utils.toast('You have no class/subject assignments. Contact the DOS.', 'error');
-  if (!activeYear) return Utils.toast('No active academic year set. Contact the DOS.', 'error');
-  const [classes, subjects, types, years, terms] = await Promise.all([DB.get('classes'), DB.get('subjects'), getAssessmentTypes(), DB.get('academic_years'), DB.get('terms')]);
-  const activeTypes = types.filter(t=>t.status==='active');
-  const assignedSubjectIds = [...new Set(teacherAssignments.map(a=>a.subject_id))];
-  const subjectOptions = subjects.filter(s=> assignedSubjectIds.includes(s.id));
-  casAutoName = '';
-  const dateStr = new Date().toISOString().split('T')[0];
-  const selYear = activeYear?.id || (years.find(y=>y.status==='active')?.id || years[0]?.id || '');
-  const selTerms = terms.filter(t=> String(t.academic_year_id)===String(selYear));
-  Modal.show('Create Assessment — All Steps on One Page', `
-    <style>
-      .cas-section { background:#f8fafc; border:1px solid #e2e8f0; border-radius:12px; padding:14px; margin-bottom:14px; }
-      .cas-section-title { font-size:11px; font-weight:800; text-transform:uppercase; letter-spacing:.08em; color:#475569; margin-bottom:10px; display:flex; align-items:center; gap:8px; }
-      .cas-section-title::after { content:""; flex:1; height:1px; background:#e2e8f0; }
-    </style>
-    <div class="cas-section">
-      <div class="cas-section-title"><i data-lucide="file-text" style="width:14px;height:14px"></i> 1 — What is the assessment?</div>
-      <div class="form-group"><label>Assessment Type <span class="required">*</span></label><select id="cas-type" class="select-field" onchange="casTypeChanged()">${activeTypes.map((t,i)=> `<option value="${t.id}" data-default-max="${t.default_maximum_mark ?? ''}" ${i===0?'selected':''}>${Utils.escapeHtml(t.name)}${t.weight!=null?' (w='+t.weight+')':''}</option>`).join('')}</select></div>
-      <div class="form-group"><label>Unit <span class="text-muted">(only for unit-based types)</span></label><input id="cas-unit" class="input-field" placeholder="e.g., Unit 4 - Fractions" oninput="casSuggestName()"></div>
-      <div class="form-group"><label>Assessment Name <span class="required">*</span></label><input id="cas-name" class="input-field" placeholder="e.g., Unit 4 Quiz"><p class="form-hint">Auto-suggested from type + unit — you can edit.</p></div>
-    </div>
-    <div class="cas-section">
-      <div class="cas-section-title"><i data-lucide="users" style="width:14px;height:14px"></i> 2 — Where is it taught?</div>
-      <div class="form-group"><label>Subject <span class="required">*</span></label><select id="cas-subject" class="select-field" onchange="casSubjectChanged()"><option value="">Select subject</option>${subjectOptions.map(s=> `<option value="${s.id}">${Utils.escapeHtml(s.name)}</option>`).join('')}</select><p class="form-hint">Only subjects assigned to you.</p></div>
-      <div class="form-group"><label>Class <span class="required">*</span></label><select id="cas-class" class="select-field" onchange="casSuggestName()"><option value="">Select class first</option></select><p class="form-hint">Only classes for the chosen subject.</p></div>
-    </div>
-    <div class="cas-section">
-      <div class="cas-section-title"><i data-lucide="calendar" style="width:14px;height:14px"></i> 3 — When & how much?</div>
-      <div class="form-row"><div class="form-group"><label>Academic Year</label><input class="input-field" value="${Utils.escapeHtml(years.find(y=>String(y.id)===String(selYear))?.name||'')}" disabled></div><div class="form-group"><label>Term</label><select id="cas-term" class="select-field"><option value="">Select term</option>${selTerms.map(t=> `<option value="${t.id}">${Utils.escapeHtml(t.name)}</option>`).join('')}</select></div></div>
-      <div class="form-row"><div class="form-group"><label>Assessment Date <span class="required">*</span></label><input id="cas-date" type="date" class="input-field" value="${dateStr}"></div><div class="form-group"><label>Maximum Marks <span class="required">*</span></label><select id="cas-max" class="select-field">${[10,20,30,40,50,100].map(m=> `<option value="${m}" ${m===(activeTypes[0]?.default_maximum_mark??30)?'selected':''}>${m}</option>`).join('')}</select></div></div>
-      <div class="form-group"><label>Weight <span class="text-muted">(optional, blank = type default)</span></label><input id="cas-weight" type="number" min="0" step="any" class="input-field" placeholder="e.g., 0.3"></div>
-    </div>
-    <div class="cas-section" style="margin-bottom:0">
-      <div class="cas-section-title"><i data-lucide="align-left" style="width:14px;height:14px"></i> 4 — Notes (optional)</div>
-      <div class="form-group"><textarea id="cas-desc" class="textarea-field" rows="3" placeholder="Optional notes about this assessment"></textarea></div>
-    </div>
-  `, `<button class="btn btn-secondary" onclick="Modal.close()">Cancel</button><button class="btn btn-secondary" onclick="casSave('draft', this)"><i data-lucide="save"></i> Save Draft</button><button class="btn btn-primary" onclick="casSave('enter', this)"><i data-lucide="arrow-right"></i> Create & Enter Marks</button>`, true);
-  if (typeof lucide!=='undefined') lucide.createIcons();
+function casUnitNumberValue() {
+  const sel = document.getElementById('cas-unit-number');
+  const v = sel && sel.value;
+  if (v && v !== '' && v !== 'custom') return v;
+  if (v === 'custom') return (document.getElementById('cas-unit-custom')?.value || '').trim();
+  return '';
+}
+
+function casUnitNumberChanged() {
+  const sel = document.getElementById('cas-unit-number');
+  const wrap = document.getElementById('cas-unit-custom-wrap');
+  if (wrap) wrap.style.display = (sel && sel.value === 'custom') ? '' : 'none';
+  casUpdatePreview();
+}
+
+function casRenderPeriodFields() {
+  const container = document.getElementById('cas-period-fields');
+  if (!container) return;
+  const type = casSelectedType();
+  const hint = Utils.getTypePeriodHint(type);
+  const terms = casTerms;
+  const selTerm = document.getElementById('cas-term')?.value || activeTerm?.id || (terms[0] && terms[0].id) || '';
+  let html = '';
+  if (hint === 'week') {
+    html = `<div class="form-group"><label>Week Number <span class="required">*</span></label><select id="cas-week" class="select-field" onchange="casUpdatePreview()"><option value="">Select week</option>${Array.from({ length: 16 }, (_, i) => i + 1).map(w => `<option value="${w}">Week ${w}</option>`).join('')}</select></div>`;
+  } else if (hint === 'month') {
+    html = `<div class="form-group"><label>Month <span class="required">*</span></label><select id="cas-month" class="select-field" onchange="casUpdatePreview()"><option value="">Select month</option>${Utils.MONTH_LONG.map((m, i) => `<option value="${i + 1}">${m}</option>`).join('')}</select></div>`;
+  } else if (hint === 'term') {
+    const t = terms.find(x => String(x.id) === String(selTerm));
+    html = `<div class="form-group"><label>Term <span class="required">*</span></label><div class="text-sm font-semibold" id="cas-term-readout" style="padding:8px 12px;background:var(--gray-50);border:1px solid var(--gray-200);border-radius:8px">${t ? Utils.escapeHtml(t.name) : 'Select a term in section 3 below.'}</div><p class="form-hint">The term chosen in section 3 is applied automatically.</p></div>`;
+  } else if (hint === 'unit') {
+    html = `<div class="form-row">
+      <div class="form-group"><label>Unit Number <span class="required">*</span></label>
+        <select id="cas-unit-number" class="select-field" onchange="casUnitNumberChanged()"><option value="">Select unit number</option>${[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15].map(n => `<option value="${n}">Unit ${n}</option>`).join('')}<option value="custom">Unit 16 and above...</option></select>
+        <div id="cas-unit-custom-wrap" style="display:none;margin-top:8px"><input id="cas-unit-custom" type="number" min="16" class="input-field" placeholder="Unit number, e.g. 18" oninput="casUpdatePreview()"></div>
+      </div>
+      <div class="form-group"><label>Unit Name <span class="required">*</span></label><input id="cas-unit-name" class="input-field" placeholder="e.g., Fractions and Decimals" oninput="casUpdatePreview()"></div>
+    </div>`;
+  } else if (hint === 'other') {
+    html = `<div class="form-group"><label>Assessment Name <span class="required">*</span></label><input id="cas-other-name" class="input-field" placeholder="Free-text name (only the Other type allows this)" oninput="casUpdatePreview()"></div>`;
+  } else {
+    html = `<div class="form-group"><label>Label <span class="text-muted">(optional — e.g. 1, 2, Session A)</span></label><input id="cas-label" class="input-field" placeholder="e.g., 1, 2, Session A" oninput="casUpdatePreview()"></div>`;
+  }
+  container.innerHTML = html;
+  casUpdatePreview();
+}
+
+function casUpdatePreview() {
+  const el = document.getElementById('cas-display-preview');
+  if (!el) return;
+  const type = casSelectedType();
+  const hint = Utils.getTypePeriodHint(type);
+  const typeName = type ? type.name : 'End-of-Unit Assessment';
+  let label = typeName;
+  if (hint === 'week') {
+    const w = document.getElementById('cas-week')?.value;
+    label = w ? typeName + ' — Week ' + w : typeName + ' — (week not set)';
+  } else if (hint === 'month') {
+    const m = document.getElementById('cas-month')?.value;
+    label = m ? typeName + ' — ' + Utils.monthLabel(m) : typeName + ' — (month not set)';
+  } else if (hint === 'term') {
+    const t = casTerms.find(x => String(x.id) === String(document.getElementById('cas-term')?.value));
+    label = t ? typeName + ' — ' + t.name : typeName + ' — (term not set)';
+  } else if (hint === 'unit') {
+    const un = casUnitNumberValue();
+    const uName = (document.getElementById('cas-unit-name')?.value || '').trim();
+    if (un && uName) label = typeName + ' — Unit ' + un + ': ' + uName;
+    else if (un) label = typeName + ' — Unit ' + un;
+    else if (uName) label = typeName + ' — ' + uName;
+    else label = typeName + ' — (unit not set)';
+  } else if (hint === 'other') {
+    label = (document.getElementById('cas-other-name')?.value || '').trim() || '(name required for Other)';
+  } else {
+    const lb = (document.getElementById('cas-label')?.value || '').trim();
+    label = lb ? typeName + ' — ' + lb : typeName;
+  }
+  el.textContent = label;
 }
 
 async function casSave(mode, btn) {
-  if (btn) {
-    btn.disabled = true;
-    const originalText = btn.innerHTML;
-    btn.innerHTML = 'Saving...';
-    btn.dataset.original = originalText;
-  }
+  const originalText = btn ? btn.innerHTML : '';
+  const fail = (msg) => {
+    if (btn) { btn.disabled = false; btn.innerHTML = originalText; if (typeof lucide !== 'undefined') lucide.createIcons(); }
+    Utils.toast(msg, 'error');
+  };
+  if (btn) { btn.disabled = true; btn.innerHTML = 'Saving...'; }
+
   const subjectId = document.getElementById('cas-subject').value;
   const classId = document.getElementById('cas-class').value;
   const typeSelect = document.getElementById('cas-type');
   const typeId = typeSelect ? typeSelect.value : null;
-  const typeName = (typeSelect && typeSelect.selectedOptions[0]) ? typeSelect.selectedOptions[0].textContent.trim() : 'End-of-Unit Assessment';
-  const unit = document.getElementById('cas-unit').value.trim();
-  const name = document.getElementById('cas-name').value.trim();
+  const type = casTypes.find(t => String(t.id) === String(typeId)) || null;
+  const hint = Utils.getTypePeriodHint(type);
+  const typeName = type ? type.name : 'End-of-Unit Assessment';
+
+  let periodType = null, periodValue = null, periodLabel = null, unitNumber = null, unitName = null;
+  let label = '';
+  const termId = document.getElementById('cas-term').value;
   const date = document.getElementById('cas-date').value;
   const maximumMark = parseInt(document.getElementById('cas-max').value) || 30;
-  const weightRaw = document.getElementById('cas-weight') ? document.getElementById('cas-weight').value.trim() : '';
-  const desc = document.getElementById('cas-desc') ? document.getElementById('cas-desc').value.trim() : '';
+  const weightRaw = document.getElementById('cas-weight').value.trim();
+  const desc = document.getElementById('cas-desc').value.trim();
 
-  if (!subjectId) return Utils.toast('Select a subject', 'error');
-  if (!classId) return Utils.toast('Select a class', 'error');
-  if (!unit && !name) { if (btn) { btn.disabled = false; btn.innerHTML = btn.dataset.original; if (typeof lucide !== 'undefined') lucide.createIcons(); } return Utils.toast('Enter a unit or an assessment name', 'error'); }
-  if (!date) return Utils.toast('Select the assessment date', 'error');
+  if (hint === 'week') {
+    periodType = 'week';
+    periodValue = parseInt(document.getElementById('cas-week')?.value) || null;
+    if (!periodValue) return fail('Select the week number');
+    periodLabel = 'Week ' + periodValue;
+    label = typeName + ' — Week ' + periodValue;
+  } else if (hint === 'month') {
+    periodType = 'month';
+    periodValue = parseInt(document.getElementById('cas-month')?.value) || null;
+    if (!periodValue) return fail('Select the month');
+    periodLabel = Utils.monthLabel(periodValue);
+    label = typeName + ' — ' + periodLabel;
+  } else if (hint === 'term') {
+    periodType = 'term';
+    if (!termId) return fail('Select a term');
+    const t = casTerms.find(x => String(x.id) === String(termId));
+    periodLabel = t ? t.name : '';
+    label = typeName + ' — ' + periodLabel;
+  } else if (hint === 'unit') {
+    periodType = 'unit';
+    unitNumber = casUnitNumberValue();
+    unitName = (document.getElementById('cas-unit-name')?.value || '').trim();
+    if (!unitNumber) return fail('Enter the unit number');
+    if (!unitName) return fail('Enter the unit name');
+    periodValue = parseInt(unitNumber) || null;
+    periodLabel = 'Unit ' + unitNumber;
+    label = typeName + ' — Unit ' + unitNumber + ': ' + unitName;
+  } else if (hint === 'other') {
+    periodType = 'other';
+    label = (document.getElementById('cas-other-name')?.value || '').trim();
+    if (!label) return fail('Enter the assessment name');
+  } else {
+    label = typeName;
+    const lb = (document.getElementById('cas-label')?.value || '').trim();
+    if (lb) label = typeName + ' — ' + lb;
+  }
+
+  if (!subjectId) return fail('Select a subject');
+  if (!classId) return fail('Select a class');
+  if (!termId) return fail('Select a term');
+  if (!date) return fail('Select the assessment date');
 
   const allowed = teacherAssignments.some(a => a.subject_id === subjectId && a.class_id === classId);
-  if (!allowed) {
-    if (btn) { btn.disabled = false; btn.innerHTML = btn.dataset.original; if (typeof lucide !== 'undefined') lucide.createIcons(); }
-    Utils.toast('You are not authorized for this class/subject combination', 'error');
-    return;
-  }
-  // scope validation — prevent Primary subject assigned to Secondary class and vice versa
+  if (!allowed) return fail('You are not authorized for this class/subject combination');
+
   try {
-    const subj = subjects.find(s => String(s.id) === String(subjectId));
-    const cls = classes.find(c => String(c.id) === String(classId));
+    const [dbClasses, dbSubjects] = await Promise.all([DB.get('classes'), DB.get('subjects')]);
+    const subj = dbSubjects.find(s => String(s.id) === String(subjectId));
+    const cls = dbClasses.find(c => String(c.id) === String(classId));
     if (subj && cls && Scope.isScoped() && (!Scope.matchesSubject(subj) || !Scope.matchesClass(cls))) {
-      if (btn) { btn.disabled = false; btn.innerHTML = btn.dataset.original; if (typeof lucide !== 'undefined') lucide.createIcons(); }
-      return Utils.toast('This class/subject combination is outside your education-level scope. Primary subjects cannot be assigned to Secondary classes, and vice versa.', 'error');
+      return fail('This class/subject combination is outside your education-level scope. Primary subjects cannot be assigned to Secondary classes, and vice versa.');
     }
   } catch (e) { /* ignore */ }
 
   const teacherId = Auth.getTeacherId();
-  if (!teacherId) {
-    if (btn) { btn.disabled = false; btn.innerHTML = btn.dataset.original; if (typeof lucide !== 'undefined') lucide.createIcons(); }
-    return Utils.toast('Your account is not linked to a teacher profile. Contact the DOS.', 'error');
-  }
-  // student check — tell teacher if class has no active learners
+  if (!teacherId) return fail('Your account is not linked to a teacher profile. Contact the DOS.');
+
   try {
     const { count: _learnerCount } = await sbClient.from('learners').select('id', { count: 'exact', head: true }).eq('class_id', classId).eq('status', 'active');
-    if (!_learnerCount) { if (btn) { btn.disabled=false; btn.innerHTML=btn.dataset.original; if(typeof lucide!=='undefined') lucide.createIcons(); } return Utils.toast('There is no student in this class — register learners in this class first before creating an assessment.', 'error'); }
+    if (!_learnerCount) return fail('There is no student in this class — register learners in this class first before creating an assessment.');
   } catch (e) { /* ignore count error */ }
+
   const data = {
-    name: name || (unit ? typeName + ' - ' + unit : typeName),
+    name: label,
+    display_name: label,
     assessment_type_id: typeId || null,
-    unit: unit || null,
+    period_type: periodType,
+    period_value: periodValue,
+    period_label: periodLabel,
+    unit_number: (hint === 'unit') ? periodValue : null,
+    unit_name: (hint === 'unit') ? unitName : null,
+    unit: (hint === 'unit') ? ('Unit ' + unitNumber + (unitName ? ' - ' + unitName : '')) : null,
     class_id: classId,
     subject_id: subjectId,
     teacher_id: teacherId,
-    academic_year_id: activeYear?.id,
-    term_id: activeTerm?.id,
+    academic_year_id: activeYear.id,
+    term_id: termId || null,
     maximum_mark: maximumMark,
     weight: weightRaw === '' ? null : parseFloat(weightRaw),
     assessment_date: date,
@@ -423,8 +473,188 @@ async function casSave(mode, btn) {
       renderEnterMarks();
     }
   } catch (e) {
-    if (btn) { btn.disabled = false; btn.innerHTML = btn.dataset.original; if (typeof lucide !== 'undefined') lucide.createIcons(); }
-    Utils.toast('Error: ' + e.message, 'error');
+    fail('Error: ' + e.message);
+  }
+}
+
+function convertCompute(mark, curMax, target) {
+  const raw = (Number(mark) / Number(curMax)) * Number(target);
+  const decimals = markSettings?.decimal_marks_enabled ? 1 : 0;
+  const factor = Math.pow(10, decimals);
+  return Math.round(raw * factor) / factor;
+}
+
+async function openConvertMarks() {
+  if (!markAssessment) return;
+  const curMax = Number(markAssessment.maximum_mark) || 0;
+  if (!curMax) return Utils.toast('This assessment has no maximum mark set', 'error');
+  const rows = markEntries.filter(e => e.mark !== '' && e.mark != null && e.markId);
+  if (!rows.length) return Utils.toast('No marks saved yet. Save a draft first, then convert.', 'error');
+  const [grading, settingsData] = await Promise.all([Utils.getGradingScale(), DB.query('school_settings', '*')]);
+  convertState = {
+    rows,
+    scope: 'all',
+    selected: new Set(rows.map(r => r.learnerId)),
+    target: curMax,
+    grading,
+    pass: (settingsData[0]?.pass_mark ?? markSettings.pass_mark ?? 50)
+  };
+  Modal.show('Convert Marks', `
+    <style>
+      .cv-chip { padding:6px 12px; border:1px solid var(--gray-200); border-radius:8px; background:#fff; cursor:pointer; font-size:12px; font-weight:600; color:var(--gray-600); }
+      .cv-chip.active { border-color:var(--blue-500); background:var(--blue-50); color:var(--blue-700); }
+    </style>
+    <div class="notice mb-2" style="margin-bottom:12px"><i data-lucide="arrow-left-right" style="width:15px;height:15px;vertical-align:middle;margin-right:6px"></i>Convert every learner's saved mark to a new maximum, keeping each learner's percentage the same. Original marks are stored so nothing is lost. This cannot affect locked/approved assessments and only applies to <strong>draft</strong> marks.</div>
+    <div class="form-row">
+      <div class="form-group"><label>Current Maximum</label><input class="input-field" value="${curMax}" disabled></div>
+      <div class="form-group"><label>Saved Marks</label><input class="input-field" value="${rows.length}" disabled></div>
+      <div class="form-group"><label>New Maximum Marks <span class="required">*</span></label><input id="cv-target-input" type="number" min="1" step="any" class="input-field" value="${curMax}" oninput="convertTargetChanged()"></div>
+    </div>
+    <div class="flex gap-2" style="margin:-4px 0 14px;flex-wrap:wrap">
+      ${[20, 30, 40, 50, 60, 70, 100].map(m => `<button type="button" class="cv-chip ${m === curMax ? 'active' : ''}" onclick="convertSetTarget(${m})">${m}</button>`).join('')}
+    </div>
+    <div class="flex gap-2" style="margin-bottom:14px">
+      <label class="flex items-center gap-2" style="font-size:13px"><input type="radio" name="cv-scope" value="all" checked onchange="convertScope('all')"> All learners with marks</label>
+      <label class="flex items-center gap-2" style="font-size:13px"><input type="radio" name="cv-scope" value="selected" onchange="convertScope('selected')"> Selected learners only</label>
+    </div>
+    <div style="max-height:260px;overflow:auto;border:1px solid var(--gray-200);border-radius:10px">
+      <table class="table" style="margin:0">
+        <thead><tr><th>Learner</th><th>Current</th><th>Now</th><th>New</th><th>New %</th><th>Grade</th><th>Result</th></tr></thead>
+        <tbody id="cv-preview-body"></tbody>
+      </table>
+    </div>
+  `, `<button class="btn btn-secondary" onclick="Modal.close()">Cancel</button><button class="btn btn-primary" onclick="applyConvertMarks()"><i data-lucide="arrow-left-right"></i> Preview & Convert</button>`, true);
+  if (typeof lucide !== 'undefined') lucide.createIcons();
+  convertPreviewRender();
+}
+
+function convertPreviewRender() {
+  const tbody = document.getElementById('cv-preview-body');
+  if (!tbody || !convertState) return;
+  const curMax = Number(markAssessment.maximum_mark) || 0;
+  const target = convertState.target || 0;
+  const rows = convertState.rows.filter(r => convertState.scope === 'all' ? true : convertState.selected.has(r.learnerId));
+  tbody.innerHTML = rows.map(r => {
+    const nm = target ? convertCompute(Number(r.mark), curMax, target) : 0;
+    const pct = target ? Utils.pct(nm, target) : 0;
+    const grade = target ? Utils.grade(pct, convertState.grading) : '';
+    const pf = target ? Utils.passFail(pct, convertState.pass) : '';
+    const checked = convertState.selected.has(r.learnerId);
+    return `<tr>
+      <td>${Utils.escapeHtml(r.name)}</td>
+      <td class="text-muted">${r.mark}<span class="text-muted"> / ${curMax}</span></td>
+      <td class="text-muted">${Utils.pct(Number(r.mark), curMax).toFixed(1)}%</td>
+      <td><strong>${nm}</strong><span class="text-muted"> / ${target}</span></td>
+      <td>${pct.toFixed(1)}%</td>
+      <td>${grade}</td>
+      <td>${pf}</td>
+      ${convertState.scope === 'selected' ? `<td><input type="checkbox" ${checked ? 'checked' : ''} onchange="convertToggleLearner('${r.learnerId}', this.checked)"></td>` : ''}
+    </tr>`;
+  }).join('');
+  const info = document.getElementById('cv-selection-info');
+  if (info) info.textContent = `Converting ${rows.length} of ${convertState.rows.length} saved marks.`;
+}
+
+function convertSetTarget(val) {
+  const el = document.getElementById('cv-target-input');
+  if (el) el.value = val;
+  document.querySelectorAll('.cv-chip').forEach(c => c.classList.toggle('active', Number(c.textContent) === Number(el?.value)));
+  convertTargetChanged();
+}
+
+function convertTargetChanged() {
+  const el = document.getElementById('cv-target-input');
+  convertState.target = el ? Number(el.value) || 0 : 0;
+  if (el) document.querySelectorAll('.cv-chip').forEach(c => c.classList.toggle('active', Number(c.textContent) === Number(el.value)));
+  convertPreviewRender();
+}
+
+function convertScope(scope) {
+  if (!convertState) return;
+  convertState.scope = scope;
+  if (scope === 'selected' && convertState.selected.size === 0) {
+    convertState.selected = new Set(convertState.rows.map(r => r.learnerId));
+  }
+  convertPreviewRender();
+}
+
+function convertToggleLearner(learnerId, checked) {
+  if (!convertState) return;
+  if (checked) convertState.selected.add(learnerId);
+  else convertState.selected.delete(learnerId);
+}
+
+function applyConvertMarks() {
+  if (!convertState) return;
+  const target = convertState.target || 0;
+  const curMax = Number(markAssessment.maximum_mark) || 0;
+  if (!target || target <= 0) return Utils.toast('Enter a valid new maximum mark', 'error');
+  if (target === curMax) return Utils.toast('New maximum is the same as the current one. Change it first.', 'error');
+  const rows = convertState.rows.filter(r => convertState.selected.has(r.learnerId));
+  if (!rows.length) return Utils.toast('Select at least one learner with a saved mark', 'error');
+
+  const statusBlocked = ['locked', 'approved', 'submitted'].includes(markAssessment.status);
+  if (statusBlocked) { Modal.close(); Utils.toast('This assessment no longer allows edits — it has been locked/approved/submitted.', 'error'); return; }
+
+  Modal.confirm('Convert ' + rows.length + ' marks?',
+    `This proportionally re-scales ${rows.length} saved mark(s) from a maximum of <strong>${curMax}</strong> to <strong>${target}</strong>.<br><br>Each learner's percentage, grade, remark and PASS/FAIL are recalculated against the new maximum. Original marks are preserved for audit and can be reviewed in reports.`,
+    () => doConvertMarks(curMax, target, rows),
+    'Convert & Save'
+  );
+}
+
+async function doConvertMarks(curMax, target, rows) {
+  Modal.close();
+  try {
+    const now = new Date().toISOString();
+    const teacherId = Auth.getTeacherId();
+    for (const r of rows) {
+      const oldMark = Number(r.mark);
+      const newMark = convertCompute(oldMark, curMax, target);
+      const pct = Utils.pct(newMark, target);
+      const patch = {
+        mark: newMark,
+        percentage: pct,
+        grade: Utils.grade(pct, convertState.grading),
+        remark: Utils.remark(pct, convertState.grading),
+        updated_at: now
+      };
+      if (r.markId) {
+        const { data: existing } = await sbClient.from('marks').select('original_mark, original_maximum').eq('id', r.markId).single();
+        if (existing && existing.original_mark == null) { patch.original_mark = oldMark; patch.original_maximum = curMax; }
+        else if (existing && existing.original_maximum == null) { patch.original_maximum = curMax; }
+        const { error } = await sbClient.from('marks').update(patch).eq('id', r.markId);
+        if (error) throw error;
+      }
+    }
+    const { error: asErr } = await sbClient.from('assessments').update({
+      maximum_mark: target,
+      converted_from_maximum: curMax,
+      converted_at: now,
+      converted_by: teacherId
+    }).eq('id', markAssessment.id);
+    if (asErr) throw asErr;
+
+    await sbClient.from('audit_logs').insert({
+      user_id: Auth.currentUser?.id,
+      user_name: Auth.currentUser?.full_name,
+      role: Auth.currentUser?.role,
+      action: 'MARKS_CONVERTED',
+      assessment_id: markAssessment.id,
+      old_value: 'Maximum ' + curMax + ' -> ' + target,
+      new_value: 'Converted ' + rows.length + ' marks to a maximum of ' + target,
+      timestamp: now
+    });
+
+    DB.invalidateMany(['marks', 'assessments', 'audit_logs']);
+    if (typeof AnalyticsEngine !== 'undefined') AnalyticsEngine.resetContext();
+    if (typeof ReportUtils !== 'undefined') ReportUtils.invalidate();
+    convertState = null;
+    Utils.toast('Converted ' + rows.length + ' marks to a maximum of ' + target, 'success');
+    renderMarksEntry(markAssessment.id);
+  } catch (e) {
+    convertState = null;
+    Utils.toast('Conversion error: ' + e.message, 'error');
   }
 }
 
@@ -435,6 +665,11 @@ async function renderMarksEntry(assessId) {
   const targetAssessment = await DB.getRelated('assessments', '*', { id: assessId });
   if (!targetAssessment.length) { setContent(Utils.empty('Assessment not found', 'file-x')); return; }
   markAssessment = targetAssessment[0];
+  /* Conversion helpers live only on the Convert Marks page — never opened here. */
+  if (Utils.isConversionHelper && Utils.isConversionHelper(markAssessment)) {
+    setContent(Utils.empty('Conversion helpers live only on the Convert Marks page', 'calculator'));
+    return;
+  }
   const totalMax = Number(markAssessment.maximum_mark) || 0;
 
   const teacherId = Auth.getTeacherId();
@@ -521,6 +756,7 @@ async function renderMarksEntry(assessId) {
       <div class="flex gap-2" style="flex-wrap:wrap">
         <button class="btn btn-secondary" onclick="renderEnterMarks()"><i data-lucide="refresh-cw"></i> Refresh</button>
         <button class="btn btn-outline" onclick="downloadMarksTemplateForCurrentAssessment()" title="Download marks template"><i data-lucide="download"></i> Download</button>
+        ${!isLocked && !isSubmitted ? `<button class="btn btn-outline" onclick="openConvertMarks()" title="Proportionally convert marks to a new maximum"><i data-lucide="arrow-left-right"></i> Convert Marks</button>` : ''}
         ${!isLocked && !isSubmitted ? `<button class="btn btn-primary" onclick="MarksImport.open({ assessmentId: '${markAssessment.id}' })"><i data-lucide="file-up"></i> Import</button>` : ''}
         ${!isLocked && !isSubmitted ? `<button class="btn btn-secondary" onclick="saveMarks()"><i data-lucide="save"></i> Save Draft</button>` : ''}
       </div>
@@ -530,8 +766,9 @@ async function renderMarksEntry(assessId) {
       <div class="flex justify-between items-center" style="flex-wrap:wrap;gap:16px">
         <div>
           <h2 class="font-bold" style="font-size:20px;color:var(--gray-900)">${Utils.escapeHtml(sub?.name || '')} â€” ${Utils.escapeHtml(cls?.name || '')}</h2>
-          <p class="text-sm text-muted" style="margin-top:2px"><strong style="color:var(--gray-700)">${Utils.escapeHtml(assessmentTypeName(types, markAssessment.assessment_type_id, 'Assessment'))}:</strong> ${Utils.escapeHtml(markAssessment.name)}${markAssessment.unit ? ' - ' + Utils.escapeHtml(markAssessment.unit) : ''}</p>
+          <p class="text-sm text-muted" style="margin-top:2px"><strong style="color:var(--gray-700)">${Utils.escapeHtml(assessmentTypeName(types, markAssessment.assessment_type_id, 'Assessment'))}:</strong> ${Utils.escapeHtml(Utils.buildAssessmentDisplayName(markAssessment, types))}</p>
           <p class="text-sm text-muted" style="margin-top:2px">${Utils.dateStr(markAssessment.assessment_date)} | Maximum Mark: <strong style="color:var(--blue-600)">${maxM}</strong></p>
+          ${markAssessment.converted_from_maximum ? `<p class="text-sm" style="margin-top:2px"><span class="status-pill" style="background:var(--blue-50);color:var(--blue-700)">Converted from a maximum of ${Utils.escapeHtml(markAssessment.converted_from_maximum)} to ${maxM}</span></p>` : ''}
         </div>
         <div class="flex items-center gap-2">
           <span id="save-status" style="font-size:12px;color:var(--gray-500)"></span>
@@ -808,6 +1045,12 @@ async function saveMarks(isAuto = false) {
 }
 
 async function openSubmitConfirm() {
+  /* Conversion helpers are working copies for external use (e.g. CAMIS
+     export) — they must never enter the official approval/report chain. */
+  if (Utils.isConversionHelper && Utils.isConversionHelper(markAssessment)) {
+    Utils.toast('Conversion helpers cannot be submitted — they are excluded from official reports. Export them instead.', 'error');
+    return;
+  }
   const entered = markEntries.filter(e => e.mark !== '' && e.mark != null).length;
   const total = markEntries.length;
   const missing = total - entered;

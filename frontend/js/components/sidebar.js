@@ -158,6 +158,8 @@ const Sidebar = {
         <i data-lucide="clipboard-list"></i> Marks Recording</a>
       <a class="nav-link" data-route="teacher/import-marks" onclick="Router.go('teacher/import-marks')">
         <i data-lucide="file-up"></i> Import Marks</a>
+      <a class="nav-link" data-route="teacher/convert-marks" onclick="Router.go('teacher/convert-marks')">
+        <i data-lucide="arrow-left-right"></i> Convert Marks</a>
       <div class="sidebar-section">
         <div class="sidebar-section-title">My Teaching</div>
         <a class="nav-link" data-route="teacher/my-classes" onclick="Router.go('teacher/my-classes')">

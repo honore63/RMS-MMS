@@ -3,8 +3,17 @@ const Utils = {
   _gradingPromise: null,
 
   pct(mark, max) {
-    if (!max || !mark && mark !== 0) return 0;
+    if (!max || (!mark && mark !== 0)) return 0;
     return Math.round((mark / max) * 10000) / 100;
+  },
+
+  _matchingGradeRange(pct, scale) {
+    if (!scale || !scale.length) return null;
+    const ranges = [...scale].sort((a, b) => Number(b.minimum_percentage) - Number(a.minimum_percentage));
+    for (const s of ranges) {
+      if (Number(pct) >= Number(s.minimum_percentage)) return s;
+    }
+    return ranges[ranges.length - 1] || null;
   },
 
   grade(pct, scale) {
@@ -17,10 +26,8 @@ const Utils = {
       if (pct >= 50) return 'S';
       return 'F';
     }
-    for (const s of scale) {
-      if (pct >= s.minimum_percentage && pct <= s.maximum_percentage) return s.grade;
-    }
-    return 'F';
+    const match = this._matchingGradeRange(pct, scale);
+    return match ? match.grade : 'F';
   },
 
   remark(pct, scale) {
@@ -33,10 +40,8 @@ const Utils = {
       if (pct >= 50) return 'Minimum Pass';
       return 'Fail';
     }
-    for (const s of scale) {
-      if (pct >= s.minimum_percentage && pct <= s.maximum_percentage) return s.descriptor || s.remark;
-    }
-    return 'Fail';
+    const match = this._matchingGradeRange(pct, scale);
+    return match ? (match.descriptor || match.remark || 'Fail') : 'Fail';
   },
 
   passFail(pct, passMark = 50) {
@@ -105,6 +110,90 @@ const Utils = {
   dateTimeStr(d) {
     if (!d) return '-';
     return new Date(d).toLocaleString('en-GB', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' });
+  },
+
+  MONTH_LONG: ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'],
+
+  ASSESSMENT_TYPE_HINTS: {
+    'Weekly Test': 'week',
+    'Monthly Test': 'month',
+    'Beginning of Term Exam': 'term',
+    'Mid-Term Exam': 'term',
+    'End of Term Exam': 'term',
+    'End of Unit': 'unit',
+    'Other': 'other'
+  },
+
+  /* Fallback hint map so the conditional creation form works even before the
+     DB migration has added assessment_types.period_hint. */
+  getTypePeriodHint(typeOrName) {
+    if (!typeOrName) return null;
+    if (typeof typeOrName === 'object') {
+      if (typeOrName.period_hint) return typeOrName.period_hint;
+      typeOrName = typeOrName.name;
+    }
+    return this.ASSESSMENT_TYPE_HINTS[(typeOrName || '').trim()] || null;
+  },
+
+  _findType(types, id) {
+    if (!types) return null;
+    if (Array.isArray(types)) return types.find(t => String(t.id) === String(id)) || null;
+    if (types instanceof Map) return types.get(String(id)) || null;
+    return null;
+  },
+
+  monthLabel(n) {
+    const i = parseInt(n, 10);
+    if (!isNaN(i) && i >= 1 && i <= 12) return this.MONTH_LONG[i - 1];
+    return (n != null && n !== '') ? String(n) : '';
+  },
+
+  /* Canonical, standardized label used consistently in marks lists, DOS
+     review, marks sheets and report cards. Falls back to legacy `name`/`unit`
+     for older assessments when no display_name was stored yet. */
+  buildAssessmentDisplayName(a, types) {
+    if (!a) return '';
+    const typeName = this._findType(types, a.assessment_type_id)?.name || '';
+
+    if (a.display_name && String(a.display_name).trim()) return a.display_name;
+
+    const hint = this.getTypePeriodHint({ period_hint: a.period_type, name: typeName });
+
+    /* End-of-Unit style: Unit N [: Unit name] */
+    if (hint === 'unit' || a.unit_number != null || a.unit_name || a.unit) {
+      const base = typeName || 'End of Unit';
+      let part = '';
+      if (a.unit_number != null) part = 'Unit ' + a.unit_number;
+      else if (a.period_label) part = a.period_label;
+      else if (a.unit) part = a.unit;
+      if (part && a.unit_name) part += ': ' + a.unit_name;
+      else if (!part && a.unit_name) part = a.unit_name;
+      return part ? base + ' — ' + part : base;
+    }
+
+    /* Week / Month / Term exam types carry a period label already */
+    if (a.period_label) return (typeName ? typeName + ' — ' : '') + a.period_label;
+
+    /* Legacy fallbacks */
+    if (a.unit) return (typeName ? typeName + ' — ' : '') + a.unit;
+    if (a.name) {
+      if (!typeName) return a.name;
+      if (a.name.indexOf(typeName) === 0) return a.name;
+      return typeName + ' — ' + a.name;
+    }
+    return typeName || 'Assessment';
+  },
+
+  /* Bulk-combine conversion helpers (Convert Marks page) are teacher working
+     copies for external use (e.g. CAMIS export) and must NEVER feed official
+     reports, report cards or analytics — even if approved. NOTE: this deliberately
+     does NOT match in-place converted official assessments (teacher-enter-marks
+     Convert action), which keep their own period_type/description. */
+  isConversionHelper(a) {
+    if (!a) return false;
+    if (String(a.description || '').indexOf('Combined marks conversion:') === 0) return true;
+    return String(a.period_type || '') === 'other'
+      && String(a.period_label || '').indexOf('Combined Conversion') === 0;
   },
 
   async getGradingScale() {

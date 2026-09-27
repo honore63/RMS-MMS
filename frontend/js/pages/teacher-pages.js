@@ -5,11 +5,12 @@ async function renderTeacherDashboard() {
   if (!teacherId) { setContent(Utils.errorCard('No Teacher Profile', 'Your account is not linked to a teacher record.')); return; }
 
   try {
-    const [assignments, allAssessments, allClasses, subjects] = await Promise.all([
+    const [assignments, allAssessments, allClasses, subjects, types] = await Promise.all([
       DB.query('teacher_assignments', '*', { teacher_id: teacherId }),
       DB.query('assessments', '*', { teacher_id: teacherId }),
       DB.get('classes'),
-      DB.get('subjects')
+      DB.get('subjects'),
+      getAssessmentTypes()
     ]);
 
     const filteredClassesIds = new Set(allClasses.map(c => c.id));
@@ -28,8 +29,8 @@ async function renderTeacherDashboard() {
       return `<tr>
         <td><span style="font-size:10px;font-weight:700;color:var(--gray-500);text-transform:uppercase;display:block;margin-bottom:2px">${cat}</span>${Utils.escapeHtml(cls?.name || '-')}</td>
         <td>${Utils.escapeHtml(subj?.name || '-')}</td>
-        <td>${Utils.escapeHtml(a.name)}</td>
-        <td>${Utils.escapeHtml(a.unit || '-')}</td>
+        <td>${Utils.escapeHtml(Utils.buildAssessmentDisplayName(a, types))}</td>
+        <td>${Utils.escapeHtml(a.period_label || a.unit_name || a.unit || '-')}</td>
         <td><span class="badge ${Utils.statusColor(a.status)}"><i data-lucide="${Utils.statusIcon(a.status)}"></i> ${a.status}</span></td>
         <td><button class="btn btn-sm btn-primary" onclick="Router.go('teacher/enter-marks?assessment=${a.id}')">${a.status === 'draft' || a.status === 'rejected' ? '<i data-lucide="pencil"></i> Enter' : '<i data-lucide="eye"></i> View'}</button></td></tr>`;
     }).join('');
@@ -268,23 +269,24 @@ async function renderNotifications() {
   setHeader('Notifications', 'View your notifications');
   setContent(Utils.loading());
   if (typeof markNotificationsRead === 'function') markNotificationsRead();
-  const notifs = await DB.query('notifications','*',{user_id:Auth.currentUser?.id},{column:'created_at',asc:false});
+  const notifs = await DB.query('notifications','*',{recipient_user_id:Auth.currentUser?.id},{column:'created_at',asc:false});
 
   const items = notifs.map(n => {
-    const borderColor = n.type==='success'?'var(--green-500)':n.type==='error'?'var(--red-500)':n.type==='warning'?'var(--amber-500)':'var(--blue-500)';
-    const bgColor = n.type==='success'?'var(--green-50)':n.type==='error'?'var(--red-50)':n.type==='warning'?'var(--amber-50)':'var(--blue-50)';
+    const borderColor = n.notification_type === 'MARKS_APPROVED' || n.notification_type === 'MARKS_SUBMITTED' ? 'var(--green-500)' : n.notification_type === 'SYSTEM' ? 'var(--blue-500)' : 'var(--amber-500)';
+    const bgColor = n.notification_type === 'MARKS_APPROVED' || n.notification_type === 'MARKS_SUBMITTED' ? 'var(--green-50)' : 'var(--blue-50)';
+    const unread = !n.is_read;
     return `
-    <div class="card" style="border-left:4px solid ${borderColor};${!n.read?'background:'+bgColor:''}">
+    <div class="card" style="border-left:4px solid ${borderColor};${unread?'background:'+bgColor:''}">
       <div class="flex justify-between items-center">
         <div class="flex gap-3 items-center">
           <div style="width:36px;height:36px;border-radius:50%;background:${bgColor};display:flex;align-items:center;justify-content:center;flex-shrink:0">
-            <i data-lucide="${n.type==='success'?'check-circle-2':n.type==='error'?'x-circle':n.type==='warning'?'alert-triangle':'info'}" style="width:18px;height:18px;color:${borderColor}"></i>
+            <i data-lucide="${n.notification_type === 'MARKS_APPROVED' ? 'check-circle-2' : n.notification_type === 'SYSTEM' ? 'info' : 'bell'}" style="width:18px;height:18px;color:${borderColor}"></i>
           </div>
           <div><h4 class="font-semibold">${Utils.escapeHtml(n.title)}</h4><p class="text-sm text-muted" style="margin-top:2px">${Utils.escapeHtml(n.message)}</p></div>
         </div>
         <div class="text-right" style="flex-shrink:0">
           <p class="text-xs text-muted">${n.created_at ? Utils.dateTimeStr(n.created_at) : ''}</p>
-          ${!n.read?'<span style="display:inline-block;width:8px;height:8px;background:var(--blue-500);border-radius:50%;margin-top:4px"></span>':''}
+          ${unread?'<span style="display:inline-block;width:8px;height:8px;background:var(--blue-500);border-radius:50%;margin-top:4px"></span>':''}
         </div>
       </div>
     </div>`;
@@ -316,11 +318,13 @@ async function renderMyAssessments() {
     getAssessmentTypes()
   ]);
   const scoped = typeof Scope !== 'undefined' && Scope.isScoped();
-  const filteredAssessments = scoped ? assessments.filter(a => {
+  /* Conversion helpers live only on the Convert Marks page. */
+  const realAssessments = assessments.filter(a => !(Utils.isConversionHelper && Utils.isConversionHelper(a)));
+  const filteredAssessments = scoped ? realAssessments.filter(a => {
     const cls = classes.find(c => String(c.id) === String(a.class_id));
     const subj = subjects.find(s => String(s.id) === String(a.subject_id));
     return cls && subj && Scope.matchesClass(cls) && Scope.matchesSubject(subj);
-  }) : assessments;
+  }) : realAssessments;
 
   currentTeacherAssessments = filteredAssessments;
 

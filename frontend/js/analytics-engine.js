@@ -130,6 +130,8 @@ const AnalyticsEngine = {
     let { data: assessments, error } = await q;
     if (error) throw error;
     assessments = assessments || [];
+    /* Bulk-combine conversion helpers never feed analytics. */
+    assessments = assessments.filter(a => !(Utils.isConversionHelper && Utils.isConversionHelper(a)));
 
     if (typeof Scope !== 'undefined' && Scope.isScoped()) {
       const classIds = new Set((ctx.classes || []).map(c => String(c.id)));

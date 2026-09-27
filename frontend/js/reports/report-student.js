@@ -88,6 +88,8 @@ const ReportStudent = {
     if (assessmentIds && assessmentIds.length) filter.id = assessmentIds;
     if (typeof Auth !== 'undefined' && Auth.isTeacher && Auth.isTeacher()) filter.teacher_id = Auth.getTeacherId();
     let list = await DB.query('assessments', '*', filter, { column: 'assessment_date', asc: true });
+    /* Bulk-combine conversion helpers never feed report cards. */
+    list = (list || []).filter(a => !(Utils.isConversionHelper && Utils.isConversionHelper(a)));
     if (subjectIds && subjectIds.length) {
       const set = new Set(subjectIds.map(String));
       list = list.filter(a => set.has(String(a.subject_id)));

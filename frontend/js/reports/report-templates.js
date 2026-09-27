@@ -98,7 +98,7 @@ const ReportTemplates = {
 
   examClassSummary(data) {
     const { settings, cls, year, term, assess, stats, learnerRows, positions, scale, totalLearners, assessedCount, missingMarks } = data;
-    const header = ReportHeader.getOfficialHeader({ settings, title: data.title || 'EXAM CLASS PERFORMANCE SUMMARY', subtitle: `${cls?.name || ''} – ${assess?.name || ''}` });
+    const header = ReportHeader.getOfficialHeader({ settings, title: data.title || 'EXAM CLASS PERFORMANCE SUMMARY', subtitle: `${cls?.name || ''} – ${assess?.display_name || assess?.name || ''}` });
 
     let tbody = '';
     const sorted = [...learnerRows].sort((a, b) => (positions[a.learner.id] || 999) - (positions[b.learner.id] || 999));
@@ -120,7 +120,7 @@ const ReportTemplates = {
       ${header}
       <div class="rms-report-title">${data.title}</div>
       <div class="rms-meta">
-        Academic Year: ${Utils.escapeHtml(year.name || '-')} | Term: ${Utils.escapeHtml(term.name || '-')} | Class: ${Utils.escapeHtml(cls?.name || '-')} | Assessment: ${Utils.escapeHtml(assess?.name || '-')}
+        Academic Year: ${Utils.escapeHtml(year.name || '-')} | Term: ${Utils.escapeHtml(term.name || '-')} | Class: ${Utils.escapeHtml(cls?.name || '-')} | Assessment: ${Utils.escapeHtml(assess?.display_name || assess?.name || '-')}
       </div>
       ${missingWarn}
       <div class="rms-summary-grid">
@@ -294,10 +294,10 @@ const ReportTemplates = {
   teacherAssessmentClass(data) {
     const { settings, year, term, rows, completionRows, classRows, totalStudents, totalPassed, totalFailed, overallAverage, overallPassRate, passMark } = data;
     const header = ReportHeader.getOfficialHeader({ settings, title: 'ASSESSMENT & CLASS ANALYSIS REPORT', subtitle: `${year?.name || ''} - ${term?.name || ''}` });
-    const comparison = (rows || []).map(row => `<tr><td>${Utils.escapeHtml(row.assessment?.name || '-')}</td><td>${Utils.escapeHtml(row.className || '-')}</td><td>${Utils.escapeHtml(row.subject || '-')}</td><td class="text-center">${ReportUtils.formatPct(row.avg)}</td><td class="text-center">${ReportUtils.formatPct(row.high)}</td><td class="text-center">${ReportUtils.formatPct(row.low)}</td><td class="text-center">${row.passed}</td><td class="text-center">${row.failed}</td><td class="text-center">${ReportUtils.formatPct(row.passRate)}</td></tr>`).join('');
+    const comparison = (rows || []).map(row => `<tr><td>${Utils.escapeHtml(row.assessment?.display_name || row.assessment?.name || '-')}</td><td>${Utils.escapeHtml(row.className || '-')}</td><td>${Utils.escapeHtml(row.subject || '-')}</td><td class="text-center">${ReportUtils.formatPct(row.avg)}</td><td class="text-center">${ReportUtils.formatPct(row.high)}</td><td class="text-center">${ReportUtils.formatPct(row.low)}</td><td class="text-center">${row.passed}</td><td class="text-center">${row.failed}</td><td class="text-center">${ReportUtils.formatPct(row.passRate)}</td></tr>`).join('');
     const classes = (classRows || []).map(row => `<tr><td>${Utils.escapeHtml(row.className)}</td><td class="text-center">${row.students}</td><td class="text-center">${ReportUtils.formatPct(row.average)}</td><td class="text-center">${ReportUtils.formatPct(row.highest)}</td><td class="text-center">${ReportUtils.formatPct(row.lowest)}</td><td class="text-center">${row.passed}</td><td class="text-center">${row.failed}</td><td class="text-center">${ReportUtils.formatPct(row.passRate)}</td></tr>`).join('');
-    const completion = (completionRows || []).map(row => `<tr><td>${Utils.escapeHtml(row.assessment?.name || '-')}</td><td>${Utils.escapeHtml(row.className || '-')}</td><td>${Utils.escapeHtml(row.subject || '-')}</td><td class="text-center">${row.expected}</td><td class="text-center">${row.entered}</td><td class="text-center">${row.missing}</td><td class="text-center">${ReportUtils.formatPct(row.completionPct)}</td></tr>`).join('');
-    const charts = rows?.length ? `<div class="rms-chart-row">${ReportUtils.charts.svgBars({ labels: rows.map(row => row.assessment?.name || 'Assessment'), values: rows.map(row => row.avg), colors: ['#1e3a5f'], height: 170 })}${ReportUtils.charts.svgDonut({ labels: ['Passed', 'Failed'], values: [totalPassed, totalFailed], colors: ['#16a34a', '#dc2626'], centerLabel: 'Pass rate', centerValue: `${Math.round(overallPassRate || 0)}%` })}</div>` : '';
+    const completion = (completionRows || []).map(row => `<tr><td>${Utils.escapeHtml(row.assessment?.display_name || row.assessment?.name || '-')}</td><td>${Utils.escapeHtml(row.className || '-')}</td><td>${Utils.escapeHtml(row.subject || '-')}</td><td class="text-center">${row.expected}</td><td class="text-center">${row.entered}</td><td class="text-center">${row.missing}</td><td class="text-center">${ReportUtils.formatPct(row.completionPct)}</td></tr>`).join('');
+    const charts = rows?.length ? `<div class="rms-chart-row">${ReportUtils.charts.svgBars({ labels: rows.map(row => row.assessment?.display_name || row.assessment?.name || 'Assessment'), values: rows.map(row => row.avg), colors: ['#1e3a5f'], height: 170 })}${ReportUtils.charts.svgDonut({ labels: ['Passed', 'Failed'], values: [totalPassed, totalFailed], colors: ['#16a34a', '#dc2626'], centerLabel: 'Pass rate', centerValue: `${Math.round(overallPassRate || 0)}%` })}</div>` : '';
     const footer = ReportHeader.getFooter({ settings, academicYear: year?.name || '', term: term?.name || '' });
     return `${header}<div class="rms-report-title">${data.title}</div><div class="rms-meta">Academic Year: ${Utils.escapeHtml(year?.name || '-')} | Term: ${Utils.escapeHtml(term?.name || '-')} | Pass Mark: ${ReportUtils.formatPct(passMark)}</div>
       <div class="rms-summary-grid"><div class="rms-stat"><span class="rms-stat-val">${totalStudents}</span><span class="rms-stat-lbl">Total Students</span></div><div class="rms-stat"><span class="rms-stat-val">${ReportUtils.formatPct(overallAverage)}</span><span class="rms-stat-lbl">Class Average</span></div><div class="rms-stat"><span class="rms-stat-val">${totalPassed}</span><span class="rms-stat-lbl">Passed</span></div><div class="rms-stat"><span class="rms-stat-val">${totalFailed}</span><span class="rms-stat-lbl">Failed</span></div><div class="rms-stat"><span class="rms-stat-val">${ReportUtils.formatPct(overallPassRate)}</span><span class="rms-stat-lbl">Overall Pass Rate</span></div></div>
@@ -367,7 +367,7 @@ const ReportTemplates = {
 
     const blocksHtml = (blocks || []).map((blk, bi) => {
       const cols = blk.assessments || [];
-      const colHead = cols.map(a => `<th>${Utils.escapeHtml(a.name)}<br><span class="rms-th-sub">/ ${a.maximum_mark || 0}</span></th>`).join('');
+      const colHead = cols.map(a => `<th>${Utils.escapeHtml(a.display_name || a.name)}<br><span class="rms-th-sub">/ ${a.maximum_mark || 0}</span></th>`).join('');
       const colCell = (r) => cols.map((a, ci) => {
         const c = r.cells && r.cells[ci];
         if (!c || !c.present) return `<td class="text-center" style="color:#b91c1c">—</td>`;
@@ -405,7 +405,7 @@ const ReportTemplates = {
     let tbody = '';
     (rows || []).forEach((r, i) => {
       const badge = r.passFail === 'PASS' ? 'badge-success' : r.passFail === 'FAIL' ? 'badge-danger' : 'badge-warning';
-      tbody += `<tr><td class="text-center">${i + 1}</td><td>${Utils.escapeHtml(r.assessment.name)}</td><td>${Utils.escapeHtml(r.type)}</td><td>${Utils.escapeHtml(r.subject)}</td><td class="text-center">${Utils.escapeHtml((r.date || '').slice(0, 10))}</td><td class="text-center">${r.max}</td><td class="text-center font-bold">${r.mark == null ? '—' : r.mark}</td><td class="text-center">${r.pct == null ? 'N/A' : r.pct.toFixed(1) + '%'}</td><td class="text-center font-bold">${r.grade}</td><td class="text-center"><span class="badge ${badge}">${Utils.escapeHtml(r.passFail)}</span></td></tr>`;
+      tbody += `<tr><td class="text-center">${i + 1}</td><td>${Utils.escapeHtml(r.assessment.display_name || r.assessment.name)}</td><td>${Utils.escapeHtml(r.type)}</td><td>${Utils.escapeHtml(r.subject)}</td><td class="text-center">${Utils.escapeHtml((r.date || '').slice(0, 10))}</td><td class="text-center">${r.max}</td><td class="text-center font-bold">${r.mark == null ? '—' : r.mark}</td><td class="text-center">${r.pct == null ? 'N/A' : r.pct.toFixed(1) + '%'}</td><td class="text-center font-bold">${r.grade}</td><td class="text-center"><span class="badge ${badge}">${Utils.escapeHtml(r.passFail)}</span></td></tr>`;
     });
 
     const incomplete = data.missingMarks > 0 ? ReportHeader.warningBanner(`${data.missingMarks} assessment mark(s) are missing for this student. The report cannot be finalised until they are entered.`) : '';
@@ -440,14 +440,14 @@ const ReportTemplates = {
     const footer = ReportHeader.getFooter({ settings, academicYear: year.name || '', term: term.name || '' });
 
     const tbody = (rows || []).map((r, i) => `<tr>
-      <td class="text-center">${i + 1}</td><td>${Utils.escapeHtml(r.assessment.name)}</td>
+      <td class="text-center">${i + 1}</td><td>${Utils.escapeHtml(r.assessment.display_name || r.assessment.name)}</td>
       <td class="text-center">${r.maximum}</td><td class="text-center">${r.entered}</td><td class="text-center" style="color:#b91c1c">${r.missing}</td>
       <td class="text-center font-bold">${ReportUtils.formatPct(r.avg)}</td><td class="text-center">${ReportUtils.formatPct(r.high)}</td><td class="text-center">${ReportUtils.formatPct(r.low)}</td>
       <td class="text-center">${ReportUtils.formatPct(r.passRate)}</td>
     </tr>`).join('');
 
-    const bestText = bestAssessment ? Utils.escapeHtml(bestAssessment.name) : '-';
-    const charts = rows && rows.length ? ReportUtils.charts.svgBars({ labels: (rows).map(r => r.assessment.name), values: (rows).map(r => r.avg), height: 170 }) : '';
+    const bestText = bestAssessment ? Utils.escapeHtml(bestAssessment.display_name || bestAssessment.name) : '-';
+    const charts = rows && rows.length ? ReportUtils.charts.svgBars({ labels: (rows).map(r => r.assessment.display_name || r.assessment.name), values: (rows).map(r => r.avg), height: 170 }) : '';
 
     return `
       ${header}
@@ -470,7 +470,7 @@ const ReportTemplates = {
     const footer = ReportHeader.getFooter({ settings, academicYear: year.name || '', term: term.name || '' });
 
     const tbody = (rows || []).map((r, i) => `<tr>
-      <td class="text-center">${i + 1}</td><td>${Utils.escapeHtml(r.assessment.name)}</td>
+      <td class="text-center">${i + 1}</td><td>${Utils.escapeHtml(r.assessment.display_name || r.assessment.name)}</td>
       <td>${Utils.escapeHtml(r.subject)}</td><td>${Utils.escapeHtml(r.className)}</td>
       <td class="text-center">${r.maximum}</td><td class="text-center">${r.expected}</td><td class="text-center">${r.entered}</td><td class="text-center" style="color:#b91c1c">${r.missing}</td>
       <td class="text-center font-bold">${ReportUtils.formatPct(r.avg)}</td><td class="text-center">${ReportUtils.formatPct(r.high)}</td><td class="text-center">${ReportUtils.formatPct(r.low)}</td><td class="text-center">${ReportUtils.formatPct(r.passRate)}</td>
@@ -498,7 +498,7 @@ const ReportTemplates = {
 
     const tbody = (rows || []).map(r => {
       const badgeClass = r.status === 'COMPLETE' ? 'badge-success' : r.status === 'PARTIALLY COMPLETE' ? 'badge-warning' : 'badge-danger';
-      return `<tr><td>${Utils.escapeHtml(r.assessment.name)}</td><td>${Utils.escapeHtml(r.className)}</td><td>${Utils.escapeHtml(r.subject)}</td><td>${Utils.escapeHtml(r.teacher)}</td><td class="text-center">${r.expected}</td><td class="text-center">${r.entered}</td><td class="text-center" style="color:#b91c1c">${r.missing}</td><td class="text-center font-bold">${r.completionPct}%</td><td class="text-center"><span class="badge ${badgeClass}">${r.status}</span></td></tr>`;
+      return `<tr><td>${Utils.escapeHtml(r.assessment.display_name || r.assessment.name)}</td><td>${Utils.escapeHtml(r.className)}</td><td>${Utils.escapeHtml(r.subject)}</td><td>${Utils.escapeHtml(r.teacher)}</td><td class="text-center">${r.expected}</td><td class="text-center">${r.entered}</td><td class="text-center" style="color:#b91c1c">${r.missing}</td><td class="text-center font-bold">${r.completionPct}%</td><td class="text-center"><span class="badge ${badgeClass}">${r.status}</span></td></tr>`;
     }).join('');
 
     const donut = (summary && summary.total) ? ReportUtils.charts.svgDonut({

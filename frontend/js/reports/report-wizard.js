@@ -736,10 +736,12 @@ const ReportWizard = {
       filter.teacher_id = teacherId;
     }
     let assessments=[];
-    try { assessments = await DB.query('assessments','id,name,unit,subject_id,class_id,term_id,assessment_type_id,status,maximum_mark,assessment_date', filter, {column:'assessment_date', asc:false}); } catch(e){ assessments=[]; }
+    try { assessments = await DB.query('assessments','id,name,unit,subject_id,class_id,term_id,assessment_type_id,status,maximum_mark,assessment_date,description,period_label,period_type', filter, {column:'assessment_date', asc:false}); } catch(e){ assessments=[]; }
     // scope filter subjects
     const allSubj = s.cache.subjects||[];
     assessments = assessments.filter(a=>{
+      /* Bulk-combine conversion helpers are never report sources. */
+      if (Utils.isConversionHelper && Utils.isConversionHelper(a)) return false;
       const subj = allSubj.find(x=> String(x.id)===String(a.subject_id));
       if (subj && typeof Scope!=='undefined' && Scope.isScoped() && !Scope.matchesSubject(subj)) return false;
       return true;
@@ -772,7 +774,7 @@ const ReportWizard = {
           ${list.length? list.map(a=>{
             const sel=s.assessmentIds.some(id=> String(id)===String(a.id));
             const tName = typeMap.get(String(a.assessment_type_id))||'Assessment';
-            return `<label class="rw-opt"><input type="checkbox" ${sel?'checked':''} onchange="ReportWizard.toggleArray('assessmentIds','${a.id}')"><span><span class="rw-opt-title">${Utils.escapeHtml(a.name)}${a.unit?' — '+Utils.escapeHtml(a.unit):''}</span> <span class="rw-opt-sub">${Utils.escapeHtml(tName)} · ${Utils.escapeHtml(a.status)} · Max ${a.maximum_mark||'-'}</span></span></label>`;
+            return `<label class="rw-opt"><input type="checkbox" ${sel?'checked':''} onchange="ReportWizard.toggleArray('assessmentIds','${a.id}')"><span><span class="rw-opt-title">${Utils.escapeHtml(a.display_name || a.name)}${a.period_label ? ' — ' + Utils.escapeHtml(a.period_label) : (a.unit ? ' — ' + Utils.escapeHtml(a.unit) : '')}</span> <span class="rw-opt-sub">${Utils.escapeHtml(tName)} · ${Utils.escapeHtml(a.status)} · Max ${a.maximum_mark||'-'}</span></span></label>`;
           }).join('') : `<div class="rw-empty">No assessments for selected scope. Check class/subject/term filters.</div>`}
         </div>
         <div style="margin-top:10px" class="rw-badge">${s.assessmentIds.length? s.assessmentIds.length+' selected' : 'All assessments (default)'}</div>

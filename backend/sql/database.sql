@@ -136,12 +136,56 @@ CREATE TABLE IF NOT EXISTS audit_logs (
 
 CREATE TABLE IF NOT EXISTS notifications (
   id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-  user_id UUID,
+  recipient_user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  sender_user_id UUID REFERENCES users(id) ON DELETE SET NULL,
   title TEXT NOT NULL,
   message TEXT NOT NULL,
-  read BOOLEAN DEFAULT FALSE,
-  type TEXT DEFAULT 'info' CHECK (type IN ('info', 'success', 'warning', 'error')),
-  created_at TIMESTAMPTZ DEFAULT NOW()
+  notification_type TEXT DEFAULT 'info' CHECK (notification_type IN (
+    'MARKS_SUBMITTED', 'MARKS_APPROVED', 'MARKS_REJECTED',
+    'ASSESSMENT_CREATED', 'ASSESSMENT_REOPENED', 'ASSESSMENT_LOCKED',
+    'ANNOUNCEMENT', 'TIMETABLE', 'MEETING', 'EXAMINATION', 'CPD', 'SYSTEM', 'REPORT'
+  )),
+  category TEXT DEFAULT 'system' CHECK (category IN ('marks', 'assessment', 'announcement', 'timetable', 'meeting', 'examination', 'cpd', 'system', 'report', 'important')),
+  priority TEXT DEFAULT 'normal' CHECK (priority IN ('normal', 'important', 'urgent')),
+  entity_type TEXT, -- assessments, classes, subjects, etc.
+  entity_id UUID, -- referencing the related entity
+  is_read BOOLEAN DEFAULT FALSE,
+  is_archived BOOLEAN DEFAULT FALSE,
+  requires_acknowledgement BOOLEAN DEFAULT FALSE,
+  acknowledged_at TIMESTAMPTZ,
+  action_url TEXT, -- URL to navigate when user clicks action
+  attachment_path TEXT, -- reference to stored document/attachment
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  read_at TIMESTAMPTZ
+);
+
+CREATE TABLE IF NOT EXISTS announcements (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  sender_user_id UUID NOT NULL REFERENCES users(id) ON DELETE SET NULL,
+  title TEXT NOT NULL,
+  message TEXT NOT NULL,
+  category TEXT NOT NULL CHECK (category IN ('general', 'timetable', 'meeting', 'examination', 'assessment', 'academic', 'urgent', 'training', 'cpd', 'administrative', 'other')),
+  priority TEXT NOT NULL CHECK (priority IN ('normal', 'important', 'urgent')),
+  audience_type TEXT NOT NULL CHECK (audience_type IN ('all', 'primary', 'secondary', 'specific_teacher', 'specific_department', 'specific_class_teacher')),
+  education_level TEXT CHECK (education_level IN ('primary', 'secondary', 'all')),
+  target_subject_id UUID REFERENCES subjects(id) ON DELETE SET NULL,
+  target_class_id UUID REFERENCES classes(id) ON DELETE SET NULL,
+  target_user_ids UUID[] DEFAULT '{}', -- for specific teacher/audience
+  requires_acknowledgement BOOLEAN DEFAULT FALSE,
+  attachment_path TEXT,
+  published_at TIMESTAMPTZ,
+  expires_at TIMESTAMPTZ,
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  updated_at TIMESTAMPTZ DEFAULT NOW(),
+  status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'archived', 'expired'))
+);
+
+CREATE TABLE IF NOT EXISTS announcement_acknowledgements (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  announcement_id UUID NOT NULL REFERENCES announcements(id) ON DELETE CASCADE,
+  user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  acknowledged_at TIMESTAMPTZ DEFAULT NOW(),
+  UNIQUE(announcement_id, user_id)
 );
 
 CREATE TABLE IF NOT EXISTS school_settings (
@@ -237,7 +281,8 @@ ALTER TABLE public.marks               ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.grading_scales      ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.school_settings     ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.notifications       ENABLE ROW LEVEL SECURITY;
-ALTER TABLE public.audit_logs          ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.announcements       ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.announcement_acknowledgements ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.documents           ENABLE ROW LEVEL SECURITY;
 
 -- ============================================================================
@@ -272,6 +317,8 @@ CREATE POLICY rms_marks_all               ON public.marks               FOR ALL 
 CREATE POLICY rms_grading_scales_all      ON public.grading_scales      FOR ALL USING (true) WITH CHECK (true);
 CREATE POLICY rms_school_settings_all     ON public.school_settings     FOR ALL USING (true) WITH CHECK (true);
 CREATE POLICY rms_notifications_all       ON public.notifications       FOR ALL USING (true) WITH CHECK (true);
+CREATE POLICY rms_announcements_all     ON public.announcements     FOR ALL USING (true) WITH CHECK (true);
+CREATE POLICY rms_announcement_ack_all  ON public.announcement_acknowledgements FOR ALL USING (true) WITH CHECK (true);
 CREATE POLICY rms_audit_logs_all          ON public.audit_logs          FOR ALL USING (true) WITH CHECK (true);
 CREATE POLICY rms_documents_all           ON public.documents           FOR ALL USING (true) WITH CHECK (true);
 
@@ -354,8 +401,12 @@ CREATE INDEX IF NOT EXISTS idx_marks_assessment_id ON marks(assessment_id);
 CREATE INDEX IF NOT EXISTS idx_marks_learner_id ON marks(learner_id);
 CREATE INDEX IF NOT EXISTS idx_audit_logs_timestamp ON audit_logs(timestamp DESC);
 CREATE INDEX IF NOT EXISTS idx_audit_logs_user_id ON audit_logs(user_id);
-CREATE INDEX IF NOT EXISTS idx_notifications_user_id ON notifications(user_id);
-CREATE INDEX IF NOT EXISTS idx_notifications_read ON notifications(read);
+CREATE INDEX IF NOT EXISTS idx_notifications_user_id ON notifications(recipient_user_id);
+CREATE INDEX IF NOT EXISTS idx_notifications_read ON notifications(is_read);
+CREATE INDEX IF NOT EXISTS idx_announcements_sender ON announcements(sender_user_id);
+CREATE INDEX IF NOT EXISTS idx_announcements_published ON announcements(published_at DESC);
+CREATE INDEX IF NOT EXISTS idx_announcement_ack_user ON announcement_acknowledgements(user_id);
+CREATE INDEX IF NOT EXISTS idx_announcement_ack_announce ON announcement_acknowledgements(announcement_id);
 CREATE INDEX IF NOT EXISTS idx_assessments_teacher_class ON assessments(teacher_id, class_id);
 CREATE INDEX IF NOT EXISTS idx_marks_assessment_learner ON marks(assessment_id, learner_id);
 CREATE INDEX IF NOT EXISTS idx_teacher_assignments_teacher_class_subject ON teacher_assignments(teacher_id, class_id, subject_id);
