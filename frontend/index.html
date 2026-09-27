@@ -10,7 +10,8 @@
   <meta name="apple-mobile-web-app-title" content="RMS-MIS">
   <title>RMS-MIS – Rukara Model School Marks Information System</title>
   <link rel="icon" type="image/webp" href="public/logo.webp">
-  <link rel="manifest" href="manifest.webmanifest?v=20260927-1">
+  <link rel="manifest" href="manifest.webmanifest?v=20260927-2">
+  <link rel="manifest" href="manifest.json?v=20260927-2">
   <link rel="apple-touch-icon" href="public/logo.webp">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -257,7 +258,12 @@
 
     if ('serviceWorker' in navigator) {
       window.addEventListener('load', () => {
-        navigator.serviceWorker.register('./sw.js').catch(err => console.warn('Service worker registration failed:', err));
+        navigator.serviceWorker.register('/sw.js', { scope: '/' }).catch(err => {
+          console.warn('Service worker registration failed, trying local scope:', err);
+          navigator.serviceWorker.register('./sw.js', { scope: './' }).catch(err2 => {
+            console.warn('Service worker registration failed entirely:', err2);
+          });
+        });
       });
     }
 

@@ -3,6 +3,11 @@ const APP_SHELL = [
   '/',
   '/index.html',
   '/manifest.webmanifest',
+  '/manifest.json',
+  '/public/logo.webp',
+  '/public/icon-192.svg',
+  '/public/icon-512.svg'
+];
   '/css/styles.css',
   '/css/report-card.css',
   '/css/student-report-card.css',
