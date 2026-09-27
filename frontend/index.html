@@ -347,7 +347,7 @@
     <button id="pwa-snackbar-install" style="background:#fff;color:#0d2f6b;border:none;padding:6px 16px;border-radius:6px;font-weight:700;font-size:13px;cursor:pointer;font-family:'Poppins',sans-serif;white-space:nowrap">Install</button>
     <button id="pwa-snackbar-dismiss" style="background:transparent;color:rgba(255,255,255,.6);border:none;padding:6px 8px;cursor:pointer;font-size:13px;font-family:'Poppins',sans-serif">Dismiss</button>
   </div>
-  <script>
+<script>
     let deferredPrompt;
     const BANNER_KEY = 'rms_pwa_banner_dismissed';
     const isStandalone = window.matchMedia('(display-mode: standalone)').matches || window.navigator.standalone === true;
@@ -356,24 +356,30 @@
       if (isStandalone) return;
       const dismissed = localStorage.getItem(BANNER_KEY);
       if (dismissed) return;
+      // Show banner immediately
       const banner = document.getElementById('pwa-install-banner');
       if (banner) { banner.style.display = 'flex'; banner.classList.add('at-banner-visible'); }
-      // Show FAB after 1 second
-      setTimeout(() => {
-        const fab = document.getElementById('pwa-fab');
-        if (fab) fab.style.display = 'flex';
-      }, 1000);
-      // Show snackbar after 3 seconds
+      // Show FAB immediately
+      const fab = document.getElementById('pwa-fab');
+      if (fab) fab.style.display = 'flex';
+      // Show snackbar after 2 seconds
       setTimeout(() => {
         const snack = document.getElementById('pwa-snackbar');
-        if (snack) { snack.style.display = 'flex'; lucide.createIcons(); }
-      }, 3000);
+        if (snack) { snack.style.display = 'flex'; if (typeof lucide !== 'undefined') lucide.createIcons(); }
+      }, 2000);
     }
 
+    // Always try to show install prompt on page load
+    window.addEventListener('load', () => {
+      if (!isStandalone && !localStorage.getItem(BANNER_KEY)) {
+        showBanner();
+      }
+    });
+
+    // Capture the native install prompt if it fires
     window.addEventListener('beforeinstallprompt', (e) => {
       e.preventDefault();
       deferredPrompt = e;
-      showBanner();
     });
 
     window.addEventListener('appinstalled', () => {
@@ -386,19 +392,19 @@
       if (snack) snack.style.display = 'none';
     });
 
-    // Always try to show install prompt even if beforeinstallprompt already fired
-    window.addEventListener('load', () => {
-      if (!deferredPrompt && !localStorage.getItem(BANNER_KEY)) {
+    // Fallback: if no install prompt after 5 seconds, show everything anyway
+    setTimeout(() => {
+      if (!deferredPrompt && !isStandalone && !localStorage.getItem(BANNER_KEY)) {
         showBanner();
       }
-    });
+    }, 5000);
 
     if ('serviceWorker' in navigator) {
       window.addEventListener('load', () => {
         navigator.serviceWorker.register('/sw.js', { scope: '/' }).catch(err => {
-          console.warn('Service worker registration failed, trying local scope:', err);
+          console.warn('SW root failed, trying local:', err);
           navigator.serviceWorker.register('./sw.js', { scope: './' }).catch(err2 => {
-            console.warn('Service worker registration failed entirely:', err2);
+            console.warn('SW local failed:', err2);
           });
         });
       });
@@ -407,6 +413,7 @@
     // Install button handlers
     document.getElementById('pwa-install-btn')?.addEventListener('click', () => {
       if (deferredPrompt) { deferredPrompt.prompt(); deferredPrompt.userChoice.then(() => { deferredPrompt = null; const b = document.getElementById('pwa-install-banner'); if(b){b.style.display='none';b.classList.remove('at-banner-visible');} const f=document.getElementById('pwa-fab'); if(f) f.style.display='none'; }); }
+      else { alert('To install, tap the menu (⋮) in Chrome → "Add to Home screen"'); }
     });
     document.getElementById('pwa-dismiss-btn')?.addEventListener('click', () => {
       const b = document.getElementById('pwa-install-banner'); if(b){b.style.display='none';b.classList.remove('at-banner-visible');}
@@ -415,12 +422,15 @@
     });
     document.getElementById('pwa-fab')?.addEventListener('click', () => {
       if (deferredPrompt) { deferredPrompt.prompt(); deferredPrompt.userChoice.then(() => { deferredPrompt = null; const f=document.getElementById('pwa-fab'); if(f) f.style.display='none'; }); }
+      else { alert('To install, tap the menu (⋮) in Chrome → "Add to Home screen"'); }
     });
     document.getElementById('pwa-snackbar-install')?.addEventListener('click', () => {
       if (deferredPrompt) { deferredPrompt.prompt(); deferredPrompt.userChoice.then(() => { deferredPrompt = null; const s=document.getElementById('pwa-snackbar'); if(s) s.style.display='none'; }); }
+      else { alert('To install, tap the menu (⋮) in Chrome → "Add to Home screen"'); }
     });
     document.getElementById('pwa-snackbar-dismiss')?.addEventListener('click', () => {
       const s = document.getElementById('pwa-snackbar'); if(s) s.style.display = 'none';
+      localStorage.setItem('rms_pwa_banner_dismissed', 'true');
     });
 
     if (typeof lucide !== 'undefined') lucide.createIcons();
