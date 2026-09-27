@@ -232,33 +232,107 @@
   <script src="js/sync-registry.js?v=20260924-10"></script>
 <script>
     let deferredPrompt;
+    const BANNER_KEY = 'rms_pwa_banner_dismissed';
+    const isStandalone = window.matchMedia('(display-mode: standalone)').matches || window.navigator.standalone === true;
+
+    function showBanner() {
+      if (isStandalone) return;
+      const dismissed = localStorage.getItem(BANNER_KEY);
+      if (dismissed) return;
+      const banner = document.getElementById('pwa-install-banner');
+      if (banner) { banner.style.display = 'flex'; banner.classList.add('at-banner-visible'); }
+    }
+
     window.addEventListener('beforeinstallprompt', (e) => {
       e.preventDefault();
       deferredPrompt = e;
-      const banner = document.getElementById('pwa-install-banner');
-      if (banner) banner.style.display = 'flex';
+      showBanner();
     });
+
     window.addEventListener('appinstalled', () => {
       deferredPrompt = null;
       const banner = document.getElementById('pwa-install-banner');
-      if (banner) banner.style.display = 'none';
+      if (banner) { banner.style.display = 'none'; banner.classList.remove('at-banner-visible'); }
     });
+
     if ('serviceWorker' in navigator) {
       window.addEventListener('load', () => {
         navigator.serviceWorker.register('./sw.js').catch(err => console.warn('Service worker registration failed:', err));
       });
     }
+
+    showBanner();
   </script>
-  <div id="pwa-install-banner" style="display:none;position:fixed;bottom:0;left:0;right:0;background:#0d2f6b;color:#fff;padding:12px 20px;z-index:9999;flex-wrap:wrap;align-items:center;gap:10px;font-family:inherit;font-size:14px">
-    <span style="flex:1"><strong>Install RMS-MIS</strong> — Add to home screen for the best experience</span>
-    <button id="pwa-install-btn" style="background:#fff;color:#0d2f6b;border:none;padding:8px 16px;border-radius:6px;font-weight:700;cursor:pointer">Install</button>
-    <button id="pwa-dismiss-btn" style="background:transparent;color:#fff;border:1px solid #fff;border-radius:6px;padding:8px 12px;cursor:pointer">Dismiss</button>
+  <style>
+    #pwa-install-banner {
+      display:none; position:fixed; bottom:0; left:0; right:0; z-index:9999;
+      background: linear-gradient(135deg, #0d2f6b 0%, #2563eb 100%);
+      color: #fff; padding: 0; overflow: hidden;
+      font-family: 'Poppins', sans-serif;
+      transition: transform 0.4s cubic-bezier(.4,0,.2,1), opacity 0.4s;
+      transform: translateY(100%); opacity: 0;
+    }
+    #pwa-install-banner.at-banner-visible {
+      display: flex !important; flex-wrap: wrap; align-items: center; justify-content: space-between;
+      gap: 16px; padding: 16px 24px;
+      transform: translateY(0); opacity: 1;
+      box-shadow: 0 -4px 20px rgba(0,0,0,.2);
+    }
+    .at-banner-content { display: flex; align-items: center; gap: 16px; flex: 1 1 auto; min-width: 200px; }
+    .at-banner-icon { width: 48px; height: 48px; background: rgba(255,255,255,.15); border-radius: 12px; display: grid; place-items: center; flex-shrink: 0; }
+    .at-banner-icon i { width: 24px; height: 24px; color: #fff; }
+    .at-banner-text strong { display: block; font-size: 15px; font-weight: 700; }
+    .at-banner-text span { display: block; font-size: 12px; opacity: .8; margin-top: 2px; }
+    .at-banner-actions { display: flex; gap: 10px; flex-shrink: 0; }
+    .at-banner-install {
+      background: #fff; color: #0d2f6b; border: none; padding: 10px 24px;
+      border-radius: var(--radius); font-weight: 700; font-size: 14px;
+      cursor: pointer; font-family: 'Poppins', sans-serif;
+      transition: all var(--transition); box-shadow: var(--shadow-md);
+    }
+    .at-banner-install:hover { background: var(--blue-50); transform: translateY(-1px); }
+    .at-banner-dismiss {
+      background: transparent; color: rgba(255,255,255,.8); border: 1px solid rgba(255,255,255,.3);
+      padding: 10px 18px; border-radius: var(--radius); font-weight: 500; font-size: 14px;
+      cursor: pointer; font-family: 'Poppins', sans-serif; transition: all var(--transition);
+    }
+    .at-banner-dismiss:hover { background: rgba(255,255,255,.1); color: #fff; }
+    @media (max-width: 600px) {
+      #pwa-install-banner.at-banner-visible { flex-direction: column; text-align: center; padding: 20px; }
+      .at-banner-content { flex-direction: column; }
+      .at-banner-actions { width: 100%; justify-content: center; }
+    }
+  </style>
+  <div id="pwa-install-banner">
+    <div class="at-banner-content">
+      <div class="at-banner-icon"><i data-lucide="smartphone"></i></div>
+      <div class="at-banner-text">
+        <strong>Install RMS-MIS</strong>
+        <span>Add to home screen for the best mobile experience</span>
+      </div>
+    </div>
+    <div class="at-banner-actions">
+      <button class="at-banner-install" id="pwa-install-btn"><i data-lucide="download" style="width:16px;height:16px;margin-right:6px"></i>Install</button>
+      <button class="at-banner-dismiss" id="pwa-dismiss-btn">Later</button>
+    </div>
   </div>
   <script>
     document.getElementById('pwa-install-btn')?.addEventListener('click', () => {
-      if (deferredPrompt) { deferredPrompt.prompt(); deferredPrompt.userChoice.then(() => { deferredPrompt = null; document.getElementById('pwa-install-banner').style.display = 'none'; }); }
+      if (deferredPrompt) {
+        deferredPrompt.prompt();
+        deferredPrompt.userChoice.then(() => {
+          deferredPrompt = null;
+          const banner = document.getElementById('pwa-install-banner');
+          if (banner) { banner.style.display = 'none'; banner.classList.remove('at-banner-visible'); }
+        });
+      }
     });
-    document.getElementById('pwa-dismiss-btn')?.addEventListener('click', () => { document.getElementById('pwa-install-banner').style.display = 'none'; });
+    document.getElementById('pwa-dismiss-btn')?.addEventListener('click', () => {
+      const banner = document.getElementById('pwa-install-banner');
+      if (banner) { banner.style.display = 'none'; banner.classList.remove('at-banner-visible'); }
+      localStorage.setItem('rms_pwa_banner_dismissed', 'true');
+    });
+    if (typeof lucide !== 'undefined') lucide.createIcons();
   </script>
 </body>
 </html>
