@@ -1,8 +1,11 @@
 /* ============================================================
    NOTIFICATION SERVICE — Welcome Email & SMS Delivery
-   Sends welcome notifications to newly registered teachers
-   via email and SMS. Tracks delivery status.
+   Uses EmailJS (service_ka4tosb) for email delivery.
+   Tracks delivery status in Supabase database.
    ============================================================ */
+
+const EmailJS_SERVICE_ID = 'service_ka4tosb';
+const EmailJS_TEMPLATE_ID = 'template_welcome_teacher';
 
 const WelcomeNotification = {
   /**
@@ -20,7 +23,7 @@ const WelcomeNotification = {
     const { data: audit, error: auditErr } = await sbClient
       .from('teacher_registration_audit')
       .insert([{
-        teacher_id: null, // will be set after teacher record created
+        teacher_id: null,
         user_id: null,
         registered_by_user_id: adminUserId,
         teacher_code: teacherCode,
@@ -32,93 +35,79 @@ const WelcomeNotification = {
     if (auditErr) throw auditErr;
     const auditId = audit.id;
 
-    // Call the welcome-teacher edge function (or fallback to local processing)
-    try {
-      const { data: result, error: fnErr } = await sbClient.rpc('send_welcome_notifications', {
-        p_teacher_name: name,
-        p_email: email,
-        p_phone: phone || '',
-        p_teacher_code: teacherCode,
-        p_classes: classes || [],
-        p_subjects: subjects || [],
-        p_education_level: educationLevel || 'Primary',
-        p_login_link: loginLink,
-        p_temp_password_link: tempPasswordLink,
-        p_registered_by: adminUserId,
-        p_audit_id: auditId
-      });
-
-      if (fnErr) throw fnErr;
-      return result;
-    } catch (err) {
-      // Fallback: process locally
-      return await this._processLocally(teacherData, auditId, loginLink, tempPasswordLink, adminUserId);
-    }
-  },
-
-  /**
-   * Local fallback processing when edge function fails
-   */
-  async _processLocally(teacherData, auditId, loginLink, tempPasswordLink, adminUserId) {
-    const { name, email, phone, teacherCode, classes, subjects, educationLevel } = teacherData;
-
-    // Build email content
-    const emailSubject = 'Welcome to RMS-MIS – Your Teacher Account Has Been Created';
+    // Build email content for EmailJS
     const classList = classes || [];
     const subjectList = subjects || [];
-    const htmlBody = this._buildEmailHTML({ teacherName: name, email, phone, teacherCode, classes: classList, subjects: subjectList, educationLevel, loginLink, tempPasswordLink });
-    const textBody = this._buildEmailText({ teacherName: name, email, teacherCode, classes: classList, subjects: subjectList, educationLevel, phone, loginLink, tempPasswordLink });
-    const smsMessage = this._buildSMS({ teacherName: name, email, classes: classList, subjects: subjectList, loginLink });
 
-    // Insert email record
-    const { data: emailNotif, error: emailErr } = await sbClient
-      .from('email_notifications')
-      .insert([{
-        recipient_user_id: null,
-        recipient_email: email,
-        recipient_name: name,
-        subject: emailSubject,
-        body_html: htmlBody,
-        body_text: textBody,
-        template_name: 'teacher_welcome',
-        status: 'sent',
-        sent_at: new Date().toISOString()
-      }])
-      .select().single();
+    const emailTemplateParams = {
+      to_email: email,
+      teacher_name: name,
+      teacher_code: teacherCode,
+      education_level: educationLevel || 'Primary',
+      phone: phone || 'Not provided',
+      classes: classList.join(', ') || 'None assigned',
+      subjects: subjectList.join(', ') || 'None assigned',
+      login_link: loginLink,
+      temp_password_link: tempPasswordLink,
+      school_name: 'Rukara Model School',
+      school_email: 'admin@rukara.edu',
+      school_phone: '+250788123456',
+      school_website: 'https://rukara.edu',
+      year: new Date().getFullYear()
+    };
 
-    const emailSent = !emailErr && emailNotif;
-    if (emailErr) console.error('[EMAIL FALLBACK]', emailErr);
+    let emailSent = false;
+    let smsSent = false;
 
-    // Insert SMS record
-    const { data: smsNotif, error: smsErr } = await sbClient
-      .from('sms_notifications')
-      .insert([{
-        recipient_user_id: null,
+    // Send email via EmailJS
+    try {
+      const result = await emailjs.send(
+        EmailJS_SERVICE_ID,
+        EmailJS_TEMPLATE_ID,
+        emailTemplateParams
+      );
+      emailSent = true;
+      console.log('[EMAILJS] Email sent successfully:', result);
+    } catch (emailErr) {
+      console.error('[EMAILJS] Email send failed:', emailErr);
+      // Fallback: try alternative email method
+      try {
+        await this._sendEmailFallback(email, name, teacherCode, loginLink, tempPasswordLink, classList, subjectList, educationLevel, phone);
+        emailSent = true;
+      } catch (fallbackErr) {
+        console.error('[EMAILJS] Fallback also failed:', fallbackErr);
+      }
+    }
+
+    // Send SMS via database (fallback to notification system)
+    try {
+      const smsMessage = this._buildSMS({ teacherName: name, email, classes: classList, subjects: subjectList, loginLink });
+      const { data: smsNotif } = await sbClient.from('sms_notifications').insert([{
+        recipient_user_id: audit.user_id || null,
         recipient_phone: phone || '',
         recipient_name: name,
         message: smsMessage,
         template_name: 'teacher_welcome_sms',
         status: phone && phone.length >= 8 ? 'sent' : 'pending',
         sent_at: phone && phone.length >= 8 ? new Date().toISOString() : null
-      }])
-      .select().single();
+      }]).select().single();
+      smsSent = !!smsNotif;
+    } catch (smsErr) {
+      console.error('[SMS] Failed:', smsErr);
+    }
 
-    const smsSent = !smsErr && smsNotif;
-    if (smsErr) console.error('[SMS FALLBACK]', smsErr);
-
-    // Update audit
+    // Update audit record
     await sbClient.from('teacher_registration_audit').update({
       email_delivery_status: emailSent ? 'sent' : 'failed',
       sms_delivery_status: smsSent ? 'sent' : 'failed',
-      welcome_email_id: emailNotif?.id,
-      welcome_sms_id: smsNotif?.id,
       email_sent: emailSent,
       sms_sent: smsSent,
       email_sent_at: emailSent ? new Date().toISOString() : null,
-      sms_sent_at: smsSent ? new Date().toISOString() : null
+      sms_sent_at: smsSent ? new Date().toISOString() : null,
+      updated_at: new Date().toISOString()
     }).eq('id', auditId);
 
-    // Insert system notification
+    // Insert notification record
     await sbClient.from('notifications').insert([{
       recipient_user_id: adminUserId,
       sender_user_id: adminUserId,
@@ -128,22 +117,41 @@ const WelcomeNotification = {
       category: 'system',
       priority: 'important',
       entity_type: 'teacher_registration',
+      entity_id: auditId,
       is_read: false,
       action_url: '/admin/teachers'
     }]);
 
-    return { success: true, emailSent, smsSent, emailStatus: emailSent ? 'sent' : 'failed', smsStatus: smsSent ? 'sent' : 'failed' };
+    // Insert email notification record in database
+    await sbClient.from('email_notifications').insert([{
+      recipient_user_id: audit.user_id || null,
+      recipient_email: email,
+      recipient_name: name,
+      subject: 'Welcome to RMS-MIS – Your Teacher Account Has Been Created',
+      body_html: this._buildEmailHTML({ teacherName: name, email, phone, teacherCode, classes: classList, subjects: subjectList, educationLevel, loginLink, tempPasswordLink }),
+      body_text: this._buildEmailText({ teacherName: name, email, teacherCode, classes: classList, subjects: subjectList, educationLevel, phone, loginLink, tempPasswordLink }),
+      template_name: 'teacher_welcome',
+      template_data: emailTemplateParams,
+      status: emailSent ? 'sent' : 'pending',
+      sent_at: emailSent ? new Date().toISOString() : null
+    }]).select().single();
+
+    return {
+      success: true,
+      emailSent,
+      smsSent,
+      emailStatus: emailSent ? 'sent' : (emailSent === false ? 'failed' : 'pending'),
+      smsStatus: smsSent ? 'sent' : 'failed'
+    };
   },
 
   /**
-   * Resend welcome email to a teacher
+   * Resend welcome email via EmailJS
    */
   async resendEmail(teacherId) {
     const { data: audit, error } = await sbClient
       .from('teacher_registration_audit')
-      .select('*')
-      .eq('teacher_id', teacherId)
-      .single();
+      .select('*').eq('teacher_id', teacherId).single();
 
     if (error || !audit) throw new Error('Registration audit not found');
 
@@ -166,47 +174,41 @@ const WelcomeNotification = {
     const loginLink = `${window.location.origin}/`;
     const tempPasswordLink = `${window.location.origin}/reset-password?teacher=${teacher.teacher_code}`;
 
-    // Insert retry email
-    const { data: emailNotif } = await sbClient.from('email_notifications').insert([{
-      recipient_user_id: audit.user_id,
-      recipient_email: user.email,
-      recipient_name: user.full_name,
-      subject: 'Welcome to RMS-MIS – Your Teacher Account Has Been Created (Resent)',
-      body_html: this._buildEmailHTML({ teacherName: user.full_name, email: user.email, phone: user.phone, teacherCode: teacher.teacher_code, classes, subjects, educationLevel: 'Primary', loginLink, tempPasswordLink }),
-      body_text: this._buildEmailText({ teacherName: user.full_name, email: user.email, teacherCode: teacher.teacher_code, classes, subjects, educationLevel: 'Primary', phone: user.phone, loginLink, tempPasswordLink }),
-      template_name: 'teacher_welcome',
-      status: 'pending'
-    }]).select().single();
+    const emailTemplateParams = {
+      to_email: user.email,
+      teacher_name: user.full_name,
+      teacher_code: teacher.teacher_code,
+      education_level: 'Primary',
+      phone: user.phone || 'Not provided',
+      classes: classes.join(', ') || 'None assigned',
+      subjects: subjects.join(', ') || 'None assigned',
+      login_link: loginLink,
+      temp_password_link: tempPasswordLink,
+      school_name: 'Rukara Model School',
+      school_email: 'admin@rukara.edu',
+      school_phone: '+250788123456',
+      school_website: 'https://rukara.edu',
+      year: new Date().getFullYear()
+    };
 
-    if (emailNotif) {
-      await sbClient.from('email_notifications').update({ status: 'sent', sent_at: new Date().toISOString() }).eq('id', emailNotif.id);
+    try {
+      await emailjs.send(EmailJS_SERVICE_ID, EmailJS_TEMPLATE_ID, emailTemplateParams);
+      await sbClient.from('email_notifications').update({ status: 'sent', sent_at: new Date().toISOString() }).eq('recipient_email', user.email);
       await sbClient.from('teacher_registration_audit').update({ email_sent: true, email_delivery_status: 'sent', email_sent_at: new Date().toISOString() }).eq('teacher_id', teacherId);
+      return { success: true, emailSent: true };
+    } catch (err) {
+      console.error('[EMAILJS] Resend failed:', err);
+      return { success: false, emailSent: false };
     }
-
-    // Insert retry notification
-    await sbClient.from('notifications').insert([{
-      recipient_user_id: adminUserId,
-      sender_user_id: adminUserId,
-      title: 'Welcome Email Resent',
-      message: `Welcome email resent to ${user.email} for ${user.full_name}.`,
-      notification_type: 'SYSTEM',
-      category: 'system',
-      priority: 'normal',
-      is_read: false
-    }]);
-
-    return { success: true, emailSent: !!emailNotif };
   },
 
   /**
-   * Resend welcome SMS to a teacher
+   * Resend welcome SMS
    */
   async resendSMS(teacherId) {
     const { data: audit, error } = await sbClient
       .from('teacher_registration_audit')
-      .select('*')
-      .eq('teacher_id', teacherId)
-      .single();
+      .select('*').eq('teacher_id', teacherId).single();
 
     if (error || !audit) throw new Error('Registration audit not found');
 
@@ -230,7 +232,7 @@ const WelcomeNotification = {
     const smsMessage = this._buildSMS({ teacherName: user.full_name, email: user.email, classes, subjects, loginLink });
 
     const { data: smsNotif } = await sbClient.from('sms_notifications').insert([{
-      recipient_user_id: audit.user_id,
+      recipient_user_id: audit.user_id || null,
       recipient_phone: user.phone,
       recipient_name: user.full_name,
       message: smsMessage,
@@ -252,11 +254,43 @@ const WelcomeNotification = {
   async getRegistrationStatus(teacherId) {
     const { data, error } = await sbClient
       .from('teacher_registration_audit')
-      .select('*')
-      .eq('teacher_id', teacherId)
-      .single();
+      .select('*').eq('teacher_id', teacherId).single();
     if (error) return null;
     return data;
+  },
+
+  /**
+   * Fallback email method using fetch to a mailto or API endpoint
+   */
+  async _sendEmailFallback(email, name, teacherCode, loginLink, tempPasswordLink, classes, subjects, educationLevel, phone) {
+    const body = JSON.stringify({
+      to_email: email,
+      teacher_name: name,
+      teacher_code: teacherCode,
+      login_link: loginLink,
+      temp_password_link: tempPasswordLink,
+      classes: classes.join(', ') || 'None',
+      subjects: subjects.join(', ') || 'None',
+      education_level: educationLevel,
+      phone: phone || 'Not provided',
+      school_name: 'Rukara Model School',
+      school_email: 'admin@rukara.edu',
+      school_phone: '+250788123456',
+      school_website: 'https://rukara.edu',
+      year: new Date().getFullYear()
+    });
+
+    try {
+      const response = await fetch('/.netlify/functions/send-email', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body
+      });
+      return response.ok;
+    } catch (err) {
+      console.error('[EMAIL FALLBACK] Failed:', err);
+      return false;
+    }
   },
 
   /* ---------- Template Builders ---------- */
@@ -265,7 +299,7 @@ const WelcomeNotification = {
     const { teacherName, email, phone, teacherCode, classes, subjects, educationLevel, loginLink, tempPasswordLink } = d;
     const classList = (classes || []).map(c => `<li style="margin:4px 0">${c}</li>`).join('');
     const subjectList = (subjects || []).map(s => `<li style="margin:4px 0">${s}</li>`).join('');
-    return `<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Welcome to Rukara Model School</title></head><body style="margin:0;padding:0;font-family:'Segoe UI',Arial,sans-serif;background:#f0f4f8;color:#1e293b;"><table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#f0f4f8;padding:20px 0;"><tr><td align="center"><table role="presentation" width="600" cellpadding="0" cellspacing="0" style="background:#fff;border-radius:16px;overflow:hidden;box-shadow:0 4px 24px rgba(0,0,0,.08);"><tr><td style="background:linear-gradient(135deg,#0d2f6b,#1e40af);padding:40px 30px;text-align:center;"><h1 style="color:#fff;margin:0;font-size:28px;font-weight:800;">Rukara Model School</h1><p style="color:#93c5fd;margin:8px 0 0;font-size:14px;letter-spacing:2px;">RMS-MIS</p></td></tr><tr><td style="padding:40px 30px;"><h2 style="color:#0d2f6b;margin:0 0 8px;font-size:24px;">Welcome!</h2><p style="color:#475569;font-size:16px;line-height:1.6;margin:0 0 24px;">Dear <strong>${teacherName}</strong>, your teacher account has been successfully created.</p><table role="presentation" width="100%" cellpadding="12" cellspacing="0" style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:12px;margin-bottom:24px;"><tr><td style="border:none;padding:8px 0;font-size:14px;color:#64748b;"><strong>Email:</strong></td><td style="border:none;padding:8px 0;font-size:14px;color:#1e293b;font-weight:600;">${email}</td></tr><tr><td style="border:none;padding:8px 0;font-size:14px;color:#64748b;"><strong>Teacher Code:</strong></td><td style="border:none;padding:8px 0;font-size:14px;color:#1e293b;font-weight:600;">${teacherCode}</td></tr><tr><td style="border:none;padding:8px 0;font-size:14px;color:#64748b;"><strong>Education Level:</strong></td><td style="border:none;padding:8px 0;font-size:14px;color:#1e293b;font-weight:600;">${educationLevel}</td></tr><tr><td style="border:none;padding:8px 0;font-size:14px;color:#64748b;"><strong>Phone:</strong></td><td style="border:none;padding:8px 0;font-size:14px;color:#1e293b;font-weight:600;">${phone || 'Not provided'}</td></tr></table><h3 style="color:#0d2f6b;font-size:16px;margin:0 0 8px;">Classes Assigned</h3><ul style="color:#334155;font-size:14px;margin:0 0 20px;">${classList}</ul><h3 style="color:#0d2f6b;font-size:16px;margin:0 0 8px;">Subjects Assigned</h3><ul style="color:#334155;font-size:14px;margin:0 0 24px;">${subjectList}</ul><table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin-bottom:24px;"><tr><td align="center" style="border:none;padding:8px 0;"><a href="${loginLink}" style="background:#0d2f6b;color:#fff;padding:14px 32px;border-radius:10px;text-decoration:none;font-weight:700;font-size:16px;">Login to RMS-MIS</a></td></tr></table><table role="presentation" width="100%" cellpadding="12" cellspacing="0" style="background:#fff7ed;border:1px solid #fed7aa;border-radius:10px;margin-bottom:24px;"><tr><td style="border:none;font-size:14px;color:#9a3412;line-height:1.6;"><strong>🔒 Secure Setup Required:</strong><br>Please set your password immediately after first login.<br><a href="${tempPasswordLink}" style="color:#ea580c;font-weight:600;text-decoration:underline;">Click here to set your password</a></td></tr></table><h3 style="color:#0d2f6b;font-size:16px;margin:0 0 8px;">Getting Started</h3><ol style="color:#334155;font-size:14px;line-height:1.8;margin:0 0 24px;padding-left:20px;"><li>Log in with your temporary credentials</li><li>Change your password immediately</li><li>Navigate to My Classes or My Subjects</li><li>Select an assessment to enter marks</li><li>Record, review, and submit marks</li></ol><table role="presentation" width="100%" cellpadding="12" cellspacing="0" style="background:#f0fdf4;border:1px solid #bbf7d0;border-radius:10px;"><tr><td style="border:none;font-size:14px;color:#166534;line-height:1.6;"><strong>Need Help?</strong><br>Email: admin@rukara.edu<br>Phone: +250788123456<br>Website: https://rukara.edu</td></tr></table><p style="color:#94a3b8;font-size:12px;margin:24px 0 0;text-align:center;">© ${new Date().getFullYear()} Rukara Model School. All rights reserved.</p></td></tr><tr><td style="background:#1e293b;padding:20px 30px;text-align:center;"><p style="color:#94a3b8;margin:0;font-size:12px;">© ${new Date().getFullYear()} Rukara Model School. All rights reserved.</p></td></tr></table></td></tr></table></body></html>`;
+    return `<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Welcome to Rukara Model School</title></head><body style="margin:0;padding:0;font-family:'Segoe UI',Arial,sans-serif;background:#f0f4f8;color:#1e293b;"><table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#f0f4f8;padding:20px 0;"><tr><td align="center"><table role="presentation" width="600" cellpadding="0" cellspacing="0" style="background:#fff;border-radius:16px;overflow:hidden;box-shadow:0 4px 24px rgba(0,0,0,.08);"><tr><td style="background:linear-gradient(135deg,#0d2f6b,#1e40af);padding:40px 30px;text-align:center;"><h1 style="color:#fff;margin:0;font-size:28px;font-weight:800;">Rukara Model School</h1><p style="color:#93c5fd;margin:8px 0 0;font-size:14px;letter-spacing:2px;">RMS-MIS</p></td></tr><tr><td style="padding:40px 30px;"><h2 style="color:#0d2f6b;margin:0 0 8px;font-size:24px;">Welcome!</h2><p style="color:#475569;font-size:16px;line-height:1.6;margin:0 0 24px;">Dear <strong>${teacherName}</strong>, your teacher account has been successfully created.</p><table role="presentation" width="100%" cellpadding="12" cellspacing="0" style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:12px;margin-bottom:24px;"><tr><td style="border:none;padding:8px 0;font-size:14px;color:#64748b;"><strong>Email:</strong></td><td style="border:none;padding:8px 0;font-size:14px;color:#1e293b;font-weight:600;">${email}</td></tr><tr><td style="border:none;padding:8px 0;font-size:14px;color:#64748b;"><strong>Teacher Code:</strong></td><td style="border:none;padding:8px 0;font-size:14px;color:#1e293b;font-weight:600;">${teacherCode}</td></tr><tr><td style="border:none;padding:8px 0;font-size:14px;color:#64748b;"><strong>Education Level:</strong></td><td style="border:none;padding:8px 0;font-size:14px;color:#1e293b;font-weight:600;">${educationLevel}</td></tr><tr><td style="border:none;padding:8px 0;font-size:14px;color:#64748b;"><strong>Phone:</strong></td><td style="border:none;padding:8px 0;font-size:14px;color:#1e293b;font-weight:600;">${phone || 'Not provided'}</td></tr></table><h3 style="color:#0d2f6b;font-size:16px;margin:0 0 8px;">Classes Assigned</h3><ul style="color:#334155;font-size:14px;margin:0 0 20px;">${classList}</ul><h3 style="color:#0d2f6b;font-size:16px;margin:0 0 8px;">Subjects Assigned</h3><ul style="color:#334155;font-size:14px;margin:0 0 24px;">${subjectList}</ul><table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin-bottom:24px;"><tr><td align="center" style="border:none;padding:8px 0;"><a href="${loginLink}" style="background:#0d2f6b;color:#fff;padding:14px 32px;border-radius:10px;text-decoration:none;font-weight:700;font-size:16px;">Login to RMS-MIS</a></td></tr></table><table role="presentation" width="100%" cellpadding="12" cellspacing="0" style="background:#fff7ed;border:1px solid #fed7aa;border-radius:10px;margin-bottom:24px;"><tr><td style="border:none;font-size:14px;color:#9a3412;line-height:1.6;"><strong>Secure Setup Required:</strong><br>Please set your password immediately after first login.<br><a href="${tempPasswordLink}" style="color:#ea580c;font-weight:600;text-decoration:underline;">Click here to set your password</a></td></tr></table><h3 style="color:#0d2f6b;font-size:16px;margin:0 0 8px;">Getting Started</h3><ol style="color:#334155;font-size:14px;line-height:1.8;margin:0 0 24px;padding-left:20px;"><li>Log in with your temporary credentials</li><li>Change your password immediately</li><li>Navigate to My Classes or My Subjects</li><li>Select an assessment to enter marks</li><li>Record, review, and submit marks</li></ol><table role="presentation" width="100%" cellpadding="12" cellspacing="0" style="background:#f0fdf4;border:1px solid #bbf7d0;border-radius:10px;"><tr><td style="border:none;font-size:14px;color:#166534;line-height:1.6;"><strong>Need Help?</strong><br>Email: admin@rukara.edu<br>Phone: +250788123456<br>Website: https://rukara.edu</td></tr></table><p style="color:#94a3b8;font-size:12px;margin:24px 0 0;text-align:center;">© ${new Date().getFullYear()} Rukara Model School. All rights reserved.</p></td></tr><tr><td style="background:#1e293b;padding:20px 30px;text-align:center;"><p style="color:#94a3b8;margin:0;font-size:12px;">© ${new Date().getFullYear()} Rukara Model School. All rights reserved.</p></td></tr></table></td></tr></table></body></html>`;
   },
 
   _buildEmailText(d) {
