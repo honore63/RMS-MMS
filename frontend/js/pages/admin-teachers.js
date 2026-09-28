@@ -79,6 +79,7 @@ function teacherSummaryProfile(t, teacherMeta = {}) {
         <button class="btn btn-sm btn-secondary teacher-view-btn" data-action="teacher-view" data-id="${Utils.escapeHtml(String(t.id))}" title="View more teacher details" aria-label="View more teacher details"><i data-lucide="eye"></i> View more</button>
         <button class="btn btn-sm btn-outline" data-action="teacher-edit" data-id="${Utils.escapeHtml(String(t.id))}"><i data-lucide="pencil"></i> Edit</button>
         <button class="btn btn-sm btn-secondary" data-action="teacher-assignments" data-id="${Utils.escapeHtml(String(t.id))}"><i data-lucide="link"></i> Manage Assignments</button>
+        <button class="btn btn-sm btn-danger" data-action="teacher-delete" data-id="${Utils.escapeHtml(String(t.id))}"><i data-lucide="trash-2"></i> Delete</button>
       </div>
     </article>
   `;
@@ -324,6 +325,14 @@ async function renderTeachers() {
       });
     });
 
+    root.querySelectorAll('[data-action="teacher-delete"]').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const id = btn.dataset.id;
+        const teacher = (teachers || []).find(t => String(t.id) === String(id));
+        if (teacher) teacherDelete(teacher);
+      });
+    });
+
     root.querySelectorAll('[data-action="teacher-assignments"]').forEach(btn => {
       btn.addEventListener('click', () => {
         const id = btn.dataset.id;
@@ -392,17 +401,39 @@ function teacherViewProfile(t, teacherMeta = {}) {
   document.getElementById('profile-edit-btn')?.addEventListener('click', () => teacherEdit(t));
 }
 
-function teacherForm() {
+async function teacherForm() {
+  let formClasses = [];
+  let formSubjects = [];
+  try {
+    const [cls, subj] = await Promise.all([DB.get('classes'), DB.get('subjects')]);
+    formClasses = (cls || []).filter(c => teacherMatchesScope(c)).sort((a, b) => String(a.name || '').localeCompare(String(b.name || '')));
+    formSubjects = (subj || []).filter(s => (s.status || 'active') === 'active').sort((a, b) => String(a.name || '').localeCompare(String(b.name || '')));
+  } catch (e) {
+    console.warn('[TEACHER FORM] Could not load classes/subjects:', e);
+  }
+
   Modal.show('Add Teacher', `
     <div class="form-group"><label>Teacher Code (11 Digits) <span class="required">*</span></label><input id="tf-code" class="input-field" placeholder="e.g., 54102325012" maxlength="11"></div>
     <div class="form-group"><label>Full Name <span class="required">*</span></label><input id="tf-name" class="input-field" placeholder="e.g., John Doe"></div>
     <div class="form-group"><label>Email <span class="required">*</span></label><input id="tf-email" class="input-field" placeholder="e.g., john@rukara.edu"></div>
     <div class="form-group"><label>Password <span class="required">*</span></label><input id="tf-pass" class="input-field" type="password" value="teacher123" placeholder="teacher123" autocomplete="new-password"><p class="form-hint">Default password: teacher123. The teacher should change it after signing in.</p></div>
     <div class="form-group"><label>Phone</label><input id="tf-phone" class="input-field" placeholder="e.g., +250788123456"></div>
-    <div class="alert alert-info" style="margin-bottom:0"><i data-lucide="info"></i> After registration, a professional welcome email and SMS will be sent to the teacher. Assignments can be linked via the Assignments module.</div>`,
+    <div class="form-group"><label><i data-lucide="users" style="width:14px;height:14px"></i> Assign Classes</label>
+      <div id="tf-classes" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:8px;max-height:160px;overflow-y:auto;border:1px solid var(--gray-200);border-radius:10px;padding:10px;background:var(--gray-50)">
+        ${formClasses.length ? formClasses.map(c => `<label style="display:flex;align-items:center;gap:8px;font-size:13px;font-weight:500;cursor:pointer"><input type="checkbox" class="tf-class-cb" value="${Utils.escapeHtml(String(c.id))}" style="width:16px;height:16px;accent-color:var(--blue-600)"> ${Utils.escapeHtml(c.name || c.level || ('Class ' + c.id))}</label>`).join('') : '<p class="form-hint" style="margin:0">No classes available. You can assign them later via Assignments.</p>'}
+      </div>
+    </div>
+    <div class="form-group"><label><i data-lucide="book-open" style="width:14px;height:14px"></i> Assign Subjects</label>
+      <div id="tf-subjects" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:8px;max-height:160px;overflow-y:auto;border:1px solid var(--gray-200);border-radius:10px;padding:10px;background:var(--gray-50)">
+        ${formSubjects.length ? formSubjects.map(s => `<label style="display:flex;align-items:center;gap:8px;font-size:13px;font-weight:500;cursor:pointer"><input type="checkbox" class="tf-subject-cb" value="${Utils.escapeHtml(String(s.id))}" style="width:16px;height:16px;accent-color:var(--blue-600)"> ${Utils.escapeHtml(s.name || 'Subject')}</label>`).join('') : '<p class="form-hint" style="margin:0">No subjects available. You can assign them later via Assignments.</p>'}
+      </div>
+      <p class="form-hint">Each selected class is paired with each selected subject. You can refine this later in Assignments.</p>
+    </div>
+    <div class="alert alert-info" style="margin-bottom:0"><i data-lucide="info"></i> After registration, a professional welcome email and SMS will be sent to the teacher listing these classes and subjects.</div>`,
     `<button class="btn btn-secondary" data-modal-close="true">Cancel</button>
      <button class="btn btn-primary" id="teacher-save-btn"><i data-lucide="save"></i> Save & Send Welcome</button>`);
 
+  if (typeof lucide !== 'undefined') lucide.createIcons();
   document.getElementById('teacher-save-btn')?.addEventListener('click', teacherSave);
   document.querySelector('[data-modal-close="true"]')?.addEventListener('click', () => Modal.close());
 }
@@ -429,8 +460,8 @@ async function teacherSave() {
       sbClient.from('teachers').select('id').eq('teacher_code', code).maybeSingle(),
       sbClient.from('users').select('id').eq('email', email).maybeSingle()
     ]);
-    if (existingCode) return Utils.toast('That teacher code is already registered', 'error');
-    if (existingEmail) return Utils.toast('That email address is already registered', 'error');
+    if (existingCode) { if (saveBtn) { saveBtn.disabled = false; saveBtn.innerHTML = '<i data-lucide="save"></i> Save & Send Welcome'; } return Utils.toast('That teacher code is already registered', 'error'); }
+    if (existingEmail) { if (saveBtn) { saveBtn.disabled = false; saveBtn.innerHTML = '<i data-lucide="save"></i> Save & Send Welcome'; } return Utils.toast('That email address is already registered', 'error'); }
 
     const { data: authData, error } = await sbClient.auth.signUp({ email, password: pass });
     if (error) throw error;
@@ -449,11 +480,61 @@ async function teacherSave() {
     }
     const creatorId = (typeof Auth !== 'undefined' && Auth.currentUser?.id) ? Auth.currentUser.id : (adminSession?.user?.id || null);
 
+    // Read selected classes/subjects from the registration form
+    const selectedClassIds = Array.from(document.querySelectorAll('.tf-class-cb:checked')).map(cb => cb.value);
+    const selectedSubjectIds = Array.from(document.querySelectorAll('.tf-subject-cb:checked')).map(cb => cb.value);
+
     // Insert users and teachers records with created_by
     await DB.insert('users', { id: authData.user.id, email, full_name: name, role: 'teacher', status: 'active', phone });
     await DB.insert('teachers', { user_id: authData.user.id, teacher_code: code, full_name: name, email, phone, status: 'active', created_by: creatorId });
     DB.invalidate('teachers');
     DB.invalidate('users');
+
+    // Resolve the new teacher row and its display names for assignments + email
+    const { data: newTeacher } = await sbClient.from('teachers').select('id').eq('teacher_code', code).single();
+    const newTeacherId = newTeacher?.id || null;
+    let assignedClassNames = [];
+    let assignedSubjectNames = [];
+    let activeYearId = null;
+    try {
+      const [allClasses, allSubjects, allYears] = await Promise.all([
+        selectedClassIds.length ? DB.get('classes') : Promise.resolve([]),
+        selectedSubjectIds.length ? DB.get('subjects') : Promise.resolve([]),
+        DB.get('academic_years').catch(() => [])
+      ]);
+      const classById = new Map((allClasses || []).map(c => [String(c.id), c]));
+      const subjectById = new Map((allSubjects || []).map(s => [String(s.id), s]));
+      assignedClassNames = selectedClassIds.map(id => classById.get(String(id))).filter(Boolean).map(c => c.name || c.level || ('Class ' + c.id));
+      assignedSubjectNames = selectedSubjectIds.map(id => subjectById.get(String(id))).filter(Boolean).map(s => s.name || 'Subject');
+      const activeYear = (allYears || []).find(y => (y.status || y.state) === 'active' || y.is_active);
+      activeYearId = activeYear ? activeYear.id : null;
+    } catch (e) {
+      console.warn('[TEACHER ASSIGN] Could not resolve names/year:', e);
+    }
+
+    // Create assignments chosen on the same page (class x subject pairs).
+    if (newTeacherId && selectedClassIds.length) {
+      try {
+        const payload = [];
+        if (selectedSubjectIds.length) {
+          for (const classId of selectedClassIds) {
+            for (const subjectId of selectedSubjectIds) {
+              payload.push({ teacher_id: newTeacherId, class_id: classId, subject_id: subjectId, academic_year_id: activeYearId });
+            }
+          }
+        } else {
+          for (const classId of selectedClassIds) {
+            payload.push({ teacher_id: newTeacherId, class_id: classId, subject_id: null, academic_year_id: activeYearId });
+          }
+        }
+        const { error: assignErr } = await sbClient.from('teacher_assignments').insert(payload);
+        if (assignErr) throw assignErr;
+        DB.invalidate('teacher_assignments');
+      } catch (assignErr) {
+        console.error('[TEACHER ASSIGN] Failed:', assignErr);
+        Utils.toast('Teacher registered, but assignments could not be saved: ' + (assignErr.message || 'unknown error'), 'error');
+      }
+    }
 
     // Send welcome notifications
     const teacherData = {
@@ -461,8 +542,8 @@ async function teacherSave() {
       email,
       phone,
       teacherCode: code,
-      classes: [],
-      subjects: [],
+      classes: assignedClassNames,
+      subjects: assignedSubjectNames,
       educationLevel: 'Primary'
     };
 
@@ -572,12 +653,15 @@ function teacherEdit(t) {
         <div class="form-group"><label>Status</label><select id="te-status" class="select-field"><option value="active" ${t.status === 'active' ? 'selected' : ''}>Active</option><option value="inactive" ${t.status === 'inactive' ? 'selected' : ''}>Inactive</option></select></div>
         <div class="alert alert-info" style="margin-bottom:0"><i data-lucide="info"></i> Education level is driven by the classes this teacher is assigned to (see Assignments).</div>
       </div><div class="modal-footer">
+        <button class="btn btn-danger" id="teacher-edit-delete-btn"><i data-lucide="trash-2"></i> Delete</button>
+        <span style="flex:1"></span>
         <button class="btn btn-secondary" data-close-modal="true">Cancel</button>
         <button class="btn btn-primary" id="teacher-update-btn"><i data-lucide="save"></i> Update</button>
       </div></div></div>`;
 
   document.querySelector('[data-close-modal="true"]')?.addEventListener('click', () => Modal.close());
   document.getElementById('teacher-update-btn')?.addEventListener('click', () => teacherUpdate(t.id));
+  document.getElementById('teacher-edit-delete-btn')?.addEventListener('click', () => teacherDelete(t));
   const overlay = document.querySelector('#modal-root .modal-overlay');
   if (overlay) {
     overlay.addEventListener('click', (event) => {
@@ -644,29 +728,39 @@ function teacherDelete(t) {
 }
 
 async function confirmTeacherDelete(id, userId) {
+  const delBtn = document.getElementById('teacher-delete-btn');
+  if (delBtn) { delBtn.disabled = true; delBtn.innerHTML = '<div class="spinner" style="width:14px;height:14px;border-width:2px"></div> Deleting...'; }
   try {
+    // Remove assignments explicitly first (covers DBs without ON DELETE CASCADE).
+    const { error: assignErr } = await sbClient.from('teacher_assignments').delete().eq('teacher_id', id);
+    if (assignErr) throw assignErr;
     if (userId) {
+      // Deleting the user cascades to the teacher row and registration audit.
       const { error } = await sbClient.from('users').delete().eq('id', userId);
       if (error) throw error;
-      DB.invalidate('users');
-      DB.invalidate('teachers');
     } else {
       await DB.remove('teachers', id);
     }
-    await DB.insert('audit_logs', {
-      user_id: Auth.currentUser?.id, user_name: Auth.currentUser?.full_name,
-      role: Auth.currentUser?.role, action: 'delete_teacher',
-      new_value: 'Deleted teacher ' + (id || ''),
-      timestamp: new Date().toISOString()
-    });
+    DB.invalidate('users');
+    DB.invalidate('teachers');
+    DB.invalidate('teacher_assignments');
+    try {
+      await DB.insert('audit_logs', {
+        user_id: Auth.currentUser?.id, user_name: Auth.currentUser?.full_name,
+        role: Auth.currentUser?.role, action: 'delete_teacher',
+        new_value: 'Deleted teacher ' + (id || ''),
+        timestamp: new Date().toISOString()
+      });
+    } catch (logErr) { console.warn('[TEACHER DELETE] Audit log failed:', logErr); }
     Modal.close();
     Utils.toast('Teacher deleted', 'success');
     renderTeachers();
   } catch (e) {
     if (/violates foreign key constraint/i.test(e.message || '')) {
       Modal.close();
-      Utils.toast('Cannot delete: teacher owns assessments. Delete or reassign those assessments first.', 'error');
+      Utils.toast('Cannot delete: teacher owns assessments or learners. Delete or reassign those records first.', 'error');
     } else {
+      if (delBtn) { delBtn.disabled = false; delBtn.innerHTML = '<i data-lucide="trash-2"></i> Delete Teacher'; }
       Utils.toast('Delete error: ' + e.message, 'error');
     }
   }

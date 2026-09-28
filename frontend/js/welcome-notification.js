@@ -19,11 +19,25 @@ const WelcomeNotification = {
     const loginLink = `${_rmsBaseUrl()}/`;
     const tempPasswordLink = `${_rmsBaseUrl()}/reset-password?teacher=${teacherCode}`;
 
+    // Resolve the teacher/user rows created just before this call so the
+    // audit row satisfies NOT NULL FKs and Resend can find it later.
+    let linkedTeacherId = null;
+    let linkedUserId = null;
+    try {
+      const { data: teacherRow } = await sbClient.from('teachers').select('id, user_id').eq('teacher_code', teacherCode).single();
+      if (teacherRow) {
+        linkedTeacherId = teacherRow.id;
+        linkedUserId = teacherRow.user_id || null;
+      }
+    } catch (linkErr) {
+      console.warn('[WELCOME] Could not resolve teacher for audit link:', linkErr);
+    }
+
     const { data: audit, error: auditErr } = await sbClient
       .from('teacher_registration_audit')
       .insert([{
-        teacher_id: null,
-        user_id: null,
+        teacher_id: linkedTeacherId,
+        user_id: linkedUserId,
         registered_by_user_id: adminUserId,
         teacher_code: teacherCode,
         email_delivery_status: 'pending',
@@ -61,15 +75,19 @@ const WelcomeNotification = {
 
     // Link audit to the teacher/user rows created just before this call,
     // so Resend Email / Resend SMS can find it later.
+    // (Already linked at insert when the teacher row could be resolved;
+    // this is a backfill for audit rows created before the link existed.)
     try {
-      const { data: teacherRow } = await sbClient.from('teachers').select('id, user_id').eq('teacher_code', teacherCode).single();
-      if (teacherRow) {
-        await sbClient.from('teacher_registration_audit').update({
-          teacher_id: teacherRow.id,
-          user_id: teacherRow.user_id || null
-        }).eq('id', auditId);
-        audit.teacher_id = teacherRow.id;
-        audit.user_id = teacherRow.user_id || null;
+      if (!audit.teacher_id || !audit.user_id) {
+        const { data: teacherRow } = await sbClient.from('teachers').select('id, user_id').eq('teacher_code', teacherCode).single();
+        if (teacherRow) {
+          await sbClient.from('teacher_registration_audit').update({
+            teacher_id: teacherRow.id,
+            user_id: teacherRow.user_id || null
+          }).eq('id', auditId);
+          audit.teacher_id = teacherRow.id;
+          audit.user_id = teacherRow.user_id || null;
+        }
       }
     } catch (linkErr) {
       console.warn('[WELCOME] Could not link audit to teacher:', linkErr);

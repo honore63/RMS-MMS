@@ -686,6 +686,9 @@ BEGIN
     DROP POLICY IF EXISTS "Authenticated Upload profile-photos" ON storage.objects;
     DROP POLICY IF EXISTS "Authenticated Update profile-photos" ON storage.objects;
     DROP POLICY IF EXISTS "Authenticated Delete profile-photos" ON storage.objects;
+    DROP POLICY IF EXISTS rms_profile_photos_owner_insert ON storage.objects;
+    DROP POLICY IF EXISTS rms_profile_photos_owner_update ON storage.objects;
+    DROP POLICY IF EXISTS rms_profile_photos_owner_delete ON storage.objects;
     CREATE POLICY rms_profile_photos_owner_insert ON storage.objects
       FOR INSERT TO authenticated
       WITH CHECK (bucket_id = 'profile-photos' AND EXISTS (
