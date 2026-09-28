@@ -5,22 +5,14 @@
    ============================================================ */
 
 const EmailJS_SERVICE_ID = 'service_ka4tosb';
-const EmailJS_TEMPLATE_ID = 'template_gyanfnc';
-const RMS_MIS_BASE_URL = 'https://rukaramodelschool-mms.vercel.app';
+const EmailJS_TEMPLATE_ID = 'template_welcome_teacher';
 
 const WelcomeNotification = {
-  /**
-   * Register a new teacher and send welcome notifications
-   * @param {Object} teacherData - { name, email, phone, teacherCode, classes, subjects, educationLevel }
-   * @param {string} adminUserId - ID of the DOS who registered the teacher
-   * @returns {Object} { success, emailSent, smsSent, emailStatus, smsStatus }
-   */
   async registerTeacher(teacherData, adminUserId) {
     const { name, email, phone, teacherCode, classes, subjects, educationLevel } = teacherData;
-    const loginLink = `${RMS_MIS_BASE_URL}/`;
-    const tempPasswordLink = `${RMS_MIS_BASE_URL}/reset-password?teacher=${teacherCode}`;
+    const loginLink = `${window.location.origin}/`;
+    const tempPasswordLink = `${window.location.origin}/reset-password?teacher=${teacherCode}`;
 
-    // Insert registration audit record
     const { data: audit, error: auditErr } = await sbClient
       .from('teacher_registration_audit')
       .insert([{
@@ -36,20 +28,15 @@ const WelcomeNotification = {
     if (auditErr) throw auditErr;
     const auditId = audit.id;
 
-    // Build email content for EmailJS
     const classList = classes || [];
     const subjectList = subjects || [];
 
-    const emailTemplateParams = {
-      email,
+    const templateParams = {
       to_email: email,
       teacher_name: name,
       teacher_code: teacherCode,
       education_level: educationLevel || 'Primary',
       phone: phone || 'Not provided',
-      assigned_classes: classList.join(', ') || 'None assigned',
-      assigned_subjects: subjectList.join(', ') || 'None assigned',
-      login_url: loginLink,
       classes: classList.join(', ') || 'None assigned',
       subjects: subjectList.join(', ') || 'None assigned',
       login_link: loginLink,
@@ -64,27 +51,14 @@ const WelcomeNotification = {
     let emailSent = false;
     let smsSent = false;
 
-    // Send email via EmailJS
     try {
-      const result = await emailjs.send(
-        EmailJS_SERVICE_ID,
-        EmailJS_TEMPLATE_ID,
-        emailTemplateParams
-      );
+      const result = await emailjs.send(EmailJS_SERVICE_ID, EmailJS_TEMPLATE_ID, templateParams);
       emailSent = true;
-      console.log('[EMAILJS] Email sent successfully:', result);
+      console.log('[EMAILJS] Email sent:', result);
     } catch (emailErr) {
-      console.error('[EMAILJS] Email send failed:', emailErr);
-      // Fallback: try alternative email method
-      try {
-        await this._sendEmailFallback(email, name, teacherCode, loginLink, tempPasswordLink, classList, subjectList, educationLevel, phone);
-        emailSent = true;
-      } catch (fallbackErr) {
-        console.error('[EMAILJS] Fallback also failed:', fallbackErr);
-      }
+      console.error('[EMAILJS] Email failed:', emailErr);
     }
 
-    // Send SMS via database (fallback to notification system)
     try {
       const smsMessage = this._buildSMS({ teacherName: name, email, classes: classList, subjects: subjectList, loginLink });
       const { data: smsNotif } = await sbClient.from('sms_notifications').insert([{
@@ -101,7 +75,6 @@ const WelcomeNotification = {
       console.error('[SMS] Failed:', smsErr);
     }
 
-    // Update audit record
     await sbClient.from('teacher_registration_audit').update({
       email_delivery_status: emailSent ? 'sent' : 'failed',
       sms_delivery_status: smsSent ? 'sent' : 'failed',
@@ -112,7 +85,6 @@ const WelcomeNotification = {
       updated_at: new Date().toISOString()
     }).eq('id', auditId);
 
-    // Insert notification record
     await sbClient.from('notifications').insert([{
       recipient_user_id: adminUserId,
       sender_user_id: adminUserId,
@@ -127,7 +99,6 @@ const WelcomeNotification = {
       action_url: '/admin/teachers'
     }]);
 
-    // Insert email notification record in database
     await sbClient.from('email_notifications').insert([{
       recipient_user_id: audit.user_id || null,
       recipient_email: email,
@@ -136,7 +107,7 @@ const WelcomeNotification = {
       body_html: this._buildEmailHTML({ teacherName: name, email, phone, teacherCode, classes: classList, subjects: subjectList, educationLevel, loginLink, tempPasswordLink }),
       body_text: this._buildEmailText({ teacherName: name, email, teacherCode, classes: classList, subjects: subjectList, educationLevel, phone, loginLink, tempPasswordLink }),
       template_name: 'teacher_welcome',
-      template_data: emailTemplateParams,
+      template_data: templateParams,
       status: emailSent ? 'sent' : 'pending',
       sent_at: emailSent ? new Date().toISOString() : null
     }]).select().single();
@@ -145,19 +116,15 @@ const WelcomeNotification = {
       success: true,
       emailSent,
       smsSent,
-      emailStatus: emailSent ? 'sent' : (emailSent === false ? 'failed' : 'pending'),
+      emailStatus: emailSent ? 'sent' : 'failed',
       smsStatus: smsSent ? 'sent' : 'failed'
     };
   },
 
-  /**
-   * Resend welcome email via EmailJS
-   */
   async resendEmail(teacherId) {
     const { data: audit, error } = await sbClient
       .from('teacher_registration_audit')
       .select('*').eq('teacher_id', teacherId).single();
-
     if (error || !audit) throw new Error('Registration audit not found');
 
     const { data: user } = await sbClient.from('users').select('email, full_name, phone').eq('id', audit.user_id).single();
@@ -176,19 +143,15 @@ const WelcomeNotification = {
       }
     }
 
-    const loginLink = `${RMS_MIS_BASE_URL}/`;
-    const tempPasswordLink = `${RMS_MIS_BASE_URL}/reset-password?teacher=${teacher.teacher_code}`;
+    const loginLink = `${window.location.origin}/`;
+    const tempPasswordLink = `${window.location.origin}/reset-password?teacher=${teacher.teacher_code}`;
 
-    const emailTemplateParams = {
-      email: user.email,
+    const templateParams = {
       to_email: user.email,
       teacher_name: user.full_name,
       teacher_code: teacher.teacher_code,
       education_level: 'Primary',
       phone: user.phone || 'Not provided',
-      assigned_classes: classes.join(', ') || 'None assigned',
-      assigned_subjects: subjects.join(', ') || 'None assigned',
-      login_url: loginLink,
       classes: classes.join(', ') || 'None assigned',
       subjects: subjects.join(', ') || 'None assigned',
       login_link: loginLink,
@@ -201,7 +164,7 @@ const WelcomeNotification = {
     };
 
     try {
-      await emailjs.send(EmailJS_SERVICE_ID, EmailJS_TEMPLATE_ID, emailTemplateParams);
+      await emailjs.send(EmailJS_SERVICE_ID, EmailJS_TEMPLATE_ID, templateParams);
       await sbClient.from('email_notifications').update({ status: 'sent', sent_at: new Date().toISOString() }).eq('recipient_email', user.email);
       await sbClient.from('teacher_registration_audit').update({ email_sent: true, email_delivery_status: 'sent', email_sent_at: new Date().toISOString() }).eq('teacher_id', teacherId);
       return { success: true, emailSent: true };
@@ -211,14 +174,10 @@ const WelcomeNotification = {
     }
   },
 
-  /**
-   * Resend welcome SMS
-   */
   async resendSMS(teacherId) {
     const { data: audit, error } = await sbClient
       .from('teacher_registration_audit')
       .select('*').eq('teacher_id', teacherId).single();
-
     if (error || !audit) throw new Error('Registration audit not found');
 
     const { data: user } = await sbClient.from('users').select('email, full_name, phone').eq('id', audit.user_id).single();
@@ -237,7 +196,7 @@ const WelcomeNotification = {
       }
     }
 
-    const loginLink = `${RMS_MIS_BASE_URL}/`;
+    const loginLink = `${window.location.origin}/`;
     const smsMessage = this._buildSMS({ teacherName: user.full_name, email: user.email, classes, subjects, loginLink });
 
     const { data: smsNotif } = await sbClient.from('sms_notifications').insert([{
@@ -257,9 +216,6 @@ const WelcomeNotification = {
     return { success: true, smsSent: !!smsNotif };
   },
 
-  /**
-   * Get registration status for a teacher
-   */
   async getRegistrationStatus(teacherId) {
     const { data, error } = await sbClient
       .from('teacher_registration_audit')
@@ -267,42 +223,6 @@ const WelcomeNotification = {
     if (error) return null;
     return data;
   },
-
-  /**
-   * Fallback email method using fetch to a mailto or API endpoint
-   */
-  async _sendEmailFallback(email, name, teacherCode, loginLink, tempPasswordLink, classes, subjects, educationLevel, phone) {
-    const body = JSON.stringify({
-      to_email: email,
-      teacher_name: name,
-      teacher_code: teacherCode,
-      login_link: loginLink,
-      temp_password_link: tempPasswordLink,
-      classes: classes.join(', ') || 'None',
-      subjects: subjects.join(', ') || 'None',
-      education_level: educationLevel,
-      phone: phone || 'Not provided',
-      school_name: 'Rukara Model School',
-      school_email: 'admin@rukara.edu',
-      school_phone: '+250788123456',
-      school_website: 'https://rukara.edu',
-      year: new Date().getFullYear()
-    });
-
-    try {
-      const response = await fetch('/.netlify/functions/send-email', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body
-      });
-      return response.ok;
-    } catch (err) {
-      console.error('[EMAIL FALLBACK] Failed:', err);
-      return false;
-    }
-  },
-
-  /* ---------- Template Builders ---------- */
 
   _buildEmailHTML(d) {
     const { teacherName, email, phone, teacherCode, classes, subjects, educationLevel, loginLink, tempPasswordLink } = d;

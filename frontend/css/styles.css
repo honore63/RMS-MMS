@@ -65,15 +65,18 @@ html {
   font-family: var(--font-sans);
   width: 100%;
   max-width: 100%;
-  overflow-x: hidden;
-  overflow-x: clip;
+  overflow: hidden;
+  height: 100vh;
+  height: 100dvh;
 }
 
 html,
 body {
   width: 100%;
   max-width: 100%;
-  overflow-x: hidden;
+  overflow: hidden;
+  height: 100vh;
+  height: 100dvh;
 }
 
 body {
@@ -85,8 +88,7 @@ body {
   -moz-osx-font-smoothing: grayscale;
   width: 100%;
   max-width: 100%;
-  overflow-x: hidden;
-  overflow-x: clip;
+  overflow: hidden;
   min-height: 100vh;
   min-height: 100dvh;
 }
@@ -99,6 +101,44 @@ body {
   width: 100%;
   max-width: 100%;
   min-width: 0;
+  height: 100vh;
+  height: 100dvh;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+#app {
+  flex-direction: column;
+}
+
+#app-layout {
+  flex-direction: row;
+}
+
+.main-wrapper {
+  flex: 1;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+.main-content {
+  flex: 1;
+  overflow-y: auto;
+  overflow-x: hidden;
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
+}
+
+.no-scroll {
+  overflow: hidden;
+  height: 100vh;
+  height: 100dvh;
+}
+
+.no-scroll .main-content {
+  overflow: hidden;
 }
 
 button,
@@ -183,12 +223,16 @@ td {
    ============================================================ */
 .login-page {
   min-height: 100vh;
+  height: 100vh;
+  height: 100dvh;
+  max-height: 100vh;
+  max-height: 100dvh;
+  overflow: hidden;
   display: flex;
   align-items: center;
   justify-content: center;
   padding: 32px 24px;
   position: relative;
-  overflow: hidden;
   background:
     linear-gradient(160deg, rgba(5, 10, 24, 0.78) 0%, rgba(10, 26, 60, 0.72) 50%, rgba(13, 47, 107, 0.75) 100%),
     url('../public/school1.jpeg') center/cover no-repeat;
@@ -4281,10 +4325,7 @@ body {
     min-width: 0;
   }
 
-  /* Sidebar */
-  .sidebar {
-    display: none !important;
-  }
+  /* Sidebar stays mounted so the fixed mobile drawer can open. */
   .sidebar-toggle-btn {
     display: flex !important;
   }
