@@ -5,7 +5,8 @@
    ============================================================ */
 
 const EmailJS_SERVICE_ID = 'service_ka4tosb';
-const EmailJS_TEMPLATE_ID = 'template_welcome_teacher';
+const EmailJS_TEMPLATE_ID = 'template_gyanfnc';
+const RMS_MIS_BASE_URL = 'https://rukaramodelschool-mms.vercel.app';
 
 const WelcomeNotification = {
   /**
@@ -16,8 +17,8 @@ const WelcomeNotification = {
    */
   async registerTeacher(teacherData, adminUserId) {
     const { name, email, phone, teacherCode, classes, subjects, educationLevel } = teacherData;
-    const loginLink = `${window.location.origin}/`;
-    const tempPasswordLink = `${window.location.origin}/reset-password?teacher=${teacherCode}`;
+    const loginLink = `${RMS_MIS_BASE_URL}/`;
+    const tempPasswordLink = `${RMS_MIS_BASE_URL}/reset-password?teacher=${teacherCode}`;
 
     // Insert registration audit record
     const { data: audit, error: auditErr } = await sbClient
@@ -40,11 +41,15 @@ const WelcomeNotification = {
     const subjectList = subjects || [];
 
     const emailTemplateParams = {
+      email,
       to_email: email,
       teacher_name: name,
       teacher_code: teacherCode,
       education_level: educationLevel || 'Primary',
       phone: phone || 'Not provided',
+      assigned_classes: classList.join(', ') || 'None assigned',
+      assigned_subjects: subjectList.join(', ') || 'None assigned',
+      login_url: loginLink,
       classes: classList.join(', ') || 'None assigned',
       subjects: subjectList.join(', ') || 'None assigned',
       login_link: loginLink,
@@ -171,15 +176,19 @@ const WelcomeNotification = {
       }
     }
 
-    const loginLink = `${window.location.origin}/`;
-    const tempPasswordLink = `${window.location.origin}/reset-password?teacher=${teacher.teacher_code}`;
+    const loginLink = `${RMS_MIS_BASE_URL}/`;
+    const tempPasswordLink = `${RMS_MIS_BASE_URL}/reset-password?teacher=${teacher.teacher_code}`;
 
     const emailTemplateParams = {
+      email: user.email,
       to_email: user.email,
       teacher_name: user.full_name,
       teacher_code: teacher.teacher_code,
       education_level: 'Primary',
       phone: user.phone || 'Not provided',
+      assigned_classes: classes.join(', ') || 'None assigned',
+      assigned_subjects: subjects.join(', ') || 'None assigned',
+      login_url: loginLink,
       classes: classes.join(', ') || 'None assigned',
       subjects: subjects.join(', ') || 'None assigned',
       login_link: loginLink,
@@ -228,7 +237,7 @@ const WelcomeNotification = {
       }
     }
 
-    const loginLink = `${window.location.origin}/`;
+    const loginLink = `${RMS_MIS_BASE_URL}/`;
     const smsMessage = this._buildSMS({ teacherName: user.full_name, email: user.email, classes, subjects, loginLink });
 
     const { data: smsNotif } = await sbClient.from('sms_notifications').insert([{
