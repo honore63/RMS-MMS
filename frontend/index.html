@@ -18,7 +18,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Poppins:ital,wght@0,400;0,500;0,600;0,700;0,800;1,600&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="css/styles.css?v=20260928-23">
+  <link rel="stylesheet" href="css/styles.css?v=20260928-26">
   <link rel="stylesheet" href="css/report-card.css">
   <link rel="stylesheet" href="css/student-report-card.css?v=20260924-11">
   <link rel="stylesheet" href="css/report-wizard.css">
@@ -200,9 +200,14 @@
 
     <!-- Notification Center Page -->
     <div id="notify-center-page" style="display:none;padding:20px;">
-      <div style="display:flex;gap:12px;margin-bottom:20px;border-bottom:1px solid var(--gray-200);padding-bottom:12px">
+      <div class="notify-center-header">
+        <h2>Notifications</h2>
+        <button type="button" class="btn btn-outline btn-sm" onclick="NotificationCenter.closeCenter()" aria-label="Close notifications"><i data-lucide="x"></i> Close</button>
+      </div>
+      <div class="notify-center-filters">
         <button class="tab-btn active" data-filter="all">All</button>
         <button class="tab-btn" data-filter="unread">Unread</button>
+        <button class="tab-btn" data-filter="messages">Messages</button>
         <button class="tab-btn" data-filter="marks">Marks</button>
         <button class="tab-btn" data-filter="assessments">Assessments</button>
         <button class="tab-btn" data-filter="announcements">Announcements</button>
@@ -210,6 +215,7 @@
         <button class="tab-btn" data-filter="system">System</button>
         <button class="tab-btn" data-filter="reports">Reports</button>
         <button class="tab-btn" data-filter="important">Important</button>
+        <button type="button" class="btn btn-outline btn-sm" style="margin-left:auto" onclick="Router.go(Auth.isAdmin() ? 'admin/messages' : 'teacher/messages')"><i data-lucide="messages-square"></i> Messages</button>
       </div>
       <div id="notify-cards-container"></div>
       <div id="no-notifications" style="color:var(--gray-400);padding:40px;text-align:center;display:none">No notifications found</div>
@@ -245,7 +251,7 @@
   <script src="js/auth.js?v=20260924-9"></script>
   <script src="js/db.js?v=20260928-1"></script>
   <script src="js/utils.js?v=20260928-12"></script>
-  <script src="js/router.js?v=20250924-8"></script>
+  <script src="js/router.js?v=20260928-1"></script>
   <script src="js/realtime.js?v=20260924-9"></script>
   <script src="js/components/ui.js?v=20250924-8"></script>
   <script src="js/components/sidebar.js?v=20260924-20"></script>
@@ -281,8 +287,8 @@
   <script src="js/pages/teacher-convert-marks.js?v=20260928-1"></script>
   <script src="js/marks-import.js?v=20260924-10"></script>
   <script src="js/sync-registry.js?v=20260924-10"></script>
-  <script src="js/communication-center.js?v=20260928-1"></script>
-  <script src="js/app.js?v=20260928-3"></script>
+  <script src="js/communication-center.js?v=20260928-2"></script>
+  <script src="js/app.js?v=20260928-7"></script>
 
   <!-- PWA Install Banner -->
   <div id="pwa-install-banner" style="display:none;position:fixed;bottom:0;left:0;right:0;z-index:9999;background:linear-gradient(135deg,#0d2f6b,#2563eb);color:#fff;padding:14px 20px;box-shadow:0 -4px 20px rgba(0,0,0,.2);font-family:'Poppins',sans-serif;transform:translateY(100%);transition:transform .4s ease;">

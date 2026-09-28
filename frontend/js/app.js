@@ -435,6 +435,7 @@ function renderNotifications() {
   if (!['#teacher/notifications', 'teacher/notifications', '#admin/notifications', 'admin/notifications'].includes(hash)) {
     // Not currently on notifications page, just update badge
     if (typeof NotificationCenter !== 'undefined') {
+      NotificationCenter.hideCenter();
       NotificationCenter.updateUnreadCount();
     }
     return;
@@ -442,7 +443,7 @@ function renderNotifications() {
   
   // We're on the notifications page
   if (typeof NotificationCenter === 'undefined') return;
-  
+  NotificationCenter.showCenter();
   NotificationCenter.renderNotifications();
 }
 
@@ -552,6 +553,11 @@ const NotificationCenter = {
 
   showCenter() {
     this.hideDropdown();
+    const route = Auth.isAdmin() ? 'admin/notifications' : 'teacher/notifications';
+    if (Router.current !== route) {
+      Router.go(route);
+      return;
+    }
     this.notifyCenterPage.style.display = 'block';
     this.loadNotifications();
     // Activate all tab
@@ -560,9 +566,13 @@ const NotificationCenter = {
   },
 
   hideCenter() {
-    this.notifyCenterPage.style.display = 'none';
+    if (this.notifyCenterPage) this.notifyCenterPage.style.display = 'none';
     this.tabButtons.forEach(btn => btn.classList.remove('active'));
     this.filter = 'all';
+  },
+
+  closeCenter() {
+    Router.go(Auth.isAdmin() ? 'admin/dashboard' : 'teacher/dashboard');
   },
 
   /* Load notifications from Supabase */
@@ -645,6 +655,7 @@ const NotificationCenter = {
       important: [] // handled separately
     };
     const types = categoryMap[this.filter];
+    if (this.filter === 'messages') return notification.entity_type === 'teacher_message';
     if (!types) return true;
     return types.includes(notification.notification_type);
   },
@@ -676,6 +687,10 @@ const NotificationCenter = {
     const actionBtn = notification.action_url 
       ? `<button class="btn btn-sm notify-action" style="background:transparent;border:none;color:var(--blue-600);font-size:11px;text-decoration:underline;margin-top:4px;display:block;">View</button>`
       : '';
+    const deleteBtn = !isDropdown && Auth.isAdmin()
+      ? `<button type="button" class="btn btn-sm notify-delete" aria-label="Delete notification: ${Utils.escapeHtml(notification.title)}" title="Delete notification" onclick="event.stopPropagation();NotificationCenter.deleteNotification('${notification.id}')"><i data-lucide="trash-2"></i></button>`
+      : '';
+    const actions = actionBtn || deleteBtn ? `<div class="notify-actions">${actionBtn}${deleteBtn}</div>` : '';
 
     return `
       <div class="notify-card ${isUnread ? 'unread' : 'read'} ${priorityClass}" 
@@ -693,7 +708,7 @@ const NotificationCenter = {
             <span class="notify-time">${timeAgo}</span>
           </div>
         </div>
-        ${actionBtn}
+        ${actions}
       </div>
     `;
   },
@@ -722,7 +737,7 @@ const NotificationCenter = {
     await this.markRead(notificationId);
 
     if (notif.entity_type === 'teacher_message') {
-      Router.go(Auth.isAdmin() ? 'admin/messages' : 'teacher/messages');
+      Router.go(`${Auth.isAdmin() ? 'admin/messages' : 'teacher/messages'}?message=${encodeURIComponent(notif.entity_id || '')}`);
       return;
     }
 
@@ -803,17 +818,21 @@ const NotificationCenter = {
 
   async deleteNotification(notificationId) {
     try {
-      await sbClient
+      const { error } = await sbClient
         .from('notifications')
         .delete()
-        .eq('id', notificationId);
+        .eq('id', notificationId)
+        .eq('recipient_user_id', Auth.currentUser?.id);
+      if (error) throw error;
 
       // Update local state
       this.allNotifications = this.allNotifications.filter(n => n.id !== notificationId);
       this.updateUnreadCount();
       this.renderNotifications();
+      Utils.toast('Notification deleted', 'success');
     } catch (err) {
       console.error('[NotificationCenter] delete error:', err);
+      Utils.toast('Could not delete notification: ' + (err.message || 'Unknown error'), 'error');
     }
   }
 };

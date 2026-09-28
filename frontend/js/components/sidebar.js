@@ -110,8 +110,6 @@ const Sidebar = {
           <i data-lucide="file-text"></i> Assessments</a>
         <a class="nav-link" data-route="admin/assessment-types" onclick="Router.go('admin/assessment-types')">
           <i data-lucide="tags"></i> Assessment Types</a>
-        <a class="nav-link" data-route="admin/assessment-types/weights" onclick="Router.go('admin/assessment-types/weights')">
-          <i data-lucide="scale"></i> Weighting</a>
         <a class="nav-link" data-route="admin/marks" onclick="Router.go('admin/marks')">
           <i data-lucide="list-checks"></i> Marks</a>
       </div>
@@ -152,8 +150,6 @@ const Sidebar = {
           <i data-lucide="history"></i> Audit Logs</a>
       </div>
       </div>
-      <a class="nav-link" data-route="admin/messages" onclick="Router.go('admin/messages')">
-        <i data-lucide="messages-square"></i> Messages</a>
       <a class="nav-link" href="#admin/notifications" data-route="admin/notifications" onclick="Router.go('admin/notifications')" id="nav-notifications-link" aria-label="Notifications">
         <i data-lucide="bell" aria-hidden="true"></i> Notifications <span class="nav-badge" id="notif-badge" aria-hidden="true"></span></a>
     </div>`;
@@ -175,11 +171,6 @@ const Sidebar = {
           <i data-lucide="school"></i> My Classes</a>
         <a class="nav-link" data-route="teacher/my-subjects" onclick="Router.go('teacher/my-subjects')">
           <i data-lucide="book-marked"></i> My Subjects</a>
-      </div>
-      <div class="sidebar-section">
-        <div class="sidebar-section-title">Communication</div>
-        <a class="nav-link" data-route="teacher/messages" onclick="Router.go('teacher/messages')">
-          <i data-lucide="mail"></i> Message DOS</a>
       </div>
       <div class="sidebar-section">
         <div class="sidebar-section-title">My Reports</div>

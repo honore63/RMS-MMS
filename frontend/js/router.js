@@ -17,6 +17,10 @@ const Router = {
     const route = fullRoute.split('?')[0];
     if (!route) return;
     this.current = route;
+    if (!['admin/notifications', 'teacher/notifications'].includes(route)
+        && typeof NotificationCenter !== 'undefined') {
+      NotificationCenter.hideCenter();
+    }
     const handler = this.routes[route];
     if (handler) {
       Sidebar.highlight();

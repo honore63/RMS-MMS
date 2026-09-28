@@ -1,9 +1,9 @@
 /* ============================================================
-   RMS-MIS — Service Worker v5
+  RMS-MIS — Service Worker v6
    Production-ready: caching, offline, push, background sync
    ============================================================ */
 
-const CACHE_NAME = 'rms-mis-v5';
+const CACHE_NAME = 'rms-mis-v6';
 const APP_SHELL = [
   '/',
   '/index.html',
@@ -15,6 +15,7 @@ const APP_SHELL = [
   '/css/report-card.css',
   '/css/student-report-card.css',
   '/css/report-wizard.css',
+  '/css/communication-center.css',
   '/js/config.js',
   '/js/auth.js',
   '/js/db.js',
@@ -23,6 +24,7 @@ const APP_SHELL = [
   '/js/realtime.js',
   '/js/components/ui.js',
   '/js/components/sidebar.js',
+  '/js/communication-center.js',
   '/js/pages/admin-dashboard.js',
   '/js/pages/admin-teachers.js',
   '/js/pages/admin-classes.js',
@@ -49,7 +51,13 @@ const OFFLINE_URL = '/index.html';
 self.addEventListener('install', (event) => {
   event.waitUntil(
     caches.open(CACHE_NAME)
-      .then((cache) => cache.addAll(APP_SHELL))
+      .then((cache) => Promise.all(APP_SHELL.map(async (asset) => {
+        try {
+          await cache.add(asset);
+        } catch (error) {
+          console.warn('[SW] Precache failed:', asset, error);
+        }
+      })))
       .then(() => self.skipWaiting())
   );
 });
@@ -216,4 +224,4 @@ self.addEventListener('message', (event) => {
   }
 });
 
-console.log('[RMS-MIS SW v5] Service worker loaded');
+console.log('[RMS-MIS SW v6] Service worker loaded');

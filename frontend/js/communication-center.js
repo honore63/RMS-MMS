@@ -35,6 +35,12 @@ const CommunicationCenter = {
     try {
       await this.loadContacts();
       await this.loadThreads();
+      const hashQuery = window.location.hash.split('?')[1] || '';
+      const messageId = new URLSearchParams(hashQuery).get('message');
+      if (messageId) {
+        const targetThread = this.state.threads.find(thread => thread.messages.some(message => String(message.id) === String(messageId)));
+        if (targetThread) this.state.selectedThreadId = targetThread.id;
+      }
       this.renderPage();
     } catch (error) {
       console.error('[CommunicationCenter] load error:', error);
@@ -406,6 +412,7 @@ const CommunicationCenter = {
       }
       Modal.close();
       Utils.toast(`Message sent to ${recipients.length} recipient${recipients.length === 1 ? '' : 's'}`, 'success');
+      this.state.selectedThreadId = '';
       await this.render();
     } catch (error) {
       if (uploaded.length) await sbClient.storage.from(this.bucket).remove(uploaded.map(item => item.path)).catch(() => {});

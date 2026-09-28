@@ -1,6 +1,8 @@
 -- Extend the communication center with DOS-initiated teacher messages
 -- and private media/document attachments.
--- Apply after migration-communication-center.sql and migration-account-isolation.sql.
+-- Apply after migration-dos-education-level-scope.sql,
+-- migration-enforce-dos-level-visibility.sql, migration-account-isolation.sql,
+-- migration-notification-center.sql, and migration-communication-center.sql.
 
 DO $$
 BEGIN
@@ -8,7 +10,8 @@ BEGIN
      OR to_regclass('public.message_attachments') IS NULL
      OR to_regprocedure('public.rms_communication_dos_scope(text)') IS NULL
      OR to_regprocedure('public.rms_dos_can_level(text)') IS NULL
-     OR to_regprocedure('public.rms_account_role()') IS NULL THEN
+    OR to_regprocedure('public.rms_account_role()') IS NULL
+    OR to_regprocedure('public.rms_account_can_class(uuid)') IS NULL THEN
     RAISE EXCEPTION 'Run migration-dos-education-level-scope.sql, migration-account-isolation.sql, and migration-communication-center.sql first';
   END IF;
 END $$;
@@ -132,7 +135,7 @@ VALUES (
     'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
     'application/vnd.ms-excel', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
     'application/vnd.ms-powerpoint', 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
-    'text/plain', 'application/zip']
+    'text/plain', 'application/zip', 'application/octet-stream']
 )
 ON CONFLICT (id) DO UPDATE SET
   public = FALSE,
