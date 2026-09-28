@@ -38,7 +38,10 @@ const Realtime = {
     'announcements',
     'messages',
     'announcement_acknowledgements',
-    'audit_logs'
+    'audit_logs',
+    'teacher_registration_audit',
+    'email_notifications',
+    'sms_notifications'
   ],
 
   init() {

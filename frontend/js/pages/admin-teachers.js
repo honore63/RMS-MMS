@@ -399,9 +399,9 @@ function teacherForm() {
     <div class="form-group"><label>Email <span class="required">*</span></label><input id="tf-email" class="input-field" placeholder="e.g., john@rukara.edu"></div>
     <div class="form-group"><label>Password <span class="required">*</span></label><input id="tf-pass" class="input-field" type="password" value="teacher123" placeholder="teacher123" autocomplete="new-password"><p class="form-hint">Default password: teacher123. The teacher should change it after signing in.</p></div>
     <div class="form-group"><label>Phone</label><input id="tf-phone" class="input-field" placeholder="e.g., +250788123456"></div>
-    <div class="alert alert-info" style="margin-bottom:0"><i data-lucide="info"></i> After registration, open Assignments to link this teacher to authorized classes and subjects.</div>`,
+    <div class="alert alert-info" style="margin-bottom:0"><i data-lucide="info"></i> After registration, a professional welcome email and SMS will be sent to the teacher. Assignments can be linked via the Assignments module.</div>`,
     `<button class="btn btn-secondary" data-modal-close="true">Cancel</button>
-     <button class="btn btn-primary" id="teacher-save-btn"><i data-lucide="save"></i> Save</button>`);
+     <button class="btn btn-primary" id="teacher-save-btn"><i data-lucide="save"></i> Save & Send Welcome</button>`);
 
   document.getElementById('teacher-save-btn')?.addEventListener('click', teacherSave);
   document.querySelector('[data-modal-close="true"]')?.addEventListener('click', () => Modal.close());
@@ -418,6 +418,9 @@ async function teacherSave() {
   if (!/^\d{11}$/.test(code)) return Utils.toast('Teacher code must be exactly 11 digits', 'error');
   if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return Utils.toast('Enter a valid teacher email address', 'error');
   if (pass.length < 8) return Utils.toast('Password must be at least 8 characters', 'error');
+
+  const saveBtn = document.getElementById('teacher-save-btn');
+  if (saveBtn) { saveBtn.disabled = true; saveBtn.innerHTML = '<div class="spinner" style="width:16px;height:16px;border-width:2px"></div> Registering...'; }
 
   try {
     const { data: currentSessionData } = await sbClient.auth.getSession();
@@ -445,14 +448,114 @@ async function teacherSave() {
       }
     }
     const creatorId = (typeof Auth !== 'undefined' && Auth.currentUser?.id) ? Auth.currentUser.id : (adminSession?.user?.id || null);
+
+    // Insert users and teachers records with created_by
     await DB.insert('users', { id: authData.user.id, email, full_name: name, role: 'teacher', status: 'active', phone });
     await DB.insert('teachers', { user_id: authData.user.id, teacher_code: code, full_name: name, email, phone, status: 'active', created_by: creatorId });
     DB.invalidate('teachers');
     DB.invalidate('users');
+
+    // Send welcome notifications
+    const teacherData = {
+      name,
+      email,
+      phone,
+      teacherCode: code,
+      classes: [],
+      subjects: [],
+      educationLevel: 'Primary'
+    };
+
+    let welcomeResult = { success: true, emailSent: false, smsSent: false, emailStatus: 'pending', smsStatus: 'pending' };
+    try {
+      if (typeof WelcomeNotification !== 'undefined') {
+        welcomeResult = await WelcomeNotification.registerTeacher(teacherData, creatorId);
+      }
+    } catch (notifErr) {
+      console.error('[WELCOME NOTIF ERROR]', notifErr);
+    }
+
     Modal.close();
-    Utils.toast('Teacher created', 'success');
+    Utils.toast('Teacher registered successfully! Welcome notifications sent.', 'success');
     await renderTeachers();
-  } catch (e) { Utils.toast('Error: ' + e.message, 'error'); }
+
+    // Show success modal with delivery status
+    showWelcomeResultModal(name, email, phone, code, welcomeResult);
+
+  } catch (e) {
+    Utils.toast('Error: ' + e.message, 'error');
+  } finally {
+    if (saveBtn) { saveBtn.disabled = false; saveBtn.innerHTML = '<i data-lucide="save"></i> Save & Send Welcome'; }
+    if (typeof lucide !== 'undefined') lucide.createIcons();
+  }
+}
+
+function showWelcomeResultModal(name, email, phone, code, result) {
+  const emailOk = result.emailSent;
+  const smsOk = result.smsSent;
+  Modal.show('✓ Teacher Registered Successfully', `
+    <div style="text-align:center;margin-bottom:20px">
+      <div style="width:64px;height:64px;border-radius:50%;background:#ecfdf5;display:flex;align-items:center;justify-content:center;margin:0 auto 12px">
+        <i data-lucide="check-circle" style="width:32px;height:32px;color:#059669"></i>
+      </div>
+      <h2 style="color:#0d2f6b;margin:0;font-size:20px">Welcome, ${Utils.escapeHtml(name)}!</h2>
+      <p style="color:#64748b;margin:4px 0 0;font-size:14px">Account created and notifications sent</p>
+    </div>
+    <div style="display:grid;gap:12px;margin-bottom:20px">
+      <div class="card" style="padding:14px">
+        <div style="display:flex;justify-content:space-between;align-items:center">
+          <span style="font-size:14px;font-weight:600">📧 Welcome Email</span>
+          <span style="color:${emailOk ? '#059669' : '#dc2626'};font-weight:700;font-size:14px">${emailOk ? '✓ Sent' : '✗ Failed'}</span>
+        </div>
+        <p style="color:#94a3b8;font-size:12px;margin:4px 0 0">${Utils.escapeHtml(email)}</p>
+      </div>
+      <div class="card" style="padding:14px">
+        <div style="display:flex;justify-content:space-between;align-items:center">
+          <span style="font-size:14px;font-weight:600">💬 SMS</span>
+          <span style="color:${smsOk ? '#059669' : '#dc2626'};font-weight:700;font-size:14px">${smsOk ? '✓ Sent' : '✗ Failed'}</span>
+        </div>
+        <p style="color:#94a3b8;font-size:12px;margin:4px 0 0">${Utils.escapeHtml(phone || 'No phone provided')}</p>
+      </div>
+    </div>
+    <p style="color:#64748b;font-size:13px;margin-bottom:16px">Teacher will be prompted to change password on first login.</p>`,
+    `<button class="btn btn-secondary" data-modal-close="true">Close</button>
+     <button class="btn btn-outline" id="resend-email-btn"><i data-lucide="mail"></i> Resend Email</button>
+     <button class="btn btn-outline" id="resend-sms-btn"><i data-lucide="smartphone"></i> Resend SMS</button>`);
+
+  if (typeof lucide !== 'undefined') lucide.createIcons();
+
+  document.getElementById('resend-email-btn')?.addEventListener('click', async () => {
+    const btn = document.getElementById('resend-email-btn');
+    if (btn) { btn.disabled = true; btn.innerHTML = '<div class="spinner" style="width:14px;height:14px;border-width:2px"></div>'; }
+    try {
+      if (typeof WelcomeNotification !== 'undefined') {
+        // Find teacher by code
+        const { data: teacher } = await sbClient.from('teachers').select('*').eq('teacher_code', code).single();
+        if (teacher) {
+          const res = await WelcomeNotification.resendEmail(teacher.id);
+          if (res.success) Utils.toast('Welcome email resent!', 'success');
+        }
+      }
+    } catch (e) { Utils.toast('Failed to resend email', 'error'); }
+    if (btn) { btn.disabled = false; btn.innerHTML = '<i data-lucide="mail"></i> Resend Email'; }
+  });
+
+  document.getElementById('resend-sms-btn')?.addEventListener('click', async () => {
+    const btn = document.getElementById('resend-sms-btn');
+    if (btn) { btn.disabled = true; btn.innerHTML = '<div class="spinner" style="width:14px;height:14px;border-width:2px"></div>'; }
+    try {
+      if (typeof WelcomeNotification !== 'undefined') {
+        const { data: teacher } = await sbClient.from('teachers').select('*').eq('teacher_code', code).single();
+        if (teacher) {
+          const res = await WelcomeNotification.resendSMS(teacher.id);
+          if (res.success) Utils.toast('Welcome SMS resent!', 'success');
+        }
+      }
+    } catch (e) { Utils.toast('Failed to resend SMS', 'error'); }
+    if (btn) { btn.disabled = false; btn.innerHTML = '<i data-lucide="smartphone"></i> Resend SMS'; }
+  });
+
+  document.querySelector('[data-modal-close="true"]')?.addEventListener('click', () => Modal.close());
 }
 
 function teacherEdit(t) {

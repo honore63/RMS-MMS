@@ -39,7 +39,10 @@ const DB = {
     import_history: 60 * 1000,
     notifications: 30 * 1000,
     announcements: 60 * 1000,
-    announcement_acknowledgements: 60 * 1000
+    announcement_acknowledgements: 60 * 1000,
+    teacher_registration_audit: 10 * 60 * 1000,
+    email_notifications: 10 * 60 * 1000,
+    sms_notifications: 10 * 60 * 1000
   },
   DEFAULT_TTL: 5 * 60 * 1000,
 
@@ -48,7 +51,8 @@ const DB = {
   SWR_TABLES: new Set([
     'school_settings', 'grading_scales', 'academic_years', 'terms',
     'assessment_types', 'subjects', 'classes', 'teachers', 'users',
-    'learners', 'teacher_assignments', 'performance_comments', 'documents'
+    'learners', 'teacher_assignments', 'performance_comments', 'documents',
+    'teacher_registration_audit', 'email_notifications', 'sms_notifications'
   ]),
 
   /* ---------- internals ---------- */

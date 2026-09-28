@@ -360,7 +360,11 @@ async function showApp() {
   registerRoutes();
   Router.init();
   if (typeof Realtime !== 'undefined') Realtime.init();
-  if (typeof refreshNotificationBadge === 'function') refreshNotificationBadge();
+if (typeof NotificationCenter !== 'undefined') {
+      NotificationCenter.init();
+      NotificationCenter.loadNotifications();
+    }
+    if (typeof refreshNotificationBadge === 'function') refreshNotificationBadge();
   /* Cache-first: prewarm common reference data in the background so the
      first dashboard → classes → subjects → teachers navigation is a HIT. */
   if (typeof DB !== 'undefined' && DB.warm) {
@@ -408,8 +412,6 @@ function registerRoutes() {
   Router.register('admin/reports/grades', () => ReportCenter.open('grade-distribution'));
   Router.register('admin/analytics', renderAnalytics);
   Router.register('admin/audit-logs', renderAuditLogs);
-  Router.register('admin/announcements', () => Communications.renderAnnouncements());
-  Router.register('admin/messages', () => Communications.renderDosInbox());
   Router.register('admin/notifications', renderNotifications);
   Router.register('admin/settings', (typeof renderSettings !== 'undefined' ? renderSettings : () => { setHeader('School Settings', 'Configure school settings'); setContent('<div class="card"><div class="card-body"><p>Settings module under development.</p></div></div>'); }));
 
@@ -422,7 +424,6 @@ function registerRoutes() {
   Router.register('teacher/submitted-marks', renderSubmittedMarks);
   Router.register('teacher/reports', (typeof renderReportCenter !== 'undefined' ? renderReportCenter : () => ReportCenter.render()));
   Router.register('teacher/analytics', renderTeacherAnalytics);
-  Router.register('teacher/messages', () => Communications.renderTeacherMessages());
   Router.register('teacher/notifications', renderNotifications);
   Router.register('teacher/account', renderTeacherAccount);
 }
@@ -468,9 +469,12 @@ const NotificationCenter = {
   unreadCount: 0,
   allNotifications: [],
   filteredNotifications: [],
+  _initialized: false,
 
   /* Initialize notification center */
   init() {
+    if (this._initialized) return;
+    this._initialized = true;
     this.bell = document.getElementById('notify-bell');
     this.badge = document.getElementById('notify-badge');
     this.headerTitle = document.getElementById('header-title');
@@ -905,7 +909,13 @@ NotificationCenter.showToast = function(notification) {
   }
 };
 
+// ---- Notification Badge Refresh (global function) ----
+function refreshNotificationBadge() {
+  if (typeof NotificationCenter === 'undefined') return;
+  NotificationCenter.updateUnreadCount();
+}
+
 document.addEventListener('DOMContentLoaded', () => {
-  NotificationCenter.init();
+  initApp();
   if (typeof Realtime !== 'undefined') Realtime.init();
 });
