@@ -5,13 +5,19 @@
    ============================================================ */
 
 const EmailJS_SERVICE_ID = 'service_ka4tosb';
-const EmailJS_TEMPLATE_ID = 'template_welcome_teacher';
+const EmailJS_TEMPLATE_ID = 'template_gyanfnc';
+const RMS_MIS_BASE_URL = 'https://rukaramodelschool-mms.vercel.app';
+
+function _rmsBaseUrl() {
+  if (typeof window !== 'undefined' && window.location && window.location.origin && window.location.origin.startsWith('http')) return window.location.origin;
+  return RMS_MIS_BASE_URL;
+}
 
 const WelcomeNotification = {
   async registerTeacher(teacherData, adminUserId) {
     const { name, email, phone, teacherCode, classes, subjects, educationLevel } = teacherData;
-    const loginLink = `${window.location.origin}/`;
-    const tempPasswordLink = `${window.location.origin}/reset-password?teacher=${teacherCode}`;
+    const loginLink = `${_rmsBaseUrl()}/`;
+    const tempPasswordLink = `${_rmsBaseUrl()}/reset-password?teacher=${teacherCode}`;
 
     const { data: audit, error: auditErr } = await sbClient
       .from('teacher_registration_audit')
@@ -50,18 +56,42 @@ const WelcomeNotification = {
 
     let emailSent = false;
     let smsSent = false;
+    let emailError = null;
+    let smsError = null;
 
+    // Link audit to the teacher/user rows created just before this call,
+    // so Resend Email / Resend SMS can find it later.
     try {
-      const result = await emailjs.send(EmailJS_SERVICE_ID, EmailJS_TEMPLATE_ID, templateParams);
-      emailSent = true;
-      console.log('[EMAILJS] Email sent:', result);
-    } catch (emailErr) {
-      console.error('[EMAILJS] Email failed:', emailErr);
+      const { data: teacherRow } = await sbClient.from('teachers').select('id, user_id').eq('teacher_code', teacherCode).single();
+      if (teacherRow) {
+        await sbClient.from('teacher_registration_audit').update({
+          teacher_id: teacherRow.id,
+          user_id: teacherRow.user_id || null
+        }).eq('id', auditId);
+        audit.teacher_id = teacherRow.id;
+        audit.user_id = teacherRow.user_id || null;
+      }
+    } catch (linkErr) {
+      console.warn('[WELCOME] Could not link audit to teacher:', linkErr);
+    }
+
+    if (typeof emailjs === 'undefined') {
+      emailError = 'EmailJS library did not load (check network/CSP for cdn.emailjs.com).';
+      console.error('[EMAILJS]', emailError);
+    } else {
+      try {
+        const result = await emailjs.send(EmailJS_SERVICE_ID, EmailJS_TEMPLATE_ID, templateParams);
+        emailSent = true;
+        console.log('[EMAILJS] Email sent:', result);
+      } catch (err) {
+        emailError = (err && (err.text || err.message)) ? (err.text || err.message) : String(err);
+        console.error('[EMAILJS] Email failed:', emailError, err);
+      }
     }
 
     try {
       const smsMessage = this._buildSMS({ teacherName: name, email, classes: classList, subjects: subjectList, loginLink });
-      const { data: smsNotif } = await sbClient.from('sms_notifications').insert([{
+      const { data: smsNotif, error: smsInsertErr } = await sbClient.from('sms_notifications').insert([{
         recipient_user_id: audit.user_id || null,
         recipient_phone: phone || '',
         recipient_name: name,
@@ -70,9 +100,11 @@ const WelcomeNotification = {
         status: phone && phone.length >= 8 ? 'sent' : 'pending',
         sent_at: phone && phone.length >= 8 ? new Date().toISOString() : null
       }]).select().single();
+      if (smsInsertErr) throw smsInsertErr;
       smsSent = !!smsNotif;
-    } catch (smsErr) {
-      console.error('[SMS] Failed:', smsErr);
+    } catch (err) {
+      smsError = (err && err.message) ? err.message : String(err);
+      console.error('[SMS] Failed:', smsError, err);
     }
 
     await sbClient.from('teacher_registration_audit').update({
@@ -117,7 +149,9 @@ const WelcomeNotification = {
       emailSent,
       smsSent,
       emailStatus: emailSent ? 'sent' : 'failed',
-      smsStatus: smsSent ? 'sent' : 'failed'
+      smsStatus: smsSent ? 'sent' : 'failed',
+      emailError,
+      smsError
     };
   },
 
@@ -143,8 +177,8 @@ const WelcomeNotification = {
       }
     }
 
-    const loginLink = `${window.location.origin}/`;
-    const tempPasswordLink = `${window.location.origin}/reset-password?teacher=${teacher.teacher_code}`;
+    const loginLink = `${_rmsBaseUrl()}/`;
+    const tempPasswordLink = `${_rmsBaseUrl()}/reset-password?teacher=${teacher.teacher_code}`;
 
     const templateParams = {
       to_email: user.email,
@@ -163,14 +197,20 @@ const WelcomeNotification = {
       year: new Date().getFullYear()
     };
 
+    if (typeof emailjs === 'undefined') {
+      const msg = 'EmailJS library did not load (check network/CSP for cdn.emailjs.com).';
+      console.error('[EMAILJS]', msg);
+      return { success: false, emailSent: false, emailError: msg };
+    }
     try {
       await emailjs.send(EmailJS_SERVICE_ID, EmailJS_TEMPLATE_ID, templateParams);
       await sbClient.from('email_notifications').update({ status: 'sent', sent_at: new Date().toISOString() }).eq('recipient_email', user.email);
       await sbClient.from('teacher_registration_audit').update({ email_sent: true, email_delivery_status: 'sent', email_sent_at: new Date().toISOString() }).eq('teacher_id', teacherId);
       return { success: true, emailSent: true };
     } catch (err) {
-      console.error('[EMAILJS] Resend failed:', err);
-      return { success: false, emailSent: false };
+      const msg = (err && (err.text || err.message)) ? (err.text || err.message) : String(err);
+      console.error('[EMAILJS] Resend failed:', msg, err);
+      return { success: false, emailSent: false, emailError: msg };
     }
   },
 
@@ -196,10 +236,10 @@ const WelcomeNotification = {
       }
     }
 
-    const loginLink = `${window.location.origin}/`;
+    const loginLink = `${_rmsBaseUrl()}/`;
     const smsMessage = this._buildSMS({ teacherName: user.full_name, email: user.email, classes, subjects, loginLink });
 
-    const { data: smsNotif } = await sbClient.from('sms_notifications').insert([{
+    const { data: smsNotif, error: smsInsertErr } = await sbClient.from('sms_notifications').insert([{
       recipient_user_id: audit.user_id || null,
       recipient_phone: user.phone,
       recipient_name: user.full_name,
@@ -207,6 +247,7 @@ const WelcomeNotification = {
       template_name: 'teacher_welcome_sms',
       status: 'pending'
     }]).select().single();
+    if (smsInsertErr) throw smsInsertErr;
 
     if (smsNotif) {
       await sbClient.from('sms_notifications').update({ status: 'sent', sent_at: new Date().toISOString() }).eq('id', smsNotif.id);

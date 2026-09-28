@@ -301,9 +301,11 @@ LANGUAGE plpgsql
 SET search_path = public, pg_temp
 AS $$
 BEGIN
+  IF auth.uid() IS NOT NULL AND NEW.id IS DISTINCT FROM OLD.id THEN
+    RAISE EXCEPTION 'Account IDs cannot be changed';
+  END IF;
   IF auth.uid() IS NOT NULL AND OLD.id = auth.uid()
-     AND (NEW.id IS DISTINCT FROM OLD.id
-       OR NEW.role IS DISTINCT FROM OLD.role
+     AND (NEW.role IS DISTINCT FROM OLD.role
        OR NEW.status IS DISTINCT FROM OLD.status
        OR NEW.education_level IS DISTINCT FROM OLD.education_level) THEN
     RAISE EXCEPTION 'Account role, status, and scope can only be changed by an administrator';
@@ -318,11 +320,15 @@ LANGUAGE plpgsql
 SET search_path = public, pg_temp
 AS $$
 BEGIN
+  IF auth.uid() IS NOT NULL AND (
+       NEW.id IS DISTINCT FROM OLD.id
+       OR NEW.user_id IS DISTINCT FROM OLD.user_id
+     ) THEN
+    RAISE EXCEPTION 'Teacher account IDs cannot be changed';
+  END IF;
   IF auth.uid() IS NOT NULL AND public.rms_account_role() IN ('teacher', 'headteacher')
      AND OLD.user_id = auth.uid()
-     AND (NEW.id IS DISTINCT FROM OLD.id
-       OR NEW.user_id IS DISTINCT FROM OLD.user_id
-       OR NEW.teacher_code IS DISTINCT FROM OLD.teacher_code
+     AND (NEW.teacher_code IS DISTINCT FROM OLD.teacher_code
        OR NEW.status IS DISTINCT FROM OLD.status
        OR NEW.created_by IS DISTINCT FROM OLD.created_by
        OR NEW.education_level IS DISTINCT FROM OLD.education_level) THEN
@@ -388,6 +394,14 @@ DROP TRIGGER IF EXISTS rms_account_guard_teacher_fields ON public.teachers;
 CREATE TRIGGER rms_account_guard_teacher_fields
   BEFORE UPDATE ON public.teachers
   FOR EACH ROW EXECUTE FUNCTION public.rms_account_guard_teacher_fields();
+
+DROP POLICY IF EXISTS rms_account_teacher_self_insert ON public.teachers;
+CREATE POLICY rms_account_teacher_self_insert ON public.teachers
+  FOR INSERT TO authenticated
+  WITH CHECK (
+    public.rms_account_role() IN ('teacher', 'headteacher')
+    AND user_id = auth.uid()
+  );
 
 DROP POLICY IF EXISTS rms_account_teacher_rows ON public.teachers;
 CREATE POLICY rms_account_teacher_rows ON public.teachers

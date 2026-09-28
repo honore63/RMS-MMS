@@ -20,6 +20,8 @@ backend/
     ├── migration-rms-mis-assessment-flexibility.sql  # Configurable assessment types
     ├── migration-rms-mis-rls.sql       # Scoped RLS (types/assessments/assignments)
     ├── migration-dos-education-level-scope.sql  # DOS Primary/Secondary scope helpers
+    ├── migration-enforce-dos-level-visibility.sql # Restrictive DOS level guards
+    ├── migration-account-isolation.sql # Per-account row and storage isolation
     ├── migration-subject-levels.sql    # subjects.level (Both/Primary/Secondary/…)
     ├── migration-education-level-class-grouping.sql  # Class → education level
     ├── migration-assignments-multi-subject-per-class.sql  # Multi-subject assignments
@@ -48,7 +50,9 @@ backend/
    8. `migration-subject-levels.sql` — subject education levels.
    9. `migration-assignments-multi-subject-per-class.sql` — multi-subject assignments.
    10. `migration-users-profile-photo.sql` — profile photos + account name fixes.
-   11. `seed-data.sql` — optional sample data.
+    11. `migration-enforce-dos-level-visibility.sql` — restrictive DOS scope guards.
+    12. `migration-account-isolation.sql` — run last to isolate account data and permissions.
+    13. `seed-data.sql` — optional sample data.
 
 > All SQL is pasted and run **manually** in the SQL Editor — there is no migration runner. Prefer paste-ready queries with no placeholders.
 
@@ -76,7 +80,7 @@ Then insert the matching `users` / `teachers` rows from `seed-data.sql`. Set rea
 
 ## Security
 
-- Row Level Security enabled on every table.
+- Row Level Security enabled and scoped by account, teacher assignment, and DOS education level.
 - DOS role: full system access within its education-level scope.
 - Teacher role: only rows linked to their own assignments.
 - Scope helpers: `rms_is_dos`, `rms_dos_education_level`, `rms_dos_can_subject`, `rms_dos_can_level`, `rms_teacher_in_scope`, `rms_is_scoped_dos`.

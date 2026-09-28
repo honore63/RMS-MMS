@@ -1150,15 +1150,22 @@ async function doBulkSave() {
     }
 
     try {
-      const { data: dosUsers } = await sbClient.from('users').select('id').eq('role', 'dos');
+      const sourceAssessmentId = c.selected[0]?.a.id;
+      const { data: dosUsers, error } = await sbClient.rpc('rms_dos_notification_recipients', {
+        p_assessment_id: sourceAssessmentId
+      });
+      if (error) throw error;
       if (dosUsers && dosUsers.length) {
         const rows = dosUsers.map(d => ({
-          recipient_user_id: d.id,
+          recipient_user_id: d.user_id,
+          sender_user_id: Auth.currentUser?.id,
           title: 'Combined Marks Conversion',
           message: bc.teacherName + ' combined ' + c.selected.length + ' assessments (' + c.subjectName + ', ' + c.className + ') into ' + targetName + ' (' + targetMax + ' marks) — ' + markRows.length + ' marks recorded.',
           notification_type: 'SYSTEM',
           category: 'assessment',
           priority: 'normal',
+          entity_type: 'assessments',
+          entity_id: sourceAssessmentId,
           is_read: false
         }));
         if (rows.length) await sbClient.from('notifications').insert(rows);

@@ -493,6 +493,8 @@ async function teacherSave() {
 function showWelcomeResultModal(name, email, phone, code, result) {
   const emailOk = result.emailSent;
   const smsOk = result.smsSent;
+  const emailErrMsg = !emailOk && result.emailError ? `<p style="color:#dc2626;font-size:11px;margin:4px 0 0">Reason: ${Utils.escapeHtml(String(result.emailError).slice(0, 180))}</p>` : '';
+  const smsErrMsg = !smsOk && result.smsError ? `<p style="color:#dc2626;font-size:11px;margin:4px 0 0">Reason: ${Utils.escapeHtml(String(result.smsError).slice(0, 180))}</p>` : '';
   Modal.show('✓ Teacher Registered Successfully', `
     <div style="text-align:center;margin-bottom:20px">
       <div style="width:64px;height:64px;border-radius:50%;background:#ecfdf5;display:flex;align-items:center;justify-content:center;margin:0 auto 12px">
@@ -507,14 +509,14 @@ function showWelcomeResultModal(name, email, phone, code, result) {
           <span style="font-size:14px;font-weight:600">📧 Welcome Email</span>
           <span style="color:${emailOk ? '#059669' : '#dc2626'};font-weight:700;font-size:14px">${emailOk ? '✓ Sent' : '✗ Failed'}</span>
         </div>
-        <p style="color:#94a3b8;font-size:12px;margin:4px 0 0">${Utils.escapeHtml(email)}</p>
+        <p style="color:#94a3b8;font-size:12px;margin:4px 0 0">${Utils.escapeHtml(email)}</p>${emailErrMsg}
       </div>
       <div class="card" style="padding:14px">
         <div style="display:flex;justify-content:space-between;align-items:center">
           <span style="font-size:14px;font-weight:600">💬 SMS</span>
           <span style="color:${smsOk ? '#059669' : '#dc2626'};font-weight:700;font-size:14px">${smsOk ? '✓ Sent' : '✗ Failed'}</span>
         </div>
-        <p style="color:#94a3b8;font-size:12px;margin:4px 0 0">${Utils.escapeHtml(phone || 'No phone provided')}</p>
+        <p style="color:#94a3b8;font-size:12px;margin:4px 0 0">${Utils.escapeHtml(phone || 'No phone provided')}</p>${smsErrMsg}
       </div>
     </div>
     <p style="color:#64748b;font-size:13px;margin-bottom:16px">Teacher will be prompted to change password on first login.</p>`,
@@ -534,6 +536,7 @@ function showWelcomeResultModal(name, email, phone, code, result) {
         if (teacher) {
           const res = await WelcomeNotification.resendEmail(teacher.id);
           if (res.success) Utils.toast('Welcome email resent!', 'success');
+          else Utils.toast('Resend failed: ' + (res.emailError || 'unknown error'), 'error');
         }
       }
     } catch (e) { Utils.toast('Failed to resend email', 'error'); }
