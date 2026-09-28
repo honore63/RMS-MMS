@@ -280,7 +280,7 @@
   <script src="js/pages/teacher-convert-marks.js?v=20260928-1"></script>
   <script src="js/marks-import.js?v=20260924-10"></script>
   <script src="js/sync-registry.js?v=20260924-10"></script>
-  <script src="js/app.js?v=20260928-1"></script>
+  <script src="js/app.js?v=20260928-3"></script>
 
   <!-- PWA Install Banner -->
   <div id="pwa-install-banner" style="display:none;position:fixed;bottom:0;left:0;right:0;z-index:9999;background:linear-gradient(135deg,#0d2f6b,#2563eb);color:#fff;padding:14px 20px;box-shadow:0 -4px 20px rgba(0,0,0,.2);font-family:'Poppins',sans-serif;transform:translateY(100%);transition:transform .4s ease;">
@@ -317,6 +317,9 @@
     const BANNER_KEY = 'rms_pwa_banner_dismissed';
     const APP_VERSION = 'v5';
     const isStandalone = window.matchMedia('(display-mode: standalone)').matches || window.navigator.standalone === true;
+  const serviceWorkerBase = new URL('.', window.location.href);
+  const serviceWorkerUrl = new URL('sw.js', serviceWorkerBase).pathname;
+  const serviceWorkerScope = serviceWorkerBase.pathname;
 
     /* ---------- Install UI ---------- */
     function showBanner() {
@@ -383,9 +386,9 @@
     });
 
     // ---------- Service Worker ---------- */
-    if ('serviceWorker' in navigator) {
+    if ('serviceWorker' in navigator && /^https?:$/.test(window.location.protocol)) {
       window.addEventListener('load', () => {
-        navigator.serviceWorker.register('/sw.js', { scope: '/' })
+        navigator.serviceWorker.register(serviceWorkerUrl, { scope: serviceWorkerScope })
           .then((reg) => {
             console.log('[RMS-MIS SW] Registered:', reg.scope);
             // Check for updates
@@ -416,16 +419,18 @@
     // ---------- Check for updates every 60 seconds ----------
     setInterval(() => {
       if ('serviceWorker' in navigator && navigator.serviceWorker.controller) {
-        navigator.serviceWorker.getRegistration('/').then((reg) => {
+        navigator.serviceWorker.getRegistration(serviceWorkerScope).then((reg) => {
           if (reg) reg.update();
         }).catch(() => {});
       }
     }, 60000);
 
     // ---------- Cache version check ----------
-    navigator.serviceWorker.addEventListener('controllerchange', () => {
-      window.location.reload();
-    });
+    if ('serviceWorker' in navigator) {
+      navigator.serviceWorker.addEventListener('controllerchange', () => {
+        window.location.reload();
+      });
+    }
 
     if (typeof lucide !== 'undefined') lucide.createIcons();
   </script>

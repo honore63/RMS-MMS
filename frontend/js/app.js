@@ -909,12 +909,6 @@ NotificationCenter.showToast = function(notification) {
   }
 };
 
-// ---- Notification Badge Refresh (global function) ----
-function refreshNotificationBadge() {
-  if (typeof NotificationCenter === 'undefined') return;
-  NotificationCenter.updateUnreadCount();
-}
-
 document.addEventListener('DOMContentLoaded', () => {
   initApp();
   if (typeof Realtime !== 'undefined') Realtime.init();
