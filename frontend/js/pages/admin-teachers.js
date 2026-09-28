@@ -621,20 +621,22 @@ async function teacherSave() {
   if (saveBtn) { saveBtn.disabled = true; saveBtn.innerHTML = '<div class="spinner" style="width:16px;height:16px;border-width:2px"></div> Registering...'; }
 
   try {
-    const { data: currentSessionData } = await sbClient.auth.getSession();
-    const adminSession = currentSessionData?.session || null;
-    const [{ data: existingCode }, { data: existingEmail }] = await Promise.all([
-      sbClient.from('teachers').select('id').eq('teacher_code', code).maybeSingle(),
-      sbClient.from('users').select('id').eq('email', email).maybeSingle()
-    ]);
-    if (existingCode) { if (saveBtn) { saveBtn.disabled = false; saveBtn.innerHTML = '<i data-lucide="save"></i> Save & Send Welcome'; } return Utils.toast('That teacher code is already registered', 'error'); }
-    if (existingEmail) { if (saveBtn) { saveBtn.disabled = false; saveBtn.innerHTML = '<i data-lucide="save"></i> Save & Send Welcome'; } return Utils.toast('That email address is already registered', 'error'); }
-
-    const { data: authData, error } = await sbClient.auth.signUp({ email, password: pass });
-    if (error) throw error;
-    if (!authData?.user?.id) throw new Error('Teacher account could not be created');
-
-    if (adminSession) {
+    let { data: currentSessionData } = await sbClient.auth.getSession();
+    let adminSession = currentSessionData?.session || null;
+    if (!adminSession) {
+      // Session may have expired (stale refresh token) — try once to refresh.
+      try {
+        const { data: refreshed } = await sbClient.auth.refreshSession();
+        adminSession = refreshed?.session || null;
+      } catch (refreshErr) {
+        console.warn('[TEACHER SAVE] Session refresh failed:', refreshErr);
+      }
+    }
+    if (!adminSession) {
+      if (saveBtn) { saveBtn.disabled = false; saveBtn.innerHTML = '<i data-lucide="save"></i> Save & Send Welcome'; }
+      return Utils.toast('Your login session expired. Please sign out and sign in again, then retry.', 'error');
+    }
+    const restoreAdminSession = async () => {
       const { data: activeSessionData } = await sbClient.auth.getSession();
       const activeUserId = activeSessionData?.session?.user?.id || null;
       if (activeUserId !== adminSession.user?.id) {
@@ -644,7 +646,37 @@ async function teacherSave() {
         });
         if (restoreError) throw restoreError;
       }
+    };
+    const [{ data: existingCode }, { data: existingEmail }] = await Promise.all([
+      sbClient.from('teachers').select('id').eq('teacher_code', code).maybeSingle(),
+      sbClient.from('users').select('id').eq('email', email).maybeSingle()
+    ]);
+    if (existingCode) { if (saveBtn) { saveBtn.disabled = false; saveBtn.innerHTML = '<i data-lucide="save"></i> Save & Send Welcome'; } return Utils.toast('That teacher code is already registered', 'error'); }
+    if (existingEmail) { if (saveBtn) { saveBtn.disabled = false; saveBtn.innerHTML = '<i data-lucide="save"></i> Save & Send Welcome'; } return Utils.toast('That email address is already registered', 'error'); }
+
+    // Create the auth account. A 422 "already registered" means a previous
+    // attempt created the auth user but failed later — recover via sign-in
+    // with the password from this form instead of failing.
+    let teacherAuthId = null;
+    const { data: authData, error } = await sbClient.auth.signUp({ email, password: pass });
+    if (error) {
+      const msg = String(error.message || '');
+      if (/already registered|already exists|user.*exists/i.test(msg)) {
+        const { data: signInData, error: signInErr } = await sbClient.auth.signInWithPassword({ email, password: pass });
+        if (signInErr || !signInData?.user?.id) {
+          throw new Error('This email already has a login account with a different password. Delete it in Supabase Dashboard → Authentication → Users, or use a different email.');
+        }
+        teacherAuthId = signInData.user.id;
+        await restoreAdminSession();
+      } else {
+        throw error;
+      }
+    } else {
+      if (!authData?.user?.id) throw new Error('Teacher account could not be created');
+      teacherAuthId = authData.user.id;
+      await restoreAdminSession();
     }
+
     const creatorId = (typeof Auth !== 'undefined' && Auth.currentUser?.id) ? Auth.currentUser.id : (adminSession?.user?.id || null);
 
     // Snapshot the assignment queue built on this page ({ class_id, subject_ids[] }).
@@ -652,9 +684,17 @@ async function teacherSave() {
       .filter(item => item && item.class_id && (item.subject_ids || []).length)
       .map(item => ({ class_id: String(item.class_id), subject_ids: [...new Set((item.subject_ids || []).map(String))] }));
 
-    // Insert users and teachers records with created_by
-    await DB.insert('users', { id: authData.user.id, email, full_name: name, role: 'teacher', status: 'active', phone });
-    await DB.insert('teachers', { user_id: authData.user.id, teacher_code: code, full_name: name, email, phone, status: 'active', created_by: creatorId });
+    // Upsert profile rows (idempotent, so retrying a partial registration is safe)
+    const { error: userUpsertErr } = await sbClient.from('users').upsert(
+      { id: teacherAuthId, email, full_name: name, role: 'teacher', status: 'active', phone },
+      { onConflict: 'id' }
+    );
+    if (userUpsertErr) throw userUpsertErr;
+    const { error: teacherUpsertErr } = await sbClient.from('teachers').upsert(
+      { user_id: teacherAuthId, teacher_code: code, full_name: name, email, phone, status: 'active', created_by: creatorId },
+      { onConflict: 'teacher_code' }
+    );
+    if (teacherUpsertErr) throw teacherUpsertErr;
     DB.invalidate('teachers');
     DB.invalidate('users');
 
