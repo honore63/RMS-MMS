@@ -401,13 +401,21 @@ function teacherViewProfile(t, teacherMeta = {}) {
   document.getElementById('profile-edit-btn')?.addEventListener('click', () => teacherEdit(t));
 }
 
+// ---- Registration assignment queue (same { class_id, subject_ids[] } array as Assignments page) ----
+let tfAssignmentQueue = [];
+let tfAssignmentSubjects = [];
+let tfAssignmentClassLookup = {};
+
 async function teacherForm() {
+  tfAssignmentQueue = [];
+  tfAssignmentSubjects = [];
+  tfAssignmentClassLookup = {};
   let formClasses = [];
-  let formSubjects = [];
   try {
-    const [cls, subj] = await Promise.all([DB.get('classes'), DB.get('subjects')]);
+    const [cls, subj] = await Promise.all([DB.get('classes'), DB.query('subjects', '*', { status: 'active' })]);
     formClasses = (cls || []).filter(c => teacherMatchesScope(c)).sort((a, b) => String(a.name || '').localeCompare(String(b.name || '')));
-    formSubjects = (subj || []).filter(s => (s.status || 'active') === 'active').sort((a, b) => String(a.name || '').localeCompare(String(b.name || '')));
+    tfAssignmentSubjects = (subj || []).sort((a, b) => String(a.name || '').localeCompare(String(b.name || '')));
+    formClasses.forEach(c => { tfAssignmentClassLookup[String(c.id)] = c.name || c.level || ('Class ' + c.id); });
   } catch (e) {
     console.warn('[TEACHER FORM] Could not load classes/subjects:', e);
   }
@@ -418,24 +426,130 @@ async function teacherForm() {
     <div class="form-group"><label>Email <span class="required">*</span></label><input id="tf-email" class="input-field" placeholder="e.g., john@rukara.edu"></div>
     <div class="form-group"><label>Password <span class="required">*</span></label><input id="tf-pass" class="input-field" type="password" value="teacher123" placeholder="teacher123" autocomplete="new-password"><p class="form-hint">Default password: teacher123. The teacher should change it after signing in.</p></div>
     <div class="form-group"><label>Phone</label><input id="tf-phone" class="input-field" placeholder="e.g., +250788123456"></div>
-    <div class="form-group"><label><i data-lucide="users" style="width:14px;height:14px"></i> Assign Classes</label>
-      <div id="tf-classes" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:8px;max-height:160px;overflow-y:auto;border:1px solid var(--gray-200);border-radius:10px;padding:10px;background:var(--gray-50)">
-        ${formClasses.length ? formClasses.map(c => `<label style="display:flex;align-items:center;gap:8px;font-size:13px;font-weight:500;cursor:pointer"><input type="checkbox" class="tf-class-cb" value="${Utils.escapeHtml(String(c.id))}" style="width:16px;height:16px;accent-color:var(--blue-600)"> ${Utils.escapeHtml(c.name || c.level || ('Class ' + c.id))}</label>`).join('') : '<p class="form-hint" style="margin:0">No classes available. You can assign them later via Assignments.</p>'}
+    <div class="form-group"><label><i data-lucide="link" style="width:14px;height:14px"></i> Assign Classes & Subjects</label>
+      <label style="font-size:12px;color:var(--gray-500);font-weight:600">Class</label>
+      <div style="display:flex;gap:8px;margin:4px 0 8px">
+        <select id="tf-class-picker" class="select-field" style="flex:1" onchange="tfAssignRenderClassSubjects()">
+          <option value="">Select a class...</option>
+          ${formClasses.map(c => `<option value="${Utils.escapeHtml(String(c.id))}">${Utils.escapeHtml(c.name || c.level || ('Class ' + c.id))}</option>`).join('')}
+        </select>
       </div>
-    </div>
-    <div class="form-group"><label><i data-lucide="book-open" style="width:14px;height:14px"></i> Assign Subjects</label>
-      <div id="tf-subjects" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:8px;max-height:160px;overflow-y:auto;border:1px solid var(--gray-200);border-radius:10px;padding:10px;background:var(--gray-50)">
-        ${formSubjects.length ? formSubjects.map(s => `<label style="display:flex;align-items:center;gap:8px;font-size:13px;font-weight:500;cursor:pointer"><input type="checkbox" class="tf-subject-cb" value="${Utils.escapeHtml(String(s.id))}" style="width:16px;height:16px;accent-color:var(--blue-600)"> ${Utils.escapeHtml(s.name || 'Subject')}</label>`).join('') : '<p class="form-hint" style="margin:0">No subjects available. You can assign them later via Assignments.</p>'}
-      </div>
-      <p class="form-hint">Each selected class is paired with each selected subject. You can refine this later in Assignments.</p>
+      <div id="tf-subject-panel" style="border:1px solid var(--gray-200);border-radius:10px;padding:10px;background:var(--gray-50);margin-bottom:8px"><div class="text-sm text-muted">Select a class first to choose the subjects taught in that class.</div></div>
+      <button type="button" class="btn btn-sm btn-outline" id="tf-add-queue-btn" style="width:100%;justify-content:center"><i data-lucide="plus"></i> Add Class With Subjects</button>
+      <div id="tf-queue" style="margin-top:10px"></div>
+      <p class="form-hint">Same queue as the Assignments page: one class with its subjects at a time. You can refine it later in Assignments.</p>
     </div>
     <div class="alert alert-info" style="margin-bottom:0"><i data-lucide="info"></i> After registration, a professional welcome email and SMS will be sent to the teacher listing these classes and subjects.</div>`,
     `<button class="btn btn-secondary" data-modal-close="true">Cancel</button>
      <button class="btn btn-primary" id="teacher-save-btn"><i data-lucide="save"></i> Save & Send Welcome</button>`);
 
   if (typeof lucide !== 'undefined') lucide.createIcons();
+  tfAssignRenderClassSubjects();
+  tfAssignRenderQueue();
+  document.getElementById('tf-add-queue-btn')?.addEventListener('click', tfAssignAddClassToQueue);
   document.getElementById('teacher-save-btn')?.addEventListener('click', teacherSave);
   document.querySelector('[data-modal-close="true"]')?.addEventListener('click', () => Modal.close());
+}
+
+// ---- Registration assignment queue renderers ----
+function tfAssignRenderClassSubjects() {
+  const classId = document.getElementById('tf-class-picker')?.value || '';
+  const panel = document.getElementById('tf-subject-panel');
+  if (!panel) return;
+  if (!classId) {
+    panel.innerHTML = '<div class="text-sm text-muted">Select a class first to choose the subjects taught in that class.</div>';
+    return;
+  }
+  const existing = tfAssignmentQueue.find(item => String(item.class_id) === String(classId));
+  const checked = new Set((existing ? existing.subject_ids : []).map(String));
+  const list = (tfAssignmentSubjects || []).map(s => `
+    <label style="display:flex;align-items:center;gap:8px;padding:4px 0;font-size:13px;cursor:pointer">
+      <input type="checkbox" name="tf-subject" value="${Utils.escapeHtml(String(s.id))}" ${checked.has(String(s.id)) ? 'checked' : ''} onchange="tfAssignRenderSubjectCount()" style="width:16px;height:16px;accent-color:var(--blue-600)">
+      ${Utils.escapeHtml(s.name)}
+    </label>
+  `).join('') || '<div class="text-sm text-muted">No active subjects available for this class.</div>';
+  panel.innerHTML = `
+    <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;margin-bottom:4px;padding-bottom:4px;border-bottom:1px solid var(--gray-200)">
+      <span class="text-xs text-muted" id="tf-subject-count" style="font-weight:600">${checked.size ? checked.size + ' subject(s) selected' : 'Select one or more subjects'}</span>
+      <span style="display:inline-flex;gap:6px">
+        <button type="button" class="btn btn-xs btn-outline" onclick="tfAssignSelectAllSubjects()">Select all</button>
+        <button type="button" class="btn btn-xs btn-outline" onclick="tfAssignClearSubjects()">Clear</button>
+      </span>
+    </div>
+    ${list}`;
+}
+
+function tfAssignRenderSubjectCount() {
+  const count = document.querySelectorAll('input[name="tf-subject"]:checked').length;
+  const el = document.getElementById('tf-subject-count');
+  if (el) el.textContent = count ? count + ' subject(s) selected' : 'Select one or more subjects';
+}
+
+function tfAssignSelectAllSubjects() {
+  document.querySelectorAll('input[name="tf-subject"]').forEach(cb => cb.checked = true);
+  tfAssignRenderSubjectCount();
+}
+
+function tfAssignClearSubjects() {
+  document.querySelectorAll('input[name="tf-subject"]').forEach(cb => cb.checked = false);
+  tfAssignRenderSubjectCount();
+}
+
+function tfAssignRenderQueue() {
+  const queue = document.getElementById('tf-queue');
+  if (!queue) return;
+  if (!tfAssignmentQueue.length) {
+    queue.innerHTML = '<div class="text-sm text-muted">No class assigned yet. Select one class and its subjects, then add it.</div>';
+    return;
+  }
+  const totalSubjects = tfAssignmentQueue.reduce((sum, item) => sum + (item.subject_ids || []).length, 0);
+  queue.innerHTML = `
+    <div style="padding:10px 12px;border:1px solid rgba(37,99,235,.18);border-radius:8px;background:rgba(37,99,235,.05);margin-bottom:10px;">
+      <div style="font-size:12px;color:var(--gray-600);text-transform:uppercase;letter-spacing:.08em;font-weight:700;margin-bottom:4px">Summary</div>
+      <div style="font-weight:700;color:var(--gray-900)">${tfAssignmentQueue.length} class(es) • ${totalSubjects} subject(s)</div>
+    </div>` + tfAssignmentQueue.map(item => {
+    const className = tfAssignmentClassLookup[String(item.class_id)] || 'Unknown class';
+    const subjectNames = (item.subject_ids || [])
+      .map(sid => (tfAssignmentSubjects.find(s => String(s.id) === String(sid))?.name) || 'Unknown subject')
+      .join(', ');
+    return `
+      <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:12px;padding:10px 12px;border:1px solid var(--gray-200);border-radius:8px;margin-bottom:8px;background:var(--gray-50)">
+        <div style="flex:1">
+          <div style="font-weight:700;color:var(--gray-900)">${Utils.escapeHtml(className)}</div>
+          <div style="font-size:12px;color:var(--gray-600);margin-top:2px;font-weight:600">${(item.subject_ids || []).length} subject(s)</div>
+          <div class="text-sm text-muted" style="margin-top:4px">${Utils.escapeHtml(subjectNames || 'No subjects')}</div>
+        </div>
+        <button type="button" class="btn btn-sm btn-danger" onclick="tfAssignRemoveFromQueue('${Utils.escapeHtml(String(item.class_id))}')">Remove</button>
+      </div>`;
+  }).join('');
+}
+
+function tfAssignRemoveFromQueue(classId) {
+  tfAssignmentQueue = tfAssignmentQueue.filter(item => String(item.class_id) !== String(classId));
+  tfAssignRenderQueue();
+  const picker = document.getElementById('tf-class-picker');
+  if (picker && String(picker.value) === String(classId)) {
+    picker.value = '';
+    tfAssignRenderClassSubjects();
+  }
+}
+
+function tfAssignAddClassToQueue() {
+  const classId = document.getElementById('tf-class-picker')?.value || '';
+  const selectedSubjects = [...document.querySelectorAll('input[name="tf-subject"]:checked')].map(el => el.value);
+  if (!classId) return Utils.toast('Select a class first', 'error');
+  if (!selectedSubjects.length) return Utils.toast('Select at least one subject for this class', 'error');
+  const existing = tfAssignmentQueue.find(item => String(item.class_id) === String(classId));
+  if (existing) {
+    // MERGE, never replace — a teacher can hold several subjects in one class.
+    existing.subject_ids = [...new Set([...(existing.subject_ids || []).map(String), ...selectedSubjects.map(String)])];
+  } else {
+    tfAssignmentQueue.push({ class_id: classId, subject_ids: [...new Set(selectedSubjects.map(String))] });
+  }
+  tfAssignRenderQueue();
+  const picker = document.getElementById('tf-class-picker');
+  if (picker) picker.value = '';
+  tfAssignRenderClassSubjects();
 }
 
 async function teacherSave() {
@@ -480,9 +594,10 @@ async function teacherSave() {
     }
     const creatorId = (typeof Auth !== 'undefined' && Auth.currentUser?.id) ? Auth.currentUser.id : (adminSession?.user?.id || null);
 
-    // Read selected classes/subjects from the registration form
-    const selectedClassIds = Array.from(document.querySelectorAll('.tf-class-cb:checked')).map(cb => cb.value);
-    const selectedSubjectIds = Array.from(document.querySelectorAll('.tf-subject-cb:checked')).map(cb => cb.value);
+    // Snapshot the assignment queue built on this page ({ class_id, subject_ids[] }).
+    const queuedAssignments = (typeof tfAssignmentQueue !== 'undefined' ? tfAssignmentQueue : [])
+      .filter(item => item && item.class_id && (item.subject_ids || []).length)
+      .map(item => ({ class_id: String(item.class_id), subject_ids: [...new Set((item.subject_ids || []).map(String))] }));
 
     // Insert users and teachers records with created_by
     await DB.insert('users', { id: authData.user.id, email, full_name: name, role: 'teacher', status: 'active', phone });
@@ -498,35 +613,37 @@ async function teacherSave() {
     let activeYearId = null;
     try {
       const [allClasses, allSubjects, allYears] = await Promise.all([
-        selectedClassIds.length ? DB.get('classes') : Promise.resolve([]),
-        selectedSubjectIds.length ? DB.get('subjects') : Promise.resolve([]),
+        queuedAssignments.length ? DB.get('classes') : Promise.resolve([]),
+        queuedAssignments.length ? DB.get('subjects') : Promise.resolve([]),
         DB.get('academic_years').catch(() => [])
       ]);
       const classById = new Map((allClasses || []).map(c => [String(c.id), c]));
       const subjectById = new Map((allSubjects || []).map(s => [String(s.id), s]));
-      assignedClassNames = selectedClassIds.map(id => classById.get(String(id))).filter(Boolean).map(c => c.name || c.level || ('Class ' + c.id));
-      assignedSubjectNames = selectedSubjectIds.map(id => subjectById.get(String(id))).filter(Boolean).map(s => s.name || 'Subject');
+      const seenClasses = new Set();
+      const seenSubjects = new Set();
+      queuedAssignments.forEach(item => {
+        const c = classById.get(String(item.class_id));
+        if (c && !seenClasses.has(String(item.class_id))) { seenClasses.add(String(item.class_id)); assignedClassNames.push(c.name || c.level || ('Class ' + c.id)); }
+        (item.subject_ids || []).forEach(sid => {
+          const s = subjectById.get(String(sid));
+          if (s && !seenSubjects.has(String(sid))) { seenSubjects.add(String(sid)); assignedSubjectNames.push(s.name || 'Subject'); }
+        });
+      });
       const activeYear = (allYears || []).find(y => (y.status || y.state) === 'active' || y.is_active);
       activeYearId = activeYear ? activeYear.id : null;
     } catch (e) {
       console.warn('[TEACHER ASSIGN] Could not resolve names/year:', e);
     }
 
-    // Create assignments chosen on the same page (class x subject pairs).
-    if (newTeacherId && selectedClassIds.length) {
+    // Create the queued assignments (same pairs as the Assignments page).
+    if (newTeacherId && queuedAssignments.length) {
       try {
         const payload = [];
-        if (selectedSubjectIds.length) {
-          for (const classId of selectedClassIds) {
-            for (const subjectId of selectedSubjectIds) {
-              payload.push({ teacher_id: newTeacherId, class_id: classId, subject_id: subjectId, academic_year_id: activeYearId });
-            }
-          }
-        } else {
-          for (const classId of selectedClassIds) {
-            payload.push({ teacher_id: newTeacherId, class_id: classId, subject_id: null, academic_year_id: activeYearId });
-          }
-        }
+        queuedAssignments.forEach(item => {
+          (item.subject_ids || []).forEach(subjectId => {
+            payload.push({ teacher_id: newTeacherId, class_id: item.class_id, subject_id: subjectId, academic_year_id: activeYearId });
+          });
+        });
         const { error: assignErr } = await sbClient.from('teacher_assignments').insert(payload);
         if (assignErr) throw assignErr;
         DB.invalidate('teacher_assignments');
