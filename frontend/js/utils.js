@@ -280,6 +280,11 @@ const Utils = {
   }
 };
 
+function assessmentTypeName(types, id, fallback) {
+  const type = Utils._findType(types, id);
+  return (type && type.name) || fallback || 'Assessment';
+}
+
 window.getGrading = function getGrading() {
   return Utils.getGradingScale();
 };

@@ -155,6 +155,8 @@ async function refreshNotificationBadge() {
   try {
     const n = await DB.count('notifications', { recipient_user_id: Auth.currentUser.id, is_read: false });
     const badge = document.getElementById('notif-badge');
+    const link = document.getElementById('nav-notifications-link');
+    if (link) link.setAttribute('aria-label', n ? `Notifications, ${n} unread` : 'Notifications');
     if (badge) {
       badge.textContent = n > 99 ? '99+' : String(n);
       badge.style.display = n > 0 ? 'inline-flex' : 'none';

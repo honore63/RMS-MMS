@@ -427,7 +427,10 @@ DROP POLICY IF EXISTS rms_account_learner_scope ON public.learners;
 CREATE POLICY rms_account_learner_scope ON public.learners
   AS RESTRICTIVE FOR ALL TO authenticated
   USING (public.rms_account_can_learner(id))
-  WITH CHECK (public.rms_account_can_learner(id));
+  WITH CHECK (
+    public.rms_account_role() = 'dos'
+    AND public.rms_account_can_class(class_id)
+  );
 DROP POLICY IF EXISTS rms_account_assignment_scope ON public.teacher_assignments;
 CREATE POLICY rms_account_assignment_scope ON public.teacher_assignments
   AS RESTRICTIVE FOR ALL TO authenticated
@@ -517,6 +520,10 @@ CREATE POLICY rms_account_audit_insert ON public.audit_logs
     AND (assessment_id IS NULL OR public.rms_account_can_assessment(assessment_id))
     AND (learner_id IS NULL OR public.rms_account_can_learner(learner_id))
   );
+
+CREATE POLICY rms_dos_can_insert_audit_logs ON public.audit_logs
+  FOR INSERT TO authenticated
+  WITH CHECK (public.rms_is_dos());
 
 DO $$
 DECLARE p RECORD;

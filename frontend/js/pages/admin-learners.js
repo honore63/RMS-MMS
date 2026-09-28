@@ -3,6 +3,12 @@ let learnersClass = 'all';
 let learnersGender = 'all';
 let learnersStatus = 'all';
 
+function requireDosLearnerAccess() {
+  if (Auth.getRole() === 'dos') return true;
+  Utils.toast('Only DOS accounts can register or import learners', 'error');
+  return false;
+}
+
 const importFlow = {
   fileName: '',
   fileSize: 0,
@@ -12,12 +18,18 @@ const importFlow = {
   dataRows: [],
   records: [],
   classes: [],
+  targetClassId: '',
   classMap: {},
   existingCodes: new Set(),
   counts: { total: 0, ready: 0, exists: 0, duplicate: 0, errors: 0 }
 };
 
 async function renderLearners() {
+  if (!requireDosLearnerAccess()) {
+    setHeader('Learner Management', 'Register and manage learners');
+    setContent('<div class="alert alert-error">Only DOS accounts can access learner management.</div>');
+    return;
+  }
   setHeader('Learner Management', 'Register and manage learners individually or through bulk import');
   setContent(Utils.loading());
   const [data, allClasses] = await Promise.all([
@@ -125,6 +137,7 @@ async function renderLearners() {
 }
 
 async function learnerForm() {
+  if (!requireDosLearnerAccess()) return;
   const [allClasses, years] = await Promise.all([DB.get('classes'), DB.get('academic_years')]);
   const classes = (typeof Scope !== 'undefined' && Scope.isScoped()) ? Scope.filterClasses(allClasses) : allClasses;
   const activeYear = (typeof getActiveYearId === 'function' ? years.find(y => y.id === getActiveYearId(years)) : null) || years.find(y => y.status === 'active') || null;
@@ -167,6 +180,7 @@ async function learnerForm() {
 }
 
 async function learnerSave() {
+  if (!requireDosLearnerAccess()) return;
   const code = document.getElementById('lf-code')?.value?.trim();
   const name = document.getElementById('lf-name')?.value?.trim();
   const gender = document.getElementById('lf-gender')?.value;
@@ -255,6 +269,7 @@ async function learnerView(l) {
 }
 
 async function learnerEdit(l) {
+  if (!requireDosLearnerAccess()) return;
   const [allClasses, years] = await Promise.all([DB.get('classes'), DB.get('academic_years')]);
   const classes = (typeof Scope !== 'undefined' && Scope.isScoped()) ? Scope.filterClasses(allClasses) : allClasses;
   Modal.show('Edit Learner', `
@@ -299,6 +314,7 @@ async function learnerEdit(l) {
 }
 
 async function learnerUpdate(id) {
+  if (!requireDosLearnerAccess()) return;
   const code = document.getElementById('le-code')?.value?.trim();
   const name = document.getElementById('le-name')?.value?.trim();
   const gender = document.getElementById('le-gender')?.value;
@@ -529,6 +545,7 @@ function resetImportFlow() {
   importFlow.dataRows = [];
   importFlow.records = [];
   importFlow.classes = [];
+  importFlow.targetClassId = '';
   importFlow.classMap = {};
   importFlow.existingCodes = new Set();
   importFlow.counts = { total: 0, ready: 0, exists: 0, duplicate: 0, errors: 0 };
@@ -554,11 +571,21 @@ function importStepHtml(current) {
   </div>`;
 }
 
-function openImportModal() {
+async function openImportModal() {
+  if (!requireDosLearnerAccess()) return;
   resetImportFlow();
+  const allImportClasses = await DB.get('classes');
+  importFlow.classes = (typeof Scope !== 'undefined' && Scope.isScoped()) ? Scope.filterClasses(allImportClasses) : allImportClasses;
   const body = `
     ${importStepHtml(1)}
-    <p class="text-sm text-muted mb-4">Upload the school Excel learner list. The system reads <strong>student_number</strong>, <strong>student_name</strong>, <strong>gender</strong>, and <strong>Class</strong> columns automatically.</p>
+    <div class="form-group">
+      <label for="import-target-class">Import learners into <span class="required">*</span></label>
+      <select id="import-target-class" class="select-field" onchange="setImportTargetClass(this.value)">
+        <option value="">Choose a class</option>
+        ${importFlow.classes.map(c => `<option value="${Utils.escapeHtml(c.id)}">${Utils.escapeHtml(c.name)}</option>`).join('')}
+      </select>
+    </div>
+    <p class="text-sm text-muted mb-4">Upload the school Excel learner list. The system finds the <strong>Student Code</strong> and <strong>Names</strong> columns, even when the sheet has school details above the table.</p>
     <div class="dropzone" id="import-dropzone">
       <div class="dz-icon"><i data-lucide="file-spreadsheet"></i></div>
       <h4>Drag &amp; drop your learner list here</h4>
@@ -570,6 +597,14 @@ function openImportModal() {
   Modal.show('Import Learners', body, '', true);
   bindImportDropzone();
   if (typeof lucide !== 'undefined') lucide.createIcons();
+}
+
+async function setImportTargetClass(classId) {
+  if (!requireDosLearnerAccess()) return;
+  importFlow.targetClassId = classId;
+  if (!importFlow.headers.length) return;
+  await validateImportRows();
+  renderImportPreview();
 }
 
 function bindImportDropzone() {
@@ -593,6 +628,7 @@ function bindImportDropzone() {
 }
 
 async function handleImportFile(file) {
+  if (!requireDosLearnerAccess()) return;
   const previewDiv = document.getElementById('import-preview');
   if (!file) return;
 
@@ -670,10 +706,15 @@ function readImportFile(file) {
 
 function buildSheetRows(textRows, rawRows) {
   if (!textRows.length) return { headers: [], rows: [] };
-  const headers = textRows[0].map(h => String(h ?? '').trim());
+  let headerIndex = textRows.findIndex(row => {
+    const map = mapImportColumns(row || []);
+    return map.student_number != null && map.student_name != null;
+  });
+  if (headerIndex < 0) headerIndex = 0;
+  const headers = (textRows[headerIndex] || []).map(h => String(h ?? '').trim());
   const width = headers.length;
   const rows = [];
-  for (let r = 1; r < textRows.length; r++) {
+  for (let r = headerIndex + 1; r < textRows.length; r++) {
     const tr = textRows[r] || [];
     const rr = rawRows[r] || [];
     const row = [];
@@ -697,7 +738,7 @@ function cellText(raw, text) {
 }
 
 function parseCSV(text) {
-  const lines = text.split(/\r?\n/).map(l => l.trim()).filter(l => l.length > 0);
+  const lines = text.split(/\r?\n/).filter(l => l.trim().length > 0);
   if (!lines.length) return { headers: [], rows: [] };
   const parseRow = line => {
     const result = [];
@@ -730,8 +771,14 @@ function parseCSV(text) {
     result.push(current.trim());
     return result;
   };
-  const headers = parseRow(lines[0]);
-  const rows = lines.slice(1).map(parseRow);
+  const parsedRows = lines.map(parseRow);
+  let headerIndex = parsedRows.findIndex(row => {
+    const map = mapImportColumns(row);
+    return map.student_number != null && map.student_name != null;
+  });
+  if (headerIndex < 0) headerIndex = 0;
+  const headers = parsedRows[headerIndex];
+  const rows = parsedRows.slice(headerIndex + 1);
   return { headers, rows };
 }
 
@@ -763,13 +810,15 @@ async function validateImportRows() {
   const map = mapImportColumns(importFlow.headers);
   importFlow.columnMap = map;
 
-  // Mandatory columns: student number, name, class. Gender is optional.
+  // Student code and name come from the file; the selected class is the destination.
   const required = [
-    ['student_number', 'student_number'],
-    ['student_name', 'student_name'],
-    ['class', 'class']
+    ['student_number', 'Student Code'],
+    ['student_name', 'Names']
   ];
   importFlow.missing = required.filter(([key]) => map[key] == null).map(([, label]) => label);
+  if (!importFlow.classes.some(c => String(c.id) === String(importFlow.targetClassId))) {
+    importFlow.missing.push('destination class');
+  }
 
   if (importFlow.missing.length) {
     importFlow.records = [];
@@ -777,17 +826,7 @@ async function validateImportRows() {
     return;
   }
 
-  const allImportClasses = await DB.get('classes');
-  importFlow.classes = (typeof Scope !== 'undefined' && Scope.isScoped()) ? Scope.filterClasses(allImportClasses) : allImportClasses;
-  const normalizeClassKey = str => String(str || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
-  const classMap = {};
-  importFlow.classes.forEach(c => {
-    const rawName = String(c.name || '').toUpperCase();
-    classMap[rawName] = c.id;
-    classMap[rawName.replace(/\s+/g, '')] = c.id;
-    classMap[normalizeClassKey(c.name)] = c.id;
-  });
-  importFlow.classMap = classMap;
+  const targetClass = importFlow.classes.find(c => String(c.id) === String(importFlow.targetClassId));
 
   const { data: existing } = await sbClient.from('learners').select('learner_code');
   importFlow.existingCodes = new Set((existing || []).map(l => String(l.learner_code || '').trim().toUpperCase()));
@@ -802,10 +841,7 @@ async function validateImportRows() {
     const learnerCode = String(row[map.student_number] ?? '').trim();
     const fullName = String(row[map.student_name] ?? '').trim();
     const genderRaw = map.gender == null ? '' : convertGender(row[map.gender]);
-    const classRaw = String(row[map.class] ?? '').trim();
-    const classKey = classRaw.toUpperCase();
-    const normalizedClassKey = normalizeClassKey(classRaw);
-    const classId = classMap[classKey] || classMap[classKey.replace(/\s+/g, '')] || classMap[normalizedClassKey] || null;
+    const classId = importFlow.targetClassId;
     const codeKey = learnerCode.toUpperCase();
 
     const errors = [];
@@ -821,12 +857,6 @@ async function validateImportRows() {
     if (genderRaw && genderRaw !== 'M' && genderRaw !== 'F') {
       errors.push({ column: 'gender', message: 'Invalid gender. Expected MALE or FEMALE (or leave empty).', fix: 'Change the cell to MALE or FEMALE (or M/F), or leave it empty.' });
     }
-    if (!classRaw) {
-      errors.push({ column: 'class', message: 'Missing class', fix: 'Select the learner\u2019s class, e.g. P4A.' });
-    } else if (!classId) {
-      errors.push({ column: 'class', message: 'Class ' + classRaw + ' does not exist in RMS.', fix: 'Create the class under Academic Years & Classes first, or fix the class name.' });
-    }
-
     if (learnerCode && !errors.length && importFlow.existingCodes.has(codeKey)) {
       errors.push({ column: 'student_number', message: 'Student number already exists.', fix: 'This learner is already registered in RMS. No action needed.' });
     }
@@ -846,7 +876,7 @@ async function validateImportRows() {
       full_name: fullName,
       gender: genderRaw || null,
       class_id: classId,
-      classDisplay: classRaw,
+      classDisplay: targetClass?.name || '',
       status,
       errors
     });
@@ -870,13 +900,16 @@ function renderImportPreview() {
 
   const { missing } = importFlow;
   if (missing.length) {
+    const missingColumns = missing.filter(m => m !== 'destination class');
+    const needsClass = missing.includes('destination class');
     if (dz) dz.style.display = '';
     previewDiv.innerHTML = `
-      <div class="alert alert-error"><i data-lucide="alert-circle"></i> This file is missing required columns.</div>
+      <div class="alert alert-error"><i data-lucide="alert-circle"></i> ${missingColumns.length ? 'This file is missing required columns.' : 'Choose a destination class before importing.'}</div>
       <div style="margin-bottom:16px">
-        ${missing.map(m => `<div class="form-error" style="margin-top:6px">Required column missing: <strong>${m}</strong></div>`).join('')}
+        ${missingColumns.map(m => `<div class="form-error" style="margin-top:6px">Required column missing: <strong>${m}</strong></div>`).join('')}
+        ${needsClass ? '<div class="form-error" style="margin-top:6px">Select the class above where these learners should be added.</div>' : ''}
       </div>
-      <p class="text-sm text-muted mb-4">The file must contain columns: <strong>student_number</strong>, <strong>student_name</strong>, <strong>Class</strong> (<strong>gender</strong> is optional). Column names are matched ignoring capitalization and spaces.</p>
+      <p class="text-sm text-muted mb-4">The file must contain <strong>Student Code</strong> and <strong>Names</strong> columns. Gender is optional; the destination class is selected above.</p>
       <div class="import-progress"><button class="btn btn-secondary" onclick="downloadTemplate()"><i data-lucide="download"></i> Download Template</button></div>`;
     if (typeof lucide !== 'undefined') lucide.createIcons();
     return;
@@ -984,6 +1017,7 @@ function renderImportErrors() {
 }
 
 function confirmImport() {
+  if (!requireDosLearnerAccess()) return;
   const count = importFlow.counts.ready;
   if (!count) return Utils.toast('No valid new learners to import', 'error');
   Modal.show('Confirm Import',
@@ -995,6 +1029,7 @@ function confirmImport() {
 }
 
 async function executeImport() {
+  if (!requireDosLearnerAccess()) return;
   const readyRows = importFlow.records.filter(r => r.status === 'ready');
   if (!readyRows.length) return Utils.toast('No valid learners to import', 'error');
 
@@ -1081,26 +1116,32 @@ function downloadTemplate() {
   if (typeof XLSX !== 'undefined') {
     try {
       const wsData = [
-        ['student_number', 'student_name', 'gender', 'Class'],
-        ['541023260055', 'AGIRANEZA GIFT WILSON (EXAMPLE)', 'MALE', 'P4A'],
-        ['541204230125', 'AMIZERO ANITHA (EXAMPLE)', 'FEMALE', 'P4A']
+        ['STUDENT LIST'],
+        [],
+        ['School:', 'Rukara Model School'],
+        ['Grade:', ''],
+        ['Combination:', ''],
+        ['Class:', 'Select the destination class in RMS'],
+        [],
+        ['#', 'Student Code', 'Names'],
+        [1, '541023260055', 'AGIRANEZA GIFT WILSON (EXAMPLE)'],
+        [2, '541204230125', 'AMIZERO ANITHA (EXAMPLE)']
       ];
       const ws = XLSX.utils.aoa_to_sheet(wsData);
-      ws['!cols'] = [{ wch: 16 }, { wch: 34 }, { wch: 10 }, { wch: 8 }];
+      ws['!cols'] = [{ wch: 8 }, { wch: 18 }, { wch: 36 }];
       const instr = XLSX.utils.aoa_to_sheet([
         ['RMS LEARNER IMPORT TEMPLATE'],
         [],
-        ['1. Fill in one row per learner using the exact column names:'],
-        ['   student_number | student_name | gender | Class'],
+        ['1. Fill in one row per learner under the table headings:'],
+        ['   # | Student Code | Names'],
         [],
-        ['2. student_number: keep it as text/numbers exactly as on the school list.'],
+        ['2. Student Code: keep the code exactly as shown on the school list.'],
         ['   Leading zeros are preserved (e.g. 000123456789 stays 000123456789).'],
         [],
-        ['3. gender: OPTIONAL — use MALE or FEMALE (M/F is also accepted), or leave empty.'],
-        ['   Mandatory columns are student_number, student_name and Class.'],
+        ['3. Names: enter the learner full name.'],
         [],
-        ['4. Class: use an existing RMS class name such as P1A, P2B, P4A.'],
-        ['   Classes are NOT created automatically during import.'],
+        ['4. Choose the destination class in the RMS import form.'],
+        ['   Every learner in this file will be added to that class.'],
         [],
         ['5. IMPORTANT: the two rows marked (EXAMPLE) in the Learners sheet are samples.'],
         ['   DELETE them before importing your real learner list.'],
@@ -1116,7 +1157,7 @@ function downloadTemplate() {
       return;
     } catch (e) { /* fall through to CSV */ }
   }
-  const csv = 'student_number,student_name,gender,Class\n541023260055,AGIRANEZA GIFT WILSON (EXAMPLE),MALE,P4A\n541204230125,AMIZERO ANITHA (EXAMPLE),FEMALE,P4A\n';
+  const csv = 'STUDENT LIST\n\nSchool:,Rukara Model School\nGrade:,\nCombination:,\nClass:,Select the destination class in RMS\n\n#,Student Code,Names\n1,541023260055,AGIRANEZA GIFT WILSON (EXAMPLE)\n2,541204230125,AMIZERO ANITHA (EXAMPLE)\n';
   const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');

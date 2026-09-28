@@ -152,8 +152,10 @@ const Sidebar = {
           <i data-lucide="history"></i> Audit Logs</a>
       </div>
       </div>
-      <a class="nav-link" data-route="admin/notifications" onclick="Router.go('admin/notifications')" id="nav-notifications-link">
-        <i data-lucide="bell"></i> Notifications <span class="nav-badge" id="notif-badge"></span></a>
+      <a class="nav-link" data-route="admin/messages" onclick="Router.go('admin/messages')">
+        <i data-lucide="messages-square"></i> Messages</a>
+      <a class="nav-link" href="#admin/notifications" data-route="admin/notifications" onclick="Router.go('admin/notifications')" id="nav-notifications-link" aria-label="Notifications">
+        <i data-lucide="bell" aria-hidden="true"></i> Notifications <span class="nav-badge" id="notif-badge" aria-hidden="true"></span></a>
     </div>`;
   },
 
@@ -190,8 +192,8 @@ const Sidebar = {
       </div>
       <a class="nav-link" data-route="teacher/analytics" onclick="Router.go('teacher/analytics')">
         <i data-lucide="trending-up"></i> Analytics</a>
-      <a class="nav-link" data-route="teacher/notifications" onclick="Router.go('teacher/notifications')">
-        <i data-lucide="bell"></i> Notifications <span class="nav-badge" id="notif-badge"></span></a>
+      <a class="nav-link" href="#teacher/notifications" data-route="teacher/notifications" onclick="Router.go('teacher/notifications')" id="nav-notifications-link" aria-label="Notifications">
+        <i data-lucide="bell" aria-hidden="true"></i> Notifications <span class="nav-badge" id="notif-badge" aria-hidden="true"></span></a>
       <div class="sidebar-section">
         <div class="sidebar-section-title">Account</div>
         <a class="nav-link" data-route="teacher/account" onclick="Router.go('teacher/account')">
@@ -205,6 +207,8 @@ highlight() {
      document.querySelectorAll('.nav-link').forEach(l => {
        let on = l.dataset.route === route;
        l.classList.toggle('active', on);
+       if (on) l.setAttribute('aria-current', 'page');
+       else l.removeAttribute('aria-current');
        if (on) anyActive = true;
      });
 

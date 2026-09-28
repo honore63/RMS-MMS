@@ -411,6 +411,7 @@ function registerRoutes() {
   Router.register('admin/reports/school', () => ReportCenter.open('school-performance'));
   Router.register('admin/reports/grades', () => ReportCenter.open('grade-distribution'));
   Router.register('admin/analytics', renderAnalytics);
+  Router.register('admin/messages', () => CommunicationCenter.render());
   Router.register('admin/audit-logs', renderAuditLogs);
   Router.register('admin/notifications', renderNotifications);
   Router.register('admin/settings', (typeof renderSettings !== 'undefined' ? renderSettings : () => { setHeader('School Settings', 'Configure school settings'); setContent('<div class="card"><div class="card-body"><p>Settings module under development.</p></div></div>'); }));
@@ -424,6 +425,7 @@ function registerRoutes() {
   Router.register('teacher/submitted-marks', renderSubmittedMarks);
   Router.register('teacher/reports', (typeof renderReportCenter !== 'undefined' ? renderReportCenter : () => ReportCenter.render()));
   Router.register('teacher/analytics', renderTeacherAnalytics);
+  Router.register('teacher/messages', () => CommunicationCenter.render());
   Router.register('teacher/notifications', renderNotifications);
   Router.register('teacher/account', renderTeacherAccount);
 }
