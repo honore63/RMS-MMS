@@ -43,7 +43,7 @@ async function renderLearners() {
       <td class="text-center" style="width:40px"><input type="checkbox" class="cb-learner" value="${l.id}" data-name="${Utils.escapeHtml(l.full_name)}" onchange="updateLearnerBulkBar()"></td>
       <td class="col-code">${Utils.escapeHtml(l.learner_code)}</td>
       <td class="col-name">${Utils.escapeHtml(l.full_name)}</td>
-      <td><span class="badge badge-${l.gender === 'M' ? 'male' : 'female'}">${l.gender === 'M' ? 'Male' : 'Female'}</span></td>
+      <td>${l.gender === 'M' ? '<span class="badge badge-male">Male</span>' : l.gender === 'F' ? '<span class="badge badge-female">Female</span>' : '<span class="text-muted">—</span>'}</td>
       <td>${Utils.escapeHtml(cls?.name || '-')}</td>
       <td><span class="badge ${Utils.statusColor(l.status)}"><i data-lucide="${Utils.statusIcon(l.status)}"></i> ${l.status}</span></td>
       <td class="col-actions">
@@ -139,12 +139,13 @@ async function learnerForm() {
       <input id="lf-name" class="input-field" placeholder="e.g., UWASE Alice">
     </div>
     <div class="form-row">
-      <div class="form-group"><label>Gender <span class="required">*</span></label>
+      <div class="form-group"><label>Gender (Optional)</label>
         <select id="lf-gender" class="select-field">
-          <option value="">Select</option>
+          <option value="">Select (optional)</option>
           <option value="M">Male</option>
           <option value="F">Female</option>
         </select>
+        <p class="form-hint">Leave empty if unknown — it can be added later.</p>
       </div>
       <div class="form-group"><label>Class <span class="required">*</span></label>
         <select id="lf-class" class="select-field">
@@ -174,7 +175,6 @@ async function learnerSave() {
 
   if (!code) return Utils.toast('Student number is required', 'error');
   if (!name) return Utils.toast('Full name is required', 'error');
-  if (!gender) return Utils.toast('Gender is required', 'error');
   if (!classId) return Utils.toast('Class is required', 'error');
   if (!/^\d{11,12}$/.test(code)) return Utils.toast('Student number must be 11 or 12 digits', 'error');
   if (typeof Scope !== 'undefined' && Scope.isScoped()) {
@@ -191,7 +191,7 @@ async function learnerSave() {
     await DB.insert('learners', {
       learner_code: code,
       full_name: name.toUpperCase(),
-      gender,
+      gender: gender || null,
       class_id: classId,
       academic_year_id: yearId,
       status: 'active'
@@ -231,7 +231,7 @@ async function learnerView(l) {
       </div>
       <div>
         <p class="text-xs text-muted" style="margin-bottom:2px">Gender</p>
-        <p><span class="badge badge-${l.gender === 'M' ? 'male' : 'female'}">${l.gender === 'M' ? 'Male' : 'Female'}</span></p>
+        <p>${l.gender === 'M' ? '<span class="badge badge-male">Male</span>' : l.gender === 'F' ? '<span class="badge badge-female">Female</span>' : '<span class="text-muted">Not specified</span>'}</p>
       </div>
       <div>
         <p class="text-xs text-muted" style="margin-bottom:2px">Class</p>
@@ -267,8 +267,9 @@ async function learnerEdit(l) {
       <input id="le-name" class="input-field" value="${Utils.escapeHtml(l.full_name)}">
     </div>
     <div class="form-row">
-      <div class="form-group"><label>Gender <span class="required">*</span></label>
+      <div class="form-group"><label>Gender (Optional)</label>
         <select id="le-gender" class="select-field">
+          <option value="" ${!l.gender ? 'selected' : ''}>Not specified</option>
           <option value="M" ${l.gender === 'M' ? 'selected' : ''}>Male</option>
           <option value="F" ${l.gender === 'F' ? 'selected' : ''}>Female</option>
         </select>
@@ -314,7 +315,7 @@ async function learnerUpdate(id) {
     await DB.update('learners', id, {
       learner_code: code,
       full_name: name.toUpperCase(),
-      gender,
+      gender: gender || null,
       class_id: classId,
       academic_year_id: yearId,
       status
@@ -762,10 +763,10 @@ async function validateImportRows() {
   const map = mapImportColumns(importFlow.headers);
   importFlow.columnMap = map;
 
+  // Mandatory columns: student number, name, class. Gender is optional.
   const required = [
     ['student_number', 'student_number'],
     ['student_name', 'student_name'],
-    ['gender', 'gender'],
     ['class', 'class']
   ];
   importFlow.missing = required.filter(([key]) => map[key] == null).map(([, label]) => label);
@@ -800,7 +801,7 @@ async function validateImportRows() {
 
     const learnerCode = String(row[map.student_number] ?? '').trim();
     const fullName = String(row[map.student_name] ?? '').trim();
-    const genderRaw = convertGender(row[map.gender]);
+    const genderRaw = map.gender == null ? '' : convertGender(row[map.gender]);
     const classRaw = String(row[map.class] ?? '').trim();
     const classKey = classRaw.toUpperCase();
     const normalizedClassKey = normalizeClassKey(classRaw);
@@ -817,10 +818,8 @@ async function validateImportRows() {
     if (!fullName) {
       errors.push({ column: 'student_name', message: 'Missing student name', fix: 'Add the learner\u2019s full name.' });
     }
-    if (!genderRaw) {
-      errors.push({ column: 'gender', message: 'Missing gender', fix: 'Use MALE or FEMALE (or M/F).' });
-    } else if (genderRaw !== 'M' && genderRaw !== 'F') {
-      errors.push({ column: 'gender', message: 'Invalid gender. Expected MALE or FEMALE.', fix: 'Change the cell to MALE or FEMALE (or M/F).' });
+    if (genderRaw && genderRaw !== 'M' && genderRaw !== 'F') {
+      errors.push({ column: 'gender', message: 'Invalid gender. Expected MALE or FEMALE (or leave empty).', fix: 'Change the cell to MALE or FEMALE (or M/F), or leave it empty.' });
     }
     if (!classRaw) {
       errors.push({ column: 'class', message: 'Missing class', fix: 'Select the learner\u2019s class, e.g. P4A.' });
@@ -845,7 +844,7 @@ async function validateImportRows() {
       rowNumber,
       learner_code: learnerCode,
       full_name: fullName,
-      gender: genderRaw,
+      gender: genderRaw || null,
       class_id: classId,
       classDisplay: classRaw,
       status,
@@ -877,7 +876,7 @@ function renderImportPreview() {
       <div style="margin-bottom:16px">
         ${missing.map(m => `<div class="form-error" style="margin-top:6px">Required column missing: <strong>${m}</strong></div>`).join('')}
       </div>
-      <p class="text-sm text-muted mb-4">The file must contain columns: <strong>student_number</strong>, <strong>student_name</strong>, <strong>gender</strong>, <strong>Class</strong>. Column names are matched ignoring capitalization and spaces.</p>
+      <p class="text-sm text-muted mb-4">The file must contain columns: <strong>student_number</strong>, <strong>student_name</strong>, <strong>Class</strong> (<strong>gender</strong> is optional). Column names are matched ignoring capitalization and spaces.</p>
       <div class="import-progress"><button class="btn btn-secondary" onclick="downloadTemplate()"><i data-lucide="download"></i> Download Template</button></div>`;
     if (typeof lucide !== 'undefined') lucide.createIcons();
     return;
@@ -1097,7 +1096,8 @@ function downloadTemplate() {
         ['2. student_number: keep it as text/numbers exactly as on the school list.'],
         ['   Leading zeros are preserved (e.g. 000123456789 stays 000123456789).'],
         [],
-        ['3. gender: use MALE or FEMALE (M/F is also accepted).'],
+        ['3. gender: OPTIONAL — use MALE or FEMALE (M/F is also accepted), or leave empty.'],
+        ['   Mandatory columns are student_number, student_name and Class.'],
         [],
         ['4. Class: use an existing RMS class name such as P1A, P2B, P4A.'],
         ['   Classes are NOT created automatically during import.'],
