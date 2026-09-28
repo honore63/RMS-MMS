@@ -4,25 +4,28 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
   <meta name="theme-color" content="#0d2f6b">
-  <meta name="theme-color" content="#0d2f6b">
-  <meta name="description" content="RMS-MIS — Rukara Model School Marks Information System for desktop and mobile web use">
+  <meta name="description" content="RMS-MIS — Rukara Model School Marks Information System">
+  <title>RMS-MIS – Rukara Model School Marks Information System</title>
+  <link rel="icon" type="image/webp" href="/public/logo.webp">
+  <link rel="icon" type="image/svg+xml" href="/public/favicon.svg">
+  <link rel="shortcut icon" href="/public/logo.webp">
+  <link rel="manifest" id="pwa-manifest-link">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="default">
   <meta name="apple-mobile-web-app-title" content="RMS-MIS">
-  <title>RMS-MIS – Rukara Model School Marks Information System</title>
-  <link rel="icon" type="image/webp" href="public/logo.webp">
-  <link rel="icon" type="image/svg+xml" href="public/icon-192.svg">
-  <link rel="apple-touch-icon" href="public/logo.webp">
-  <link rel="mask-icon" href="public/icon-192.svg" color="#0d2f6b">
-  <link rel="shortcut icon" href="public/logo.webp">
-  <meta name="msapplication-TileImage" content="public/icon-192.svg">
-  <meta name="msapplication-TileColor" content="#0d2f6b">
-  <meta http-equiv="Content-Security-Policy" content="default-src 'self' blob:; script-src 'self' 'unsafe-eval' blob:; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' blob: data: https:; connect-src 'self' https://*.supabase.co; manifest-src 'self' blob:;">
-  <link rel="manifest" id="pwa-manifest-link">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self' blob: data:; script-src 'self' 'unsafe-eval' 'unsafe-inline' blob: https://unpkg.com https://cdn.jsdelivr.net; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com https://cdn.jsdelivr.net; font-src 'self' https://fonts.gstatic.com; img-src 'self' blob: data: https:; connect-src 'self' https://*.supabase.co wss://*.supabase.co https://*.vercel.app https://unpkg.com; manifest-src 'self' blob: data:; worker-src 'self' blob:;">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Poppins:ital,wght@0,400;0,500;0,600;0,700;0,800;1,600&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="css/styles.css?v=20260924-22">
+  <link rel="stylesheet" href="css/report-card.css">
+  <link rel="stylesheet" href="css/student-report-card.css?v=20260924-11">
+  <link rel="stylesheet" href="css/report-wizard.css">
   <script>
     (function() {
       var manifest = {
-        name: 'RMS-MIS — Rukara Model School Marks Information System',
+        name: 'RMS-MIS – Rukara Model School Marks Information System',
         short_name: 'RMS-MIS',
         description: 'Rukara Model School Marks Information System — Manage assessments, marks, grades, and reports.',
         start_url: '/',
@@ -34,29 +37,17 @@
         lang: 'en',
         categories: ['education', 'productivity'],
         icons: [
+          { src: '/public/icon-192.svg', sizes: '192x192', type: 'image/svg+xml', purpose: 'any' },
+          { src: '/public/icon-512.svg', sizes: '512x512', type: 'image/svg+xml', purpose: 'any' },
           { src: '/public/logo.webp', sizes: '192x192', type: 'image/webp', purpose: 'any' },
-          { src: '/public/logo.webp', sizes: '512x512', type: 'image/webp', purpose: 'any' },
-          { src: '/public/logo.webp', sizes: '512x512', type: 'image/webp', purpose: 'maskable' },
-          { src: '/public/icon-192.svg', sizes: '192x192', type: 'image/svg+xml', purpose: 'any maskable' },
-          { src: '/public/icon-512.svg', sizes: '512x512', type: 'image/svg+xml', purpose: 'any maskable' }
-        ],
-        screenshots: [],
-        prefer_related_applications: false,
-        related_applications: []
+          { src: '/public/logo.webp', sizes: '512x512', type: 'image/webp', purpose: 'any' }
+        ]
       };
       var blob = new Blob([JSON.stringify(manifest)], { type: 'application/manifest+json' });
       var link = document.getElementById('pwa-manifest-link');
       if (link) link.href = URL.createObjectURL(blob);
     })();
   </script>
-  <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Poppins:ital,wght@0,400;0,500;0,600;0,700;0,800;1,600&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="css/styles.css?v=20260924-22">
-  <link rel="stylesheet" href="css/report-card.css">
-  <link rel="stylesheet" href="css/student-report-card.css?v=20260924-11">
-  <link rel="stylesheet" href="css/report-wizard.css">
-    <link rel="stylesheet" href="css/communications.css">
   <script src="https://unpkg.com/lucide@latest"></script>
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
@@ -229,7 +220,7 @@
 
   <script src="js/config.js?v=20250924-8"></script>
   <script src="js/auth.js?v=20260924-9"></script>
-  <script src="js/db.js?v=20260924-9"></script>
+  <script src="js/db.js?v=20260928-1"></script>
   <script src="js/utils.js?v=20260924-11"></script>
   <script src="js/router.js?v=20250924-8"></script>
   <script src="js/realtime.js?v=20260924-9"></script>
@@ -239,7 +230,8 @@
   <script src="js/pages/admin-academic.js?v=20260924-9"></script>
   <script src="js/pages/admin-classes.js?v=20250924-8"></script>
   <script src="js/pages/admin-subjects.js?v=20260924-3"></script>
-  <script src="js/pages/admin-teachers.js?v=20260924-19"></script>
+  <script src="js/pages/admin-teachers.js?v=20260928-1"></script>
+    <script src="js/welcome-notification.js?v=20260928-2"></script>
   <script src="js/pages/admin-learners.js?v=20260924-9"></script>
   <script src="js/pages/admin-assignments.js?v=20260924-15"></script>
   <script src="js/pages/admin-assessments.js?v=20260924-12"></script>
@@ -261,169 +253,156 @@
   <script src="js/analytics-engine.js?v=20250924-9"></script>
   <script src="js/pages/analytics.js?v=20250924-8"></script>
   <script src="js/pages/teacher-pages.js?v=20260924-6"></script>
-    <script src="js/pages/communications.js?v=20260927-1"></script>
   <script src="js/pages/teacher-account.js?v=20260924-9"></script>
   <script src="js/pages/teacher-enter-marks.js?v=20260924-12"></script>
   <script src="js/pages/teacher-convert-marks.js?v=20260924-18"></script>
   <script src="js/marks-import.js?v=20260924-10"></script>
   <script src="js/sync-registry.js?v=20260924-10"></script>
-  <style>
-    #pwa-install-banner {
-      display:none; position:fixed; bottom:0; left:0; right:0; z-index:9999;
-      background: linear-gradient(135deg, #0d2f6b 0%, #2563eb 100%);
-      color: #fff; padding: 0; overflow: hidden;
-      font-family: 'Poppins', sans-serif;
-      transition: transform 0.4s cubic-bezier(.4,0,.2,1), opacity 0.4s;
-      transform: translateY(100%); opacity: 0;
-    }
-    #pwa-install-banner.at-banner-visible {
-      display: flex !important; flex-wrap: wrap; align-items: center; justify-content: space-between;
-      gap: 16px; padding: 16px 24px;
-      transform: translateY(0); opacity: 1;
-      box-shadow: 0 -4px 20px rgba(0,0,0,.2);
-    }
-    .at-banner-content { display: flex; align-items: center; gap: 16px; flex: 1 1 auto; min-width: 200px; }
-.at-banner-icon { width: 52px; height: 52px; background: rgba(255,255,255,.15); border-radius: 14px; display: grid; place-items: center; flex-shrink: 0; }
-        .at-banner-icon i { width: 26px; height: 26px; color: #fff; }
-    .at-banner-text strong { display: block; font-size: 15px; font-weight: 700; }
-    .at-banner-text span { display: block; font-size: 12px; opacity: .8; margin-top: 2px; }
-    .at-banner-actions { display: flex; gap: 10px; flex-shrink: 0; }
-    .at-banner-install {
-      background: #fff; color: #0d2f6b; border: none; padding: 12px 28px;
-      border-radius: var(--radius); font-weight: 700; font-size: 15px;
-      cursor: pointer; font-family: 'Poppins', sans-serif;
-      transition: all var(--transition); box-shadow: var(--shadow-md);
-      display: inline-flex; align-items: center; gap: 8px;
-    }
-    .at-banner-install:hover { background: var(--blue-50); transform: translateY(-2px); box-shadow: var(--shadow-lg); }
-    .at-banner-dismiss {
-      background: transparent; color: rgba(255,255,255,.8); border: 1px solid rgba(255,255,255,.3);
-      padding: 10px 18px; border-radius: var(--radius); font-weight: 500; font-size: 14px;
-      cursor: pointer; font-family: 'Poppins', sans-serif; transition: all var(--transition);
-    }
-    .at-banner-dismiss:hover { background: rgba(255,255,255,.1); color: #fff; }
-    @media (max-width: 600px) {
-      #pwa-install-banner.at-banner-visible { flex-direction: column; text-align: center; padding: 20px; }
-      .at-banner-content { flex-direction: column; }
-      .at-banner-actions { width: 100%; justify-content: center; }
-    }
-    #pwa-fab:hover { transform: scale(1.1); box-shadow: 0 6px 24px rgba(13,47,107,.5); }
-    #pwa-snackbar { border-radius: 12px; }
-    #pwa-snackbar-install:hover { background: var(--blue-50); }
-    #pwa-snackbar-dismiss:hover { color: #fff; }
-    @media (max-width: 600px) {
-      #pwa-snackbar { max-width: 90vw; font-size: 13px; }
-      #pwa-fab { bottom: 16px; right: 16px; width: 48px; height: 48px; }
-    }
-  </style>
-  <div id="pwa-install-banner">
-    <div class="at-banner-content">
-      <div class="at-banner-icon"><i data-lucide="download-cloud"></i></div>
-      <div class="at-banner-text">
-        <strong>Install RMS-MIS</strong>
-        <span>Add to home screen for the best mobile experience</span>
+  <script src="js/app.js?v=20260928-1"></script>
+
+  <!-- PWA Install Banner -->
+  <div id="pwa-install-banner" style="display:none;position:fixed;bottom:0;left:0;right:0;z-index:9999;background:linear-gradient(135deg,#0d2f6b,#2563eb);color:#fff;padding:14px 20px;box-shadow:0 -4px 20px rgba(0,0,0,.2);font-family:'Poppins',sans-serif;transform:translateY(100%);transition:transform .4s ease;">
+    <div style="display:flex;align-items:center;justify-content:space-between;gap:16px;flex-wrap:wrap">
+      <div style="display:flex;align-items:center;gap:12px">
+        <img src="/public/logo.webp" style="width:40px;height:40px;border-radius:8px" alt="RMS-MIS">
+        <div>
+          <div style="font-weight:700;font-size:14px">Install RMS-MIS</div>
+          <div style="font-size:11px;opacity:.8">Quick access on your device</div>
+        </div>
+      </div>
+      <div style="display:flex;gap:8px">
+        <button id="pwa-install-btn" style="background:#fff;color:#0d2f6b;border:none;padding:8px 16px;border-radius:8px;font-weight:700;font-size:12px;cursor:pointer">Install</button>
+        <button id="pwa-dismiss-btn" style="background:transparent;color:#fff;border:1px solid rgba(255,255,255,.4);padding:8px 16px;border-radius:8px;font-weight:600;font-size:12px;cursor:pointer">Dismiss</button>
       </div>
     </div>
-    <div class="at-banner-actions">
-      <button class="at-banner-install" id="pwa-install-btn"><i data-lucide="download-cloud" style="width:20px;height:20px;margin-right:8px"></i>Install App</button>
-      <button class="at-banner-dismiss" id="pwa-dismiss-btn">Later</button>
-    </div>
   </div>
-  <!-- Persistent floating install button -->
-  <button id="pwa-fab" style="display:none;position:fixed;bottom:24px;right:24px;z-index:9998;width:56px;height:56px;border-radius:50%;background:linear-gradient(135deg,#0d2f6b,#2563eb);color:#fff;border:none;cursor:pointer;box-shadow:0 4px 16px rgba(13,47,107,.4);transition:all .3s;align-items:center;justify-content:center" aria-label="Install App">
-    <i data-lucide="download-cloud" style="width:26px;height:26px"></i>
+
+  <!-- PWA Floating Action Button -->
+  <button id="pwa-fab" style="display:none;position:fixed;bottom:20px;right:20px;z-index:9998;width:56px;height:56px;border-radius:50%;background:linear-gradient(135deg,#0d2f6b,#2563eb);color:#fff;border:none;box-shadow:0 4px 16px rgba(0,0,0,.3);cursor:pointer;font-size:24px;align-items:center;justify-content:center" aria-label="Install App">
+    <i data-lucide="download"></i>
   </button>
-  <!-- Snackbar notification -->
-  <div id="pwa-snackbar" style="display:none;position:fixed;bottom:90px;left:50%;transform:translateX(-50%);z-index:9998;background:#333;color:#fff;padding:14px 24px;border-radius:8px;font-family:'Poppins',sans-serif;font-size:14px;box-shadow:0 4px 12px rgba(0,0,0,.2);align-items:center;gap:12px;max-width:400px">
-    <i data-lucide="smartphone" style="width:20px;height:20px;flex-shrink:0"></i>
-    <span>Install RMS-MIS for the best experience</span>
-    <button id="pwa-snackbar-install" style="background:#fff;color:#0d2f6b;border:none;padding:6px 16px;border-radius:6px;font-weight:700;font-size:13px;cursor:pointer;font-family:'Poppins',sans-serif;white-space:nowrap">Install</button>
-    <button id="pwa-snackbar-dismiss" style="background:transparent;color:rgba(255,255,255,.6);border:none;padding:6px 8px;cursor:pointer;font-size:13px;font-family:'Poppins',sans-serif">Dismiss</button>
+
+  <!-- PWA Snackbar -->
+  <div id="pwa-snackbar" style="display:none;position:fixed;bottom:80px;left:50%;transform:translateX(-50%);z-index:9999;background:#333;color:#fff;padding:12px 24px;border-radius:8px;font-size:13px;font-family:'Poppins',sans-serif;box-shadow:0 4px 12px rgba(0,0,0,.3);max-width:90vw;text-align:center">
+    <span id="pwa-snackbar-text"></span>
+    <button id="pwa-snackbar-install" style="background:#fff;color:#333;border:none;padding:4px 12px;border-radius:4px;margin-left:12px;font-weight:700;font-size:12px;cursor:pointer">Install</button>
+    <button id="pwa-snackbar-dismiss" style="background:transparent;color:#fff;border:1px solid rgba(255,255,255,.4);padding:4px 12px;border-radius:4px;margin-left:8px;font-weight:600;font-size:12px;cursor:pointer">Dismiss</button>
   </div>
-<script>
+
+  <!-- Service Worker + PWA Install Logic -->
+  <script>
     let deferredPrompt;
     const BANNER_KEY = 'rms_pwa_banner_dismissed';
+    const APP_VERSION = 'v5';
     const isStandalone = window.matchMedia('(display-mode: standalone)').matches || window.navigator.standalone === true;
 
+    /* ---------- Install UI ---------- */
     function showBanner() {
       if (isStandalone) return;
-      const dismissed = localStorage.getItem(BANNER_KEY);
-      if (dismissed) return;
-      // Show banner immediately
+      if (localStorage.getItem(BANNER_KEY)) return;
       const banner = document.getElementById('pwa-install-banner');
-      if (banner) { banner.style.display = 'flex'; banner.classList.add('at-banner-visible'); }
-      // Show FAB immediately
+      if (banner) { banner.style.display = 'flex'; banner.style.transform = 'translateY(0)'; }
       const fab = document.getElementById('pwa-fab');
       if (fab) fab.style.display = 'flex';
-      // Show snackbar after 2 seconds
       setTimeout(() => {
         const snack = document.getElementById('pwa-snackbar');
-        if (snack) { snack.style.display = 'flex'; if (typeof lucide !== 'undefined') lucide.createIcons(); }
-      }, 2000);
+        if (snack) { snack.style.display = 'block'; const txt = document.getElementById('pwa-snackbar-text'); if (txt) txt.textContent = 'Tap Install to add RMS-MIS to your device'; }
+        if (typeof lucide !== 'undefined') lucide.createIcons();
+      }, 1500);
     }
 
-    // Always try to show install prompt on page load
-    window.addEventListener('load', () => {
-      if (!isStandalone && !localStorage.getItem(BANNER_KEY)) {
-        showBanner();
-      }
-    });
+    // Show immediately
+    if (document.readyState === 'loading') {
+      document.addEventListener('DOMContentLoaded', showBanner);
+    } else {
+      showBanner();
+    }
+    window.addEventListener('load', showBanner);
 
-    // Capture the native install prompt if it fires
+    // Capture native prompt
     window.addEventListener('beforeinstallprompt', (e) => {
       e.preventDefault();
       deferredPrompt = e;
+      showBanner();
     });
 
+    // App installed
     window.addEventListener('appinstalled', () => {
       deferredPrompt = null;
       const banner = document.getElementById('pwa-install-banner');
-      if (banner) { banner.style.display = 'none'; banner.classList.remove('at-banner-visible'); }
+      if (banner) { banner.style.display = 'none'; banner.style.transform = 'translateY(100%)'; }
       const fab = document.getElementById('pwa-fab');
       if (fab) fab.style.display = 'none';
       const snack = document.getElementById('pwa-snackbar');
       if (snack) snack.style.display = 'none';
+      localStorage.setItem('rms_pwa_banner_dismissed', 'true');
     });
-
-    // Fallback: if no install prompt after 5 seconds, show everything anyway
-    setTimeout(() => {
-      if (!deferredPrompt && !isStandalone && !localStorage.getItem(BANNER_KEY)) {
-        showBanner();
-      }
-    }, 5000);
-
-    if ('serviceWorker' in navigator) {
-      window.addEventListener('load', () => {
-        navigator.serviceWorker.register('/sw.js', { scope: '/' }).catch(err => {
-          console.warn('SW root failed, trying local:', err);
-          navigator.serviceWorker.register('./sw.js', { scope: './' }).catch(err2 => {
-            console.warn('SW local failed:', err2);
-          });
-        });
-      });
-    }
 
     // Install button handlers
     document.getElementById('pwa-install-btn')?.addEventListener('click', () => {
-      if (deferredPrompt) { deferredPrompt.prompt(); deferredPrompt.userChoice.then(() => { deferredPrompt = null; const b = document.getElementById('pwa-install-banner'); if(b){b.style.display='none';b.classList.remove('at-banner-visible');} const f=document.getElementById('pwa-fab'); if(f) f.style.display='none'; }); }
-      else { alert('To install, tap the menu (⋮) in Chrome → "Add to Home screen"'); }
+      if (deferredPrompt) { deferredPrompt.prompt(); deferredPrompt.userChoice.then(() => { deferredPrompt = null; const b = document.getElementById('pwa-install-banner'); if(b){b.style.display='none';b.style.transform='translateY(100%)';} const f=document.getElementById('pwa-fab'); if(f) f.style.display='none'; }); }
+      else { alert('To install: tap menu (⋮) → "Add to Home screen"'); }
     });
     document.getElementById('pwa-dismiss-btn')?.addEventListener('click', () => {
-      const b = document.getElementById('pwa-install-banner'); if(b){b.style.display='none';b.classList.remove('at-banner-visible');}
-      const f = document.getElementById('pwa-fab'); if(f) f.style.display = 'none';
+      const b = document.getElementById('pwa-install-banner'); if(b){b.style.display='none';b.style.transform='translateY(100%)';}
+      const f = document.getElementById('pwa-fab'); if(f) f.style.display='none';
       localStorage.setItem('rms_pwa_banner_dismissed', 'true');
     });
     document.getElementById('pwa-fab')?.addEventListener('click', () => {
       if (deferredPrompt) { deferredPrompt.prompt(); deferredPrompt.userChoice.then(() => { deferredPrompt = null; const f=document.getElementById('pwa-fab'); if(f) f.style.display='none'; }); }
-      else { alert('To install, tap the menu (⋮) in Chrome → "Add to Home screen"'); }
+      else { alert('To install: tap menu (⋮) → "Add to Home screen"'); }
     });
     document.getElementById('pwa-snackbar-install')?.addEventListener('click', () => {
       if (deferredPrompt) { deferredPrompt.prompt(); deferredPrompt.userChoice.then(() => { deferredPrompt = null; const s=document.getElementById('pwa-snackbar'); if(s) s.style.display='none'; }); }
-      else { alert('To install, tap the menu (⋮) in Chrome → "Add to Home screen"'); }
     });
     document.getElementById('pwa-snackbar-dismiss')?.addEventListener('click', () => {
       const s = document.getElementById('pwa-snackbar'); if(s) s.style.display = 'none';
       localStorage.setItem('rms_pwa_banner_dismissed', 'true');
+    });
+
+    // ---------- Service Worker ---------- */
+    if ('serviceWorker' in navigator) {
+      window.addEventListener('load', () => {
+        navigator.serviceWorker.register('/sw.js', { scope: '/' })
+          .then((reg) => {
+            console.log('[RMS-MIS SW] Registered:', reg.scope);
+            // Check for updates
+            reg.addEventListener('updatefound', () => {
+              const newWorker = reg.installing;
+              newWorker.addEventListener('statechange', () => {
+                if (newWorker.state === 'installed' && navigator.serviceWorker.controller) {
+                  // New version available
+                  if (typeof showUpdateNotification === 'function') showUpdateNotification();
+                }
+              });
+            });
+          })
+          .catch((err) => console.warn('[RMS-MIS SW] Registration failed:', err));
+      });
+    }
+
+    // ---------- Update Notification ---------- */
+    window.showUpdateNotification = function() {
+      const snack = document.getElementById('pwa-snackbar');
+      if (snack) {
+        snack.style.display = 'block';
+        const txt = document.getElementById('pwa-snackbar-text');
+        if (txt) txt.textContent = 'New version available! Tap Install to update.';
+      }
+    };
+
+    // ---------- Check for updates every 60 seconds ----------
+    setInterval(() => {
+      if ('serviceWorker' in navigator && navigator.serviceWorker.controller) {
+        navigator.serviceWorker.getRegistration('/').then((reg) => {
+          if (reg) reg.update();
+        }).catch(() => {});
+      }
+    }, 60000);
+
+    // ---------- Cache version check ----------
+    navigator.serviceWorker.addEventListener('controllerchange', () => {
+      window.location.reload();
     });
 
     if (typeof lucide !== 'undefined') lucide.createIcons();

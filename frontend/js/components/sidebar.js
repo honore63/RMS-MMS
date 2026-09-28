@@ -82,7 +82,7 @@ const Sidebar = {
     }
     this.restoreGroups();
     this.highlight();
-    if (role === 'dos' && typeof Communications !== 'undefined') Communications.refreshBadges();
+    if (typeof refreshNotificationBadge === 'function') refreshNotificationBadge();
   },
 
   adminMenu() {
@@ -110,6 +110,8 @@ const Sidebar = {
           <i data-lucide="file-text"></i> Assessments</a>
         <a class="nav-link" data-route="admin/assessment-types" onclick="Router.go('admin/assessment-types')">
           <i data-lucide="tags"></i> Assessment Types</a>
+        <a class="nav-link" data-route="admin/assessment-types/weights" onclick="Router.go('admin/assessment-types/weights')">
+          <i data-lucide="scale"></i> Weighting</a>
         <a class="nav-link" data-route="admin/marks" onclick="Router.go('admin/marks')">
           <i data-lucide="list-checks"></i> Marks</a>
       </div>
@@ -149,12 +151,6 @@ const Sidebar = {
         <a class="nav-link" data-route="admin/audit-logs" onclick="Router.go('admin/audit-logs')">
           <i data-lucide="history"></i> Audit Logs</a>
       </div>
-      <div class="sidebar-section">
-        <div class="sidebar-section-title">Communication</div>
-        <a class="nav-link" data-route="admin/announcements" onclick="Router.go('admin/announcements')">
-          <i data-lucide="megaphone"></i> Announcements <span class="nav-badge" id="announcement-badge" style="display:none"></span></a>
-        <a class="nav-link" data-route="admin/messages" onclick="Router.go('admin/messages')">
-          <i data-lucide="mail"></i> Teacher Inbox <span class="nav-badge" id="message-badge" style="display:none"></span></a>
       </div>
       <a class="nav-link" data-route="admin/notifications" onclick="Router.go('admin/notifications')" id="nav-notifications-link">
         <i data-lucide="bell"></i> Notifications <span class="nav-badge" id="notif-badge"></span></a>
