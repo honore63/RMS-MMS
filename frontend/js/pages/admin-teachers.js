@@ -410,12 +410,19 @@ async function teacherForm() {
   tfAssignmentQueue = [];
   tfAssignmentSubjects = [];
   tfAssignmentClassLookup = {};
+  tfActiveYearId = null;
   let formClasses = [];
   try {
-    const [cls, subj] = await Promise.all([DB.get('classes'), DB.query('subjects', '*', { status: 'active' })]);
+    const [cls, subj, yrs] = await Promise.all([
+      DB.get('classes'),
+      DB.query('subjects', '*', { status: 'active' }),
+      DB.get('academic_years').catch(() => [])
+    ]);
     formClasses = (cls || []).filter(c => teacherMatchesScope(c)).sort((a, b) => String(a.name || '').localeCompare(String(b.name || '')));
     tfAssignmentSubjects = (subj || []).sort((a, b) => String(a.name || '').localeCompare(String(b.name || '')));
     formClasses.forEach(c => { tfAssignmentClassLookup[String(c.id)] = c.name || c.level || ('Class ' + c.id); });
+    const formActiveYear = (yrs || []).find(y => (y.status || y.state) === 'active' || y.is_active);
+    tfActiveYearId = formActiveYear ? formActiveYear.id : null;
   } catch (e) {
     console.warn('[TEACHER FORM] Could not load classes/subjects:', e);
   }
@@ -452,6 +459,35 @@ async function teacherForm() {
 }
 
 // ---- Registration assignment queue renderers ----
+let tfActiveYearId = null;
+
+async function tfCheckConflicts(pairs) {
+  if (typeof findAssignmentConflicts === 'function') return findAssignmentConflicts(pairs, null);
+  // Fallback when the Assignments module is not loaded: same rule, local query.
+  const wanted = (pairs || []).filter(p => p && p.class_id && p.subject_id);
+  if (!wanted.length) return [];
+  const classIds = [...new Set(wanted.map(p => String(p.class_id)))];
+  const { data: rows, error } = await sbClient.from('teacher_assignments')
+    .select('teacher_id,class_id,subject_id,academic_year_id')
+    .in('class_id', classIds);
+  if (error) throw error;
+  const conflicts = [];
+  (wanted || []).forEach(p => {
+    const hit = (rows || []).find(r =>
+      String(r.class_id) === String(p.class_id) &&
+      String(r.subject_id) === String(p.subject_id) &&
+      String(r.academic_year_id || '') === String(p.academic_year_id || '')
+    );
+    if (hit) conflicts.push({ ...p, teacherName: 'another teacher' });
+  });
+  return conflicts;
+}
+
+function tfConflictMessage(conflicts) {
+  if (typeof conflictMessage === 'function') return conflictMessage(conflicts);
+  return 'Already assigned to another teacher: ' + conflicts.map(c => `${c.subject_id} in class ${c.class_id}`).join('; ');
+}
+
 function tfAssignRenderClassSubjects() {
   const classId = document.getElementById('tf-class-picker')?.value || '';
   const panel = document.getElementById('tf-subject-panel');
@@ -534,17 +570,34 @@ function tfAssignRemoveFromQueue(classId) {
   }
 }
 
-function tfAssignAddClassToQueue() {
+async function tfAssignAddClassToQueue() {
   const classId = document.getElementById('tf-class-picker')?.value || '';
   const selectedSubjects = [...document.querySelectorAll('input[name="tf-subject"]:checked')].map(el => el.value);
   if (!classId) return Utils.toast('Select a class first', 'error');
   if (!selectedSubjects.length) return Utils.toast('Select at least one subject for this class', 'error');
+
+  // No double-booking: a subject in this class can belong to only one teacher.
+  let allowedSubjects = [...new Set(selectedSubjects.map(String))];
+  try {
+    const conflicts = await tfCheckConflicts(
+      allowedSubjects.map(sid => ({ class_id: String(classId), subject_id: String(sid), academic_year_id: tfActiveYearId }))
+    );
+    if (conflicts.length) {
+      const taken = new Set(conflicts.map(c => String(c.subject_id)));
+      allowedSubjects = allowedSubjects.filter(sid => !taken.has(String(sid)));
+      Utils.toast(tfConflictMessage(conflicts), 'error');
+      if (!allowedSubjects.length) return;
+    }
+  } catch (e) {
+    console.warn('[TEACH ASSIGN] Conflict check failed, proceeding:', e);
+  }
+
   const existing = tfAssignmentQueue.find(item => String(item.class_id) === String(classId));
   if (existing) {
     // MERGE, never replace — a teacher can hold several subjects in one class.
-    existing.subject_ids = [...new Set([...(existing.subject_ids || []).map(String), ...selectedSubjects.map(String)])];
+    existing.subject_ids = [...new Set([...(existing.subject_ids || []).map(String), ...allowedSubjects])];
   } else {
-    tfAssignmentQueue.push({ class_id: classId, subject_ids: [...new Set(selectedSubjects.map(String))] });
+    tfAssignmentQueue.push({ class_id: classId, subject_ids: [...new Set(allowedSubjects)] });
   }
   tfAssignRenderQueue();
   const picker = document.getElementById('tf-class-picker');
@@ -611,22 +664,28 @@ async function teacherSave() {
     let assignedClassNames = [];
     let assignedSubjectNames = [];
     let activeYearId = null;
+    let classById = new Map();
+    let subjectById = new Map();
     try {
       const [allClasses, allSubjects, allYears] = await Promise.all([
         queuedAssignments.length ? DB.get('classes') : Promise.resolve([]),
         queuedAssignments.length ? DB.get('subjects') : Promise.resolve([]),
         DB.get('academic_years').catch(() => [])
       ]);
-      const classById = new Map((allClasses || []).map(c => [String(c.id), c]));
-      const subjectById = new Map((allSubjects || []).map(s => [String(s.id), s]));
+      classById = new Map((allClasses || []).map(c => [String(c.id), c]));
+      subjectById = new Map((allSubjects || []).map(s => [String(s.id), s]));
+      const namePair = (classId, subjectId) => {
+        const c = classById.get(String(classId));
+        const s = subjectById.get(String(subjectId));
+        return { c: c ? (c.name || c.level || ('Class ' + c.id)) : null, s: s ? (s.name || 'Subject') : null };
+      };
       const seenClasses = new Set();
       const seenSubjects = new Set();
       queuedAssignments.forEach(item => {
-        const c = classById.get(String(item.class_id));
-        if (c && !seenClasses.has(String(item.class_id))) { seenClasses.add(String(item.class_id)); assignedClassNames.push(c.name || c.level || ('Class ' + c.id)); }
         (item.subject_ids || []).forEach(sid => {
-          const s = subjectById.get(String(sid));
-          if (s && !seenSubjects.has(String(sid))) { seenSubjects.add(String(sid)); assignedSubjectNames.push(s.name || 'Subject'); }
+          const n = namePair(item.class_id, sid);
+          if (n.c && !seenClasses.has(String(item.class_id))) { seenClasses.add(String(item.class_id)); assignedClassNames.push(n.c); }
+          if (n.s && !seenSubjects.has(String(sid))) { seenSubjects.add(String(sid)); assignedSubjectNames.push(n.s); }
         });
       });
       const activeYear = (allYears || []).find(y => (y.status || y.state) === 'active' || y.is_active);
@@ -644,9 +703,37 @@ async function teacherSave() {
             payload.push({ teacher_id: newTeacherId, class_id: item.class_id, subject_id: subjectId, academic_year_id: activeYearId });
           });
         });
-        const { error: assignErr } = await sbClient.from('teacher_assignments').insert(payload);
-        if (assignErr) throw assignErr;
-        DB.invalidate('teacher_assignments');
+        // Final no-double-booking check (a slot may have been taken since it was queued).
+        let finalPayload = payload;
+        try {
+          const conflicts = await tfCheckConflicts(payload);
+          if (conflicts.length) {
+            const taken = new Set(conflicts.map(c => `${c.class_id}|${c.subject_id}`));
+            finalPayload = payload.filter(p => !taken.has(`${String(p.class_id)}|${String(p.subject_id)}`));
+            Utils.toast(tfConflictMessage(conflicts) + ' — skipped.', 'error');
+          }
+        } catch (checkErr) {
+          console.warn('[TEACHER ASSIGN] Final conflict check failed, proceeding:', checkErr);
+        }
+        // Names in the welcome email must reflect only what was actually saved.
+        const savedPairs = new Set(finalPayload.map(p => `${String(p.class_id)}|${String(p.subject_id)}`));
+        assignedClassNames = [];
+        assignedSubjectNames = [];
+        {
+          const seenC = new Set();
+          const seenS = new Set();
+          finalPayload.forEach(p => {
+            const c = classById.get(String(p.class_id));
+            const s = subjectById.get(String(p.subject_id));
+            if (c && !seenC.has(String(p.class_id))) { seenC.add(String(p.class_id)); assignedClassNames.push(c.name || c.level || ('Class ' + c.id)); }
+            if (s && !seenS.has(String(p.subject_id))) { seenS.add(String(p.subject_id)); assignedSubjectNames.push(s.name || 'Subject'); }
+          });
+        }
+        if (finalPayload.length) {
+          const { error: assignErr } = await sbClient.from('teacher_assignments').insert(finalPayload);
+          if (assignErr) throw assignErr;
+          DB.invalidate('teacher_assignments');
+        }
       } catch (assignErr) {
         console.error('[TEACHER ASSIGN] Failed:', assignErr);
         Utils.toast('Teacher registered, but assignments could not be saved: ' + (assignErr.message || 'unknown error'), 'error');

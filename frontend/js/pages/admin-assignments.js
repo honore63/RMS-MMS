@@ -49,6 +49,57 @@ function assignClearSubjects() {
   renderAssignmentSubjectCount();
 }
 
+// ---- Shared rule: one subject in one class = one teacher per academic year.
+// pairs: [{ class_id, subject_id, academic_year_id }]. Rows owned by
+// excludeTeacherId are ignored (so edits don't conflict with themselves).
+// Returns [{ class_id, subject_id, academic_year_id, className, subjectName, teacherName }]
+async function findAssignmentConflicts(pairs, excludeTeacherId) {
+  const wanted = (pairs || []).filter(p => p && p.class_id && p.subject_id);
+  if (!wanted.length) return [];
+  const classIds = [...new Set(wanted.map(p => String(p.class_id)))];
+  const { data: rows, error } = await sbClient.from('teacher_assignments')
+    .select('teacher_id,class_id,subject_id,academic_year_id')
+    .in('class_id', classIds);
+  if (error) throw error;
+  const hits = (rows || []).filter(r => String(r.teacher_id) !== String(excludeTeacherId || ''));
+  if (!hits.length) return [];
+  const teacherIds = [...new Set(hits.map(r => r.teacher_id).filter(Boolean))];
+  const subjectIds = [...new Set(wanted.map(p => String(p.subject_id)))];
+  const [teachersRes, classesRes, subjectsRes] = await Promise.all([
+    teacherIds.length ? sbClient.from('teachers').select('id,full_name').in('id', teacherIds) : Promise.resolve({ data: [] }),
+    sbClient.from('classes').select('id,name').in('id', classIds),
+    sbClient.from('subjects').select('id,name').in('id', subjectIds)
+  ]);
+  const teacherName = new Map(((teachersRes || {}).data || []).map(t => [String(t.id), t.full_name || 'Another teacher']));
+  const className = new Map(((classesRes || {}).data || []).map(c => [String(c.id), c.name || 'Class']));
+  const subjectName = new Map(((subjectsRes || {}).data || []).map(s => [String(s.id), s.name || 'Subject']));
+  const conflicts = [];
+  wanted.forEach(p => {
+    const hit = hits.find(r =>
+      String(r.class_id) === String(p.class_id) &&
+      String(r.subject_id) === String(p.subject_id) &&
+      String(r.academic_year_id || '') === String(p.academic_year_id || '')
+    );
+    if (hit) conflicts.push({
+      class_id: String(p.class_id),
+      subject_id: String(p.subject_id),
+      academic_year_id: p.academic_year_id || null,
+      className: className.get(String(p.class_id)) || 'Class',
+      subjectName: subjectName.get(String(p.subject_id)) || 'Subject',
+      teacherName: teacherName.get(String(hit.teacher_id)) || 'Another teacher'
+    });
+  });
+  return conflicts;
+}
+
+function conflictMessage(conflicts, max) {
+  const shown = (conflicts || []).slice(0, max || 3)
+    .map(c => `${c.subjectName} in ${c.className} (taken by ${c.teacherName})`)
+    .join('; ');
+  const extra = (conflicts || []).length > (max || 3) ? ` (+${conflicts.length - (max || 3)} more)` : '';
+  return 'Already assigned: ' + shown + extra;
+}
+
 function renderAssignmentQueue() {
   const queue = document.getElementById('af-class-subject-queue');
   if (!queue) return;
@@ -307,6 +358,11 @@ async function assignSaveMultiple(btn) {
   }
 
   try {
+    const conflicts = await findAssignmentConflicts(payLoad, teacher_id);
+    if (conflicts.length) {
+      if (btn) { btn.disabled = false; btn.innerHTML = '<i data-lucide="check"></i> Create Assignments'; }
+      return Utils.toast(conflictMessage(conflicts), 'error');
+    }
     const existing = await DB.query('teacher_assignments', 'teacher_id,class_id,subject_id,academic_year_id', {
       teacher_id,
       academic_year_id: year_id
@@ -347,6 +403,11 @@ async function assignUpdateMultiple(teacherId, yearId, btn) {
   }
 
   try {
+    const conflicts = await findAssignmentConflicts(payLoad, teacherId);
+    if (conflicts.length) {
+      if (btn) { btn.disabled = false; btn.innerHTML = '<i data-lucide="save"></i> Update Assignments'; }
+      return Utils.toast(conflictMessage(conflicts), 'error');
+    }
     let existingQuery = sbClient.from('teacher_assignments').select('id,teacher_id,class_id,subject_id,academic_year_id').eq('teacher_id', teacherId);
     if (yearId !== 'null') existingQuery = existingQuery.eq('academic_year_id', yearId);
     else existingQuery = existingQuery.is('academic_year_id', null);
