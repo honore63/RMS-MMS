@@ -372,7 +372,9 @@ const CommunicationCenter = {
   async sendMessages(recipients, files) {
     if (files.length > 8) return Utils.toast('Choose no more than 8 files', 'error');
     if (files.some(file => file.size > this.maxFileBytes)) return Utils.toast('Each attachment must be 50 MB or smaller', 'error');
-    const userId = Auth.currentUser?.id;
+    const { data: authData } = await sbClient.auth.getUser();
+    const userId = authData?.user?.id || Auth.currentUser?.id;
+    if (!userId) return Utils.toast('Your session is not ready — sign in again', 'error');
     const uploaded = [];
     try {
       for (const file of files) {

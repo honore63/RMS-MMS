@@ -1032,6 +1032,100 @@ td {
 }
 
 /* ============================================================
+   CONVERT MARKS — RESPONSIVE (mobile-first refinements)
+   Scoped to the bulk conversion page; leaves the rest of the
+   app untouched.
+   ============================================================ */
+.bulk-steps {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  margin-bottom: 16px;
+}
+.bulk-steps-spacer { flex: 1; }
+.bulk-step-count { margin-left: 2px; }
+.bulk-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-bottom: 12px;
+}
+.bulk-toolbar .bulk-tabs { margin-bottom: 0; }
+.bulk-toolbar.bulk-review-toolbar { align-items: center; }
+.bulk-spacer { flex: 1; }
+.bulk-tabs {
+  flex-wrap: nowrap;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+  scrollbar-width: thin;
+}
+.bulk-tabs .tab-btn { white-space: nowrap; flex: 0 0 auto; }
+.bulk-target-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 12px;
+}
+.bulk-chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.bulk-export-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+.bulk-preview-wrap {
+  overflow: auto;
+  max-height: 860px;
+  -webkit-overflow-scrolling: touch;
+}
+.bulk-swipe-hint { display: none; }
+
+@media (max-width: 768px) {
+  .bulk-steps {
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    scroll-snap-type: x proximity;
+    padding-bottom: 2px;
+  }
+  .bulk-steps > .btn {
+    flex: 0 0 auto;
+    white-space: nowrap;
+    scroll-snap-align: start;
+  }
+  .bulk-steps-spacer { display: none; }
+  .bulk-swipe-hint {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin-bottom: 8px;
+    font-size: 11.5px;
+    color: var(--gray-500);
+  }
+  .bulk-swipe-hint i { width: 14px; height: 14px; flex: 0 0 auto; }
+  .bulk-toolbar { align-items: flex-end; }
+}
+
+@media (max-width: 560px) {
+  .bulk-toolbar { align-items: stretch; }
+  .bulk-search { max-width: 100% !important; }
+  .bulk-toolbar .bulk-tabs { width: 100%; }
+  .bulk-toolbar.bulk-review-toolbar { align-items: center; }
+  .bulk-toolbar.bulk-review-toolbar .bulk-tabs { width: auto; }
+  .bulk-sel { margin-left: 0; }
+}
+
+@media (max-width: 480px) {
+  .bulk-target-row { gap: 8px; }
+  .bulk-target-row #bulk-target { width: 100%; max-width: 100% !important; }
+  .bulk-chips .btn { flex: 1 1 auto; }
+  .bulk-export-actions .btn { flex: 1 1 auto; justify-content: center; }
+}
+
+/* ============================================================
    QUICK ACTION CARDS
    ============================================================ */
 .action-card {

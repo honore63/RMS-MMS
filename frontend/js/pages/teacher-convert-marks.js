@@ -171,11 +171,11 @@ function bulkRenderPage() {
     (!bc.selTermId || String(r.a.term_id) === String(bc.selTermId))).length;
 
   setContent(`
-    <div class="flex" style="gap:8px;margin-bottom:16px;flex-wrap:wrap;align-items:center">
-      <a class="btn btn-sm btn-outline" href="#bulk-sec-setup">Step 1 · Setup</a>
-      <a class="btn btn-sm btn-outline" href="#bulk-sec-convert">Step 2 · Convert (<span id="bulk-nav-count">${bc.selAssess.size}</span>)</a>
-      <a class="btn btn-sm btn-outline" href="#bulk-sec-finish">Step 3 · Report & Save</a>
-      <div style="flex:1"></div>
+    <div class="bulk-steps" role="tablist" aria-label="Conversion steps">
+      <a class="btn btn-sm btn-outline" href="#bulk-sec-setup" role="tab">Step 1 · Setup</a>
+      <a class="btn btn-sm btn-outline" href="#bulk-sec-convert" role="tab">Step 2 · Convert <span class="bulk-step-count" id="bulk-nav-count">${bc.selAssess.size}</span></a>
+      <a class="btn btn-sm btn-outline" href="#bulk-sec-finish" role="tab">Step 3 · Report &amp; Save</a>
+      <span class="bulk-steps-spacer"></span>
       <button class="btn btn-sm btn-primary" onclick="bulkAllConverted()"><i data-lucide="eye"></i> All converted marks</button>
     </div>
 
@@ -202,20 +202,21 @@ function bulkRenderPage() {
       <hr style="margin:16px 0;border:none;border-top:1px solid var(--gray-200)">
       <h3 class="page-title" style="font-size:14px">Assessments to combine</h3>
       <p class="text-sm text-muted" style="margin-bottom:12px">Tick two or more assessments with saved marks — including submitted or approved ones. Sources are only read, never changed, so official records and reports stay untouched.</p>
-      <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:12px">
-        <input class="input-field" id="bulk-search" style="max-width:280px" placeholder="Search assessments..." value="${Utils.escapeHtml(bulkSearch)}" oninput="bulkSearch=this.value;bulkRefreshAssessRows()">
-        <div class="tab-bar">
+      <div class="bulk-toolbar">
+        <input class="input-field bulk-search" id="bulk-search" style="max-width:280px" placeholder="Search assessments..." value="${Utils.escapeHtml(bulkSearch)}" oninput="bulkSearch=this.value;bulkRefreshAssessRows()">
+        <div class="tab-bar bulk-tabs" role="tablist" aria-label="Assessment status filter">
           <button class="tab-btn ${bulkFilter === 'convertible' ? 'active' : ''}" onclick="bulkSetFilter('convertible')">Convertible</button>
           <button class="tab-btn ${bulkFilter === 'draft' ? 'active' : ''}" onclick="bulkSetFilter('draft')">Draft</button>
           <button class="tab-btn ${bulkFilter === 'rejected' ? 'active' : ''}" onclick="bulkSetFilter('rejected')">Rejected</button>
           <button class="tab-btn ${bulkFilter === 'official' ? 'active' : ''}" onclick="bulkSetFilter('official')">Official</button>
           <button class="tab-btn ${bulkFilter === 'all' ? 'active' : ''}" onclick="bulkSetFilter('all')">All</button>
         </div>
-        <div style="flex:1"></div>
-        <span class="text-sm text-muted"><span id="bulk-sel-count">${bc.selAssess.size}</span> selected</span>
+        <span class="bulk-spacer"></span>
+        <span class="text-sm text-muted bulk-sel"><span id="bulk-sel-count">${bc.selAssess.size}</span> selected</span>
         <button class="btn btn-sm btn-outline" onclick="bulkSelectAll(true)"><i data-lucide="check-square"></i> Select all</button>
         <button class="btn btn-sm btn-outline" onclick="bulkSelectAll(false)"><i data-lucide="square"></i> Clear all</button>
       </div>
+      <div class="bulk-swipe-hint"><i data-lucide="move-horizontal"></i> Swipe the table sideways on small screens</div>
       <div class="table-container" style="max-height:420px;overflow-y:auto"><table class="data-table">
         <thead><tr><th style="width:36px"></th><th>Assessment</th><th>Type</th><th>Max</th><th>Date</th><th>Saved marks</th><th>Status</th></tr></thead>
         <tbody id="bulk-assess-rows">${bulkAssessRowsHtml()}</tbody>
@@ -226,9 +227,9 @@ function bulkRenderPage() {
       <h2 class="page-title" style="font-size:16px">Step 2 · Convert — Target & Review</h2>
       <p class="text-sm text-muted" style="margin-bottom:12px">Set the target maximum and where to record the marks. Each student's percentage is preserved by proportional re-scaling — the review below recalculates instantly. ${bc.missingZero ? 'Missing marks are counted as zero.' : 'Missing marks are excluded — never treated as zero.'}</p>
       <label class="form-label">Target Maximum Mark <span class="required">*</span></label>
-      <div class="flex gap-2" style="flex-wrap:wrap;align-items:center;margin-bottom:12px">
+      <div class="bulk-target-row">
         <input id="bulk-target" type="number" min="1" step="any" class="input-field" style="max-width:160px;font-size:18px;font-weight:700" value="${bc.target}" oninput="bulkTargetLiveInput()">
-        ${chips.map(m => `<button type="button" class="btn btn-sm ${m === bc.target ? 'btn-primary' : 'btn-outline'}" onclick="bulkSetTargetChip(${m})">${m}</button>`).join('')}
+        <div class="bulk-chips">${chips.map(m => `<button type="button" class="btn btn-sm ${m === bc.target ? 'btn-primary' : 'btn-outline'}" onclick="bulkSetTargetChip(${m})">${m}</button>`).join('')}</div>
       </div>
       <p class="form-hint" style="margin-bottom:12px">Rounding rule: ${bc.decimals ? 'marks rounded to 1 decimal place' : 'marks rounded to whole numbers'} · Pass mark: ${bc.pass}%</p>
       <div class="alert alert-info" style="margin:0"><i data-lucide="info"></i><div>On save, a helper assessment named <strong id="bulk-autoname">—</strong> is created automatically. It is visible only on this page and never affects official reports.</div></div>
@@ -241,14 +242,14 @@ function bulkRenderPage() {
     <div class="card" id="bulk-sec-finish" style="margin-bottom:16px;scroll-margin-top:12px;border:1px solid var(--blue-200)"><div class="card-body">
       <h2 class="page-title" style="font-size:16px">Step 3 · Report & Save</h2>
       <p class="text-sm text-muted" style="margin-bottom:12px">Preview the print-identical report, export it, then confirm and save. Original assessments are never modified.</p>
-      <div class="flex" style="gap:8px;margin-bottom:12px;flex-wrap:wrap">
+      <div class="bulk-export-actions">
         <button class="btn btn-sm btn-outline" onclick="bulkPreviewTab()"><i data-lucide="external-link"></i> Preview</button>
         <button class="btn btn-sm btn-outline" onclick="bulkPrintReport()"><i data-lucide="printer"></i> Print</button>
         <button class="btn btn-sm btn-outline" onclick="bulkDownloadPdf()"><i data-lucide="file-down"></i> PDF</button>
         <button class="btn btn-sm btn-outline" onclick="bulkDownloadExcel()"><i data-lucide="file-spreadsheet"></i> Excel</button>
         <button class="btn btn-sm btn-outline" onclick="bulkDownloadWord()"><i data-lucide="file-text"></i> Word</button>
       </div>
-      <div style="overflow:auto;max-height:860px"><div id="bulk-report-preview" style="min-width:1180px;background:var(--gray-100);border-radius:var(--radius-lg)">${Utils.loading()}</div></div>
+      <div class="bulk-preview-wrap"><div id="bulk-report-preview" style="min-width:1180px;background:var(--gray-100);border-radius:var(--radius-lg)">${Utils.loading()}</div></div>
       <hr style="margin:16px 0;border:none;border-top:1px solid var(--gray-200)">
       <h3 class="page-title" style="font-size:14px">Confirm & save</h3>
       <p class="text-sm text-muted" style="margin-bottom:12px">Duplicate submissions are prevented. The converted assessment is a helper — it never affects official reports or report cards.</p>
@@ -575,8 +576,8 @@ function bulkReviewHtml() {
       ? `<div class="alert alert-warning" style="margin-bottom:16px"><i data-lucide="alert-triangle"></i><div><strong>${c.missingCount} student(s) have missing marks</strong> in at least one selected assessment. They are <strong>counted as zero</strong> and included in the calculation.</div></div>`
       : `<div class="alert alert-warning" style="margin-bottom:16px"><i data-lucide="alert-triangle"></i><div><strong>Warning — ${c.missingCount} student(s) have missing marks</strong> in at least one selected assessment. Missing marks are <strong>excluded</strong> from the calculation and are <strong>never treated as zero</strong>.</div></div>`) : ''}
     ${c.convertedCount === 0 ? `<div class="alert alert-warning" style="margin-bottom:16px"><i data-lucide="alert-triangle"></i><div>No students could be converted (all marks missing).</div></div>` : ''}
-    <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:12px">
-      <div class="tab-bar">
+    <div class="bulk-toolbar bulk-review-toolbar">
+      <div class="tab-bar bulk-tabs" role="tablist" aria-label="Review view">
         <button class="tab-btn ${bulkReviewView === 'sheet' ? 'active' : ''}" onclick="bulkSetReviewView('sheet')">Converted marks</button>
         <button class="tab-btn ${bulkReviewView === 'full' ? 'active' : ''}" onclick="bulkSetReviewView('full')">Full review</button>
       </div>
