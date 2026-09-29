@@ -687,7 +687,9 @@ const NotificationCenter = {
     const actionBtn = notification.action_url 
       ? `<button class="btn btn-sm notify-action" style="background:transparent;border:none;color:var(--blue-600);font-size:11px;text-decoration:underline;margin-top:4px;display:block;">View</button>`
       : '';
-    const deleteBtn = !isDropdown && Auth.isAdmin()
+    const isDos = Auth.isAdmin();
+    const canDelete = isDos;
+    const deleteBtn = canDelete
       ? `<button type="button" class="btn btn-sm notify-delete" aria-label="Delete notification: ${Utils.escapeHtml(notification.title)}" title="Delete notification" onclick="event.stopPropagation();NotificationCenter.deleteNotification('${notification.id}')"><i data-lucide="trash-2"></i></button>`
       : '';
     const actions = actionBtn || deleteBtn ? `<div class="notify-actions">${actionBtn}${deleteBtn}</div>` : '';
@@ -818,11 +820,11 @@ const NotificationCenter = {
 
   async deleteNotification(notificationId) {
     try {
-      const { error } = await sbClient
-        .from('notifications')
-        .delete()
-        .eq('id', notificationId)
-        .eq('recipient_user_id', Auth.currentUser?.id);
+      const userRole = Auth.getRole();
+      const deleteQuery = userRole === 'dos'
+        ? sbClient.from('notifications').delete().eq('id', notificationId)
+        : sbClient.from('notifications').delete().eq('id', notificationId).eq('recipient_user_id', Auth.currentUser?.id);
+      const { error } = await deleteQuery;
       if (error) throw error;
 
       // Update local state

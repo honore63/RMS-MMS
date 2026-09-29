@@ -21,3 +21,9 @@ CREATE POLICY rms_account_learner_scope ON public.learners
     public.rms_account_role() = 'dos'
     AND public.rms_account_can_class(class_id)
   );
+
+SELECT policyname, cmd, with_check
+FROM pg_policies
+WHERE schemaname = 'public'
+  AND tablename = 'learners'
+  AND policyname = 'rms_account_learner_scope';

@@ -481,15 +481,23 @@ function assessDelete(id) {
 
 async function confirmAssessDelete(id) {
   try {
+    const [assessment] = await DB.getRelated('assessments', '*', { id });
     await deleteAssessmentWithMarks(id);
-    await DB.insert('audit_logs', {
-      user_id: Auth.currentUser?.id, user_name: Auth.currentUser?.full_name,
-      role: Auth.currentUser?.role, action: 'delete_assessment',
-      assessment_id: id, new_value: 'Deleted assessment ' + id,
-      timestamp: new Date().toISOString()
-    });
+    let auditError = null;
+    try {
+      await DB.insert('audit_logs', {
+        user_id: Auth.currentUser?.id, user_name: Auth.currentUser?.full_name,
+        role: Auth.currentUser?.role, action: 'delete_assessment',
+        assessment_id: null,
+        new_value: `Deleted assessment ${assessment?.name || id} (${id})`,
+        timestamp: new Date().toISOString()
+      });
+    } catch (error) {
+      auditError = error;
+      console.error('Assessment deleted but audit logging failed:', error);
+    }
     Modal.close();
-    Utils.toast('Assessment deleted', 'success');
+    Utils.toast(auditError ? 'Assessment deleted, but the audit log could not be saved' : 'Assessment deleted', auditError ? 'warning' : 'success');
     renderAssessments();
   } catch (e) {
     const msg = [e.message, e.details, e.hint].filter(Boolean).join(' | ');

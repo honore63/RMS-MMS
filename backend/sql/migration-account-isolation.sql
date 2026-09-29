@@ -494,7 +494,10 @@ CREATE POLICY rms_account_notifications_update ON public.notifications
   USING (recipient_user_id = auth.uid())
   WITH CHECK (recipient_user_id = auth.uid());
 CREATE POLICY rms_account_notifications_delete ON public.notifications
-  FOR DELETE TO authenticated USING (recipient_user_id = auth.uid());
+  FOR DELETE TO authenticated USING (
+    recipient_user_id = auth.uid()
+    OR (public.rms_account_role() = 'dos')
+  );
 
 ALTER TABLE public.audit_logs ENABLE ROW LEVEL SECURITY;
 DO $$

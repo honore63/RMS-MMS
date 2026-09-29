@@ -197,12 +197,24 @@ async function learnerSave() {
   }
 
   try {
+    const [roleCheck, classCheck] = await Promise.all([
+      sbClient.rpc('rms_account_role'),
+      sbClient.rpc('rms_account_can_class', { p_class_id: classId })
+    ]);
+    if (roleCheck.error || classCheck.error) throw roleCheck.error || classCheck.error;
+    if (roleCheck.data !== 'dos') {
+      return Utils.toast('Supabase does not recognize this session as an active DOS. Sign out and sign in again, then retry.', 'error');
+    }
+    if (!classCheck.data) {
+      return Utils.toast('This class is outside your DOS level in Supabase. Check the class education level before registering the learner.', 'error');
+    }
+
     const existing = await DB.query('learners', 'id', { learner_code: code });
     if (existing.length) {
       showStudentDuplicateMessage(code);
       return;
     }
-    await DB.insert('learners', {
+    const { error } = await sbClient.from('learners').insert({
       learner_code: code,
       full_name: name.toUpperCase(),
       gender: gender || null,
@@ -210,12 +222,18 @@ async function learnerSave() {
       academic_year_id: yearId,
       status: 'active'
     });
+    if (error) throw error;
+    DB.invalidate('learners');
     Modal.close();
     Utils.toast('Learner added successfully', 'success');
     renderLearners();
   } catch (e) {
     if (/duplicate key|unique|already exists|23505/i.test(e.message || '')) {
       showStudentDuplicateMessage(code);
+      return;
+    }
+    if (/rms_account_learner_scope|row-level security policy/i.test(e.message || '')) {
+      Utils.toast('Supabase blocked registration. Run migration-dos-learner-write-access.sql and verify the class is within your DOS level.', 'error');
       return;
     }
     Utils.toast('Error: ' + e.message, 'error');
