@@ -512,7 +512,19 @@ td {
   .login-auth { padding: 36px 32px 26px; }
 }
 @media (max-width: 480px) {
-  .login-page { padding: 20px 14px; }
+  .login-page {
+    position: fixed;
+    inset: 0;
+    z-index: 1000;
+    height: 100dvh;
+    min-height: 100dvh;
+    max-height: none;
+    overflow-x: hidden;
+    overflow-y: auto;
+    align-items: flex-start;
+    padding: 20px 14px;
+  }
+  .login-shell { flex: 0 0 auto; margin: 0 auto; }
   .login-card { padding: 0; }
   .login-brand { padding: 28px 22px 24px; }
   .login-auth { padding: 28px 22px 22px; }
