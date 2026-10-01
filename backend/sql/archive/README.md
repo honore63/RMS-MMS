@@ -12,12 +12,13 @@ This folder contains historical and backup project files. **It is not part of th
 backend/sql/archive/
 ├── sql/
 │   └── combined-database.sql   # Consolidated reference snapshot (see below)
-├── old-migrations/
-│   └── *.sql                   # All 66 original historical SQL files, preserved untouched
 └── README.md                   # This file
 ```
 
-There is no `backups/` folder: no database dump/backup files were found in the archive,
+The 66 original migration/snapshot files were consolidated into
+`sql/combined-database.sql` (2026-10-01) and then removed from the working
+tree. Every version remains recoverable via git history. There is no
+`backups/` folder: no database dump/backup files were found in the archive,
 so no extra category was created.
 
 ## SQL Archive
@@ -33,7 +34,8 @@ production master `backend/sql/database.sql` contains. The combined file's body 
 byte-identical to that master file as of the consolidation date; only the header
 banner (this provenance note) differs.
 
-Historical files combined (all preserved in `old-migrations/`):
+Historical files combined (removed from the working tree 2026-10-01 after
+verification; all recoverable via git history):
 
 - 46 `migration-*.sql` files — schema, DOS education-level scope, account isolation,
   RLS policies, communication center, notification center, grading system, assessment
@@ -64,5 +66,5 @@ Historical files combined (all preserved in `old-migrations/`):
 - The archive is for organization and historical preservation only.
 - Never point the app, deployments, or fresh database setups at files in here —
   use `backend/sql/database.sql`.
-- When in doubt, preserve the original file: nothing in `old-migrations/` should be
-  deleted; git history retains every version regardless.
+- The consolidated file is the record; individual originals live on in git
+  history if ever needed for archaeology.

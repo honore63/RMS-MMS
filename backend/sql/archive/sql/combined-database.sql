@@ -14,7 +14,8 @@
 --   (verified: 46/46 archived functions, all archived tables/columns/
 --   triggers/policies/indexes present).
 --
--- FILES COMBINED (66, preserved untouched in ../old-migrations/):
+-- FILES COMBINED (66 originals, removed from the working tree 2026-10-01
+-- after verification; all recoverable via git history):
 --   46 migration-*.sql files (schema, DOS education-level scope, account
 --     isolation, RLS, communication center, notifications, grading,
 --     assessment types/standardization, curriculum subjects, class
