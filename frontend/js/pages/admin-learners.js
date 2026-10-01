@@ -235,7 +235,7 @@ async function learnerSave() {
       return;
     }
     if (/rms_account_learner_scope|row-level security policy/i.test(e.message || '')) {
-      Utils.toast('Supabase blocked registration. Run migration-dos-learner-write-access.sql and verify the class is within your DOS level.', 'error');
+      Utils.toast('Supabase blocked registration. Run backend/sql/database.sql in the Supabase SQL Editor and verify the class is within your DOS level.', 'error');
       return;
     }
     Utils.toast('Error: ' + e.message, 'error');

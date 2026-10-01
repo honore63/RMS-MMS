@@ -8,51 +8,27 @@ This folder contains everything that defines the backend.
 
 ```
 backend/
+├── README.md                     # This guide
+├── functions/
+│   └── welcome-teacher/
+│       └── main.ts               # Supabase Edge Function: sends welcome email/SMS
 └── sql/
-    ├── rms-full-setup.sql              # ONE-SHOT: full schema + RLS + default data
-    ├── database.sql                    # Tables, columns, keys
-    ├── rms-rls-policies.sql            # Row Level Security policies
-    ├── seed-data.sql                   # Sample data for DOS + Teacher + learners
-    ├── rms-run-now.sql                 # Quick reference setup script
-    ├── migration-documents.sql         # Documents table + storage bucket
-    ├── migration-academic-year-management.sql  # Academic year lifecycle
-    ├── migration-marks-import.sql      # Marks Excel import tables/columns
-    ├── migration-rms-mis-assessment-flexibility.sql  # Configurable assessment types
-    ├── migration-rms-mis-rls.sql       # Scoped RLS (types/assessments/assignments)
-    ├── migration-dos-education-level-scope.sql  # DOS Primary/Secondary scope helpers
-    ├── migration-enforce-dos-level-visibility.sql # Restrictive DOS level guards
-    ├── migration-account-isolation.sql # Per-account row and storage isolation
-    ├── migration-subject-levels.sql    # subjects.level (Both/Primary/Secondary/…)
-    ├── migration-education-level-class-grouping.sql  # Class → education level
-    ├── migration-assignments-multi-subject-per-class.sql  # Multi-subject assignments
-    ├── migration-users-profile-photo.sql  # users.profile_photo_url + name fixes
-    ├── migration-fix-teacher-registration-rls.sql  # Teacher 409 / scoped teachers RLS
-    ├── migration-performance-comments.sql  # Performance comments bank
-    ├── migration-report-wizard-indexes.sql # Report performance indexes
-    ├── performance-indexes.sql         # Optimised indexes
-    └── Image/                          # Supporting images
+    ├── database.sql              # MASTER SETUP: complete schema + RLS + triggers + seeds (run this)
+    ├── clear-data.sql            # Operational utility: wipe imported data, keep logins (NOT setup)
+    └── archive/                  # Historical migrations, one-off fixes and diagnostics,
+                                  # all already folded into database.sql (kept for reference only)
 ```
 
-> Many other `migration-*.sql` files exist for incremental fixes (RLS recursion, 403/404, grading, class management, curriculum subjects, etc.). Run only what you need, in chronological order.
+> `database.sql` is the single authoritative setup file. The `archive/` folder holds the old
+> incremental `migration-*.sql` files plus one-off fix/diagnostic scripts — do not run them on a
+> fresh project; everything they did is already inside `database.sql`.
 
 ## Setup
 
 1. Open your Supabase project → **SQL Editor**.
-2. **New query** → paste the script → **Run**.
-3. Recommended order for a fresh install:
-   1. `rms-full-setup.sql` — everything needed to start.
-   2. `migration-documents.sql` — Documents page (uploads/downloads via `documents` bucket).
-   3. `migration-academic-year-management.sql` — Academic Year Management UI.
-   4. `migration-marks-import.sql` — Marks Excel import.
-   5. `migration-rms-mis-assessment-flexibility.sql` — configurable assessment types.
-   6. `migration-rms-mis-rls.sql` — scoped RLS.
-   7. `migration-dos-education-level-scope.sql` — DOS level scope helpers.
-   8. `migration-subject-levels.sql` — subject education levels.
-   9. `migration-assignments-multi-subject-per-class.sql` — multi-subject assignments.
-   10. `migration-users-profile-photo.sql` — profile photos + account name fixes.
-    11. `migration-enforce-dos-level-visibility.sql` — restrictive DOS scope guards.
-    12. `migration-account-isolation.sql` — run last to isolate account data and permissions.
-    13. `seed-data.sql` — optional sample data.
+2. **New query** → paste the entire `backend/sql/database.sql` → **Run**.
+3. Verify the required tables/functions/policies (checks are listed at the end of `database.sql`).
+4. Start the frontend (open `frontend/index.html` or deploy to Vercel).
 
 > All SQL is pasted and run **manually** in the SQL Editor — there is no migration runner. Prefer paste-ready queries with no placeholders.
 
@@ -65,7 +41,9 @@ Create users in Supabase → **Authentication → Users**:
 | DOS     | dos@rukara.edu      | dos123     | Yes          |
 | Teacher | teacher@rukara.edu  | teacher123 | Yes          |
 
-Then insert the matching `users` / `teachers` rows from `seed-data.sql`. Set real names with the UPDATE examples in `migration-users-profile-photo.sql`.
+Then insert the matching `users` / `teachers` rows (the DOS accounts are created automatically
+by `database.sql`; create any teacher Auth users first, then link them with the `link_auth_user`
+helper defined at the end of `database.sql`).
 
 ## Schema Overview (tables)
 

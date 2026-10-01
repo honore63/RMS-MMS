@@ -138,10 +138,9 @@ rms-eua/
 ├── backend/
 │   ├── README.md                   # Supabase setup guide
 │   ├── sql/
-│   │   ├── database.sql            # Full schema + RLS + triggers
-│   │   ├── migration-teacher-welcome-notifications.sql  # Email/SMS tables + triggers
-│   │   ├── migration-welcome-notifications-function.sql # send_welcome_notifications() function
-│   │   └── migration-*.sql         # Incremental migrations
+│   │   ├── database.sql            # MASTER setup: full schema + RLS + triggers + seeds (run this)
+│   │   ├── clear-data.sql          # Operational utility: wipe imported data, keep logins
+│   │   └── archive/                # Historical migrations (already folded into database.sql)
 │   └── functions/
 │       └── welcome-teacher/
 │           └── main.ts             # Supabase Edge Function: sends welcome email/SMS
@@ -157,13 +156,11 @@ rms-eua/
 ### 1. Backend (Supabase)
 
 1. Open [Supabase Dashboard](https://supabase.com/dashboard) → your project → **SQL Editor**
-2. Run the master schema:
+2. Run the master setup file (creates the complete database, idempotent — safe to re-run):
 
    ```sql
-   -- Run in order:
-   -- 1. database.sql (full schema + RLS + triggers)
-   -- 2. migration-teacher-welcome-notifications.sql (email/SMS tables)
-   -- 3. migration-welcome-notifications-function.sql (send_welcome_notifications function)
+   -- Paste and run the whole file:
+   -- backend/sql/database.sql
    ```
 
 3. Verify tables:
