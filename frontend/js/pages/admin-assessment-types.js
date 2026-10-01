@@ -63,72 +63,6 @@ function getAssessmentTypeName(types, id, fallback) {
   return (t && t.name) || fallback || 'Assessment';
 }
 
-// Canonical RMS-MIS assessment types. Kept in sync with the seed block in
-// backend/sql/database.sql. Used by "Restore standard types" so the catalogue
-// can be repaired from the UI without access to the SQL editor.
-const STANDARD_ASSESSMENT_TYPES = [
-  { name: 'CAT',                   code: 'CAT',   description: 'Continuous assessment test',    default_maximum_mark: 20,  display_order: 1,  period_hint: null,    is_standard: true },
-  { name: 'Weekly Test',            code: 'WKT',   description: 'Weekly classroom test',          default_maximum_mark: 10,  display_order: 2,  period_hint: 'week',  is_standard: true },
-  { name: 'Monthly Test',           code: 'MLT',   description: 'Monthly assessment',             default_maximum_mark: 20,  display_order: 3,  period_hint: 'month', is_standard: true },
-  { name: 'Beginning Exam',         code: 'BOT',   description: 'Beginning of term examination', default_maximum_mark: 50,  display_order: 4,  period_hint: 'term',  is_standard: true },
-  { name: 'Mid-Term Exam',          code: 'MTE',   description: 'Mid-term examination',          default_maximum_mark: 50,  display_order: 5,  period_hint: 'term',  is_standard: true },
-  { name: 'End of Term Exam',       code: 'EOT',   description: 'End of term examination',        default_maximum_mark: 100, display_order: 6,  period_hint: 'term',  is_standard: true },
-  { name: 'End of Unit',            code: 'EOU',   description: 'End-of-unit assessment',         default_maximum_mark: 30,  display_order: 7,  period_hint: 'unit',  is_standard: true },
-  { name: 'Quiz',                   code: 'QUIZ',  description: 'Short quiz',                     default_maximum_mark: 20,  display_order: 8,  period_hint: null,    is_standard: true },
-  { name: 'Assignment',             code: 'ASGMT', description: 'Take-home assignment',           default_maximum_mark: 20,  display_order: 9,  period_hint: null,    is_standard: true },
-  { name: 'Practical',              code: 'PRAC',  description: 'Practical assessment',           default_maximum_mark: 30,  display_order: 10, period_hint: null,    is_standard: true },
-  { name: 'Class Exercise',         code: 'CEXE',  description: 'Class exercise',                 default_maximum_mark: 10,  display_order: 11, period_hint: null,    is_standard: true },
-  { name: 'Homework',               code: 'HW',    description: 'Homework',                       default_maximum_mark: 10,  display_order: 12, period_hint: null,    is_standard: true },
-  { name: 'Oral',                   code: 'ORAL',  description: 'Oral assessment',                default_maximum_mark: 10,  display_order: 13, period_hint: null,    is_standard: true },
-  { name: 'Other',                  code: 'OTHER', description: 'Other assessment',               default_maximum_mark: 30,  display_order: 14, period_hint: 'other', is_standard: true }
-];
-
-// Inserts any missing canonical type and refreshes the ones already present.
-// Idempotent: safe to run repeatedly, never duplicates by name.
-async function restoreStandardTypes() {
-  const btn = document.getElementById('ats-restore-btn');
-  if (btn) { btn.disabled = true; btn.innerHTML = '<i data-lucide="loader" style="width:16px;height:16px;animation:spin 1s linear infinite"></i> Restoring...'; }
-  if (typeof lucide !== 'undefined') lucide.createIcons();
-  let added = 0, updated = 0;
-  const failures = [];
-  try {
-    const existing = await getAssessmentTypes(true, true);
-    for (const std of STANDARD_ASSESSMENT_TYPES) {
-      const payload = {
-        name: std.name, code: std.code, description: std.description,
-        default_maximum_mark: std.default_maximum_mark, weight: null,
-        contributes_to_combined: true, display_order: std.display_order,
-        status: 'active', period_hint: std.period_hint, is_standard: std.is_standard
-      };
-      const match = (existing || []).find(t => String(t.name || '').toLowerCase() === std.name.toLowerCase());
-      try {
-        if (match) { await DB.update('assessment_types', match.id, payload); updated++; }
-        else { await DB.insert('assessment_types', payload); added++; }
-      } catch (e) {
-        const code = e.code || '';
-        const msg = (e.message || 'failed');
-        // 42501 / "row-level security" means the caller's users row does not
-        // satisfy the DOS write policy (role = 'dos' AND status = 'active').
-        if (code === '42501' || /row-level security/i.test(msg)) {
-          failures.push(std.name + ': your account is not set up as a DOS account');
-        } else {
-          failures.push(std.name + ': ' + msg);
-        }
-      }
-    }
-    assessmentTypesCache = null;
-    await renderAssessmentTypes();
-    if (failures.length) {
-      Utils.toast('Restored ' + (added + updated) + ' types, but ' + failures.length + ' failed. ' + failures[0], 'error');
-    } else {
-      Utils.toast('Standard assessment types restored (' + added + ' added, ' + updated + ' updated)', 'success');
-    }
-  } catch (e) {
-    if (btn) { btn.disabled = false; btn.innerHTML = '<i data-lucide="rotate-ccw"></i> Restore standard types'; if (typeof lucide !== 'undefined') lucide.createIcons(); }
-    Utils.toast('Restore failed: ' + (e.message || 'could not reach the database'), 'error');
-  }
-}
-
 function getCategoryForType(type) {
   const code = (type.code || '').toUpperCase();
   if (['EOU', 'QUIZ', 'HOMEWORK', 'PRACTICE'].includes(code)) return 'formative';
@@ -156,6 +90,9 @@ async function renderAssessmentTypes() {
   setContent(Utils.loading());
 
   try {
+    // Canonical types are defined in code (ASSESSMENT_TYPES in utils.js); this keeps
+    // the backing rows in sync automatically - no manual restore step.
+    await Utils.ensureAssessmentTypes();
     const [types, assessments] = await Promise.all([
       getAssessmentTypes(true, true),
       DB.get('assessments', {}, { select: 'id,assessment_type_id' })
@@ -419,9 +356,6 @@ async function renderAssessmentTypes() {
             <div class="ats-stat"><div class="ats-stat-value">${activeCount}</div><div class="ats-stat-label">Active</div></div>
             <div class="ats-stat"><div class="ats-stat-value">${combinedCount}</div><div class="ats-stat-label">In Combined</div></div>
             <div class="ats-stat"><div class="ats-stat-value">${inUseCount}</div><div class="ats-stat-label">In Use</div></div>
-            <div class="ats-stat" style="display:flex;flex-direction:column;justify-content:center;gap:6px">
-              <button class="ats-filter-btn" id="ats-restore-btn" style="white-space:nowrap"><i data-lucide="rotate-ccw" style="width:14px;height:14px"></i> Restore standard types</button>
-            </div>
           </div>
         </div>
 
@@ -460,7 +394,6 @@ async function renderAssessmentTypes() {
                 ${types.length === 0 ? `
                   <p><strong>No assessment types have been set up yet.</strong></p>
                   <p style="margin-top:6px">Teachers need at least one assessment type before they can create assessments or enter marks.</p>
-                  <button class="ats-add-btn" id="ats-restore-empty-btn" style="margin-top:14px"><i data-lucide="rotate-ccw"></i> Restore the ${STANDARD_ASSESSMENT_TYPES.length} standard assessment types</button>
                 ` : `
                   <p>No assessment types match your filters</p>
                 `}
@@ -606,8 +539,6 @@ async function renderAssessmentTypes() {
       });
     });
     document.getElementById('ats-add-btn')?.addEventListener('click', () => openTypeModal());
-    document.getElementById('ats-restore-btn')?.addEventListener('click', () => restoreStandardTypes());
-    document.getElementById('ats-restore-empty-btn')?.addEventListener('click', () => restoreStandardTypes());
     if (typeof lucide !== 'undefined') lucide.createIcons();
   } catch (error) {
     setContent(`

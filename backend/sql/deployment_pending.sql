@@ -13,7 +13,7 @@
 --   and policies. Nothing here deletes or rewrites school records.
 --
 -- HOW TO APPLY
---   Run blocks 1-8 in order. Each block is self-contained; a failure in one
+--   Run blocks 1-5, then 7 (grants) and 8 (admin roles). Each block is self-contained; a failure in one
 --   block does not invalidate the others.
 --
 -- REMOVED: the password_recovery_attempts table (and the /api/auth/recover
@@ -183,45 +183,15 @@ REVOKE EXECUTE ON FUNCTION public.rms_delete_teacher(UUID) FROM anon;
 
 
 -- ============================================================================
--- BLOCK 6 — RESTORE ASSESSMENT TYPES (additive, never destructive)
--- The standard types are reference data for assessments.assessment_type_id.
---
--- SAFETY PROPERTIES OF THIS BLOCK
---   * It only INSERTS. Nothing is deleted, renamed or truncated.
---   * A type is skipped when a type with the same name (case-insensitive)
---     already exists, so it cannot create duplicates against live data.
---   * Existing custom types added by the school are preserved untouched.
---   * weight is cast (NULL::NUMERIC) because an all-NULL VALUES column would
---     otherwise be typed as text and fail against the numeric column.
---
--- Run it whenever the Assessment Types page is empty or the Create Assessment
--- dropdown has no options. Safe to run repeatedly.
+-- BLOCK 6 - REVIEW ASSESSMENT TYPES (read-only, nothing to initialise)
+-- Assessment types are defined in application code (ASSESSMENT_TYPES in
+-- frontend/js/utils.js) and the app inserts any missing rows automatically on
+-- login, so there is NO seed step and no manual initialisation.
+-- These queries only help you review what is currently stored.
 -- ============================================================================
-INSERT INTO assessment_types (name, code, description, default_maximum_mark, weight, contributes_to_combined, display_order, status, period_hint, is_standard)
-SELECT * FROM (VALUES
-  ('CAT','CAT','Continuous assessment test',20,NULL::NUMERIC,TRUE,1,'active',NULL,TRUE),
-  ('Weekly Test','WKT','Weekly classroom test',10,NULL::NUMERIC,TRUE,2,'active','week',TRUE),
-  ('Monthly Test','MLT','Monthly assessment',20,NULL::NUMERIC,TRUE,3,'active','month',TRUE),
-  ('Beginning Exam','BOT','Beginning of term examination',50,NULL::NUMERIC,TRUE,4,'active','term',TRUE),
-  ('Mid-Term Exam','MTE','Mid-term examination',50,NULL::NUMERIC,TRUE,5,'active','term',TRUE),
-  ('End of Term Exam','EOT','End of term examination',100,NULL::NUMERIC,TRUE,6,'active','term',TRUE),
-  ('End of Unit','EOU','End-of-unit assessment',30,NULL::NUMERIC,TRUE,7,'active','unit',TRUE),
-  ('Quiz','QUIZ','Short quiz',20,NULL::NUMERIC,TRUE,8,'active',NULL,TRUE),
-  ('Assignment','ASGMT','Take-home assignment',20,NULL::NUMERIC,TRUE,9,'active',NULL,TRUE),
-  ('Practical','PRAC','Practical assessment',30,NULL::NUMERIC,TRUE,10,'active',NULL,TRUE),
-  ('Class Exercise','CEXE','Class exercise',10,NULL::NUMERIC,TRUE,11,'active',NULL,TRUE),
-  ('Homework','HW','Homework',10,NULL::NUMERIC,TRUE,12,'active',NULL,TRUE),
-  ('Oral','ORAL','Oral assessment',10,NULL::NUMERIC,TRUE,13,'active',NULL,TRUE),
-  ('Other','OTHER','Other assessment',30,NULL::NUMERIC,TRUE,14,'active','other',TRUE)
-) AS v (name, code, description, default_maximum_mark, weight, contributes_to_combined, display_order, status, period_hint, is_standard)
-WHERE NOT EXISTS (
-  SELECT 1 FROM assessment_types t
-  WHERE lower(btrim(t.name)) = lower(btrim(v.name))
-    OR lower(btrim(t.code)) = lower(btrim(v.code))
-);
 
--- 6a. Types now present, with how many assessments use each.
---     assessments_in_use = 0 means the type is safe to remove by hand.
+-- 6a. Types currently stored, with how many assessments use each.
+--     assessments_in_use = 0 means the type is unreferenced.
 SELECT t.id, t.name, t.code, t.default_maximum_mark, t.status,
        (SELECT count(*) FROM assessments a WHERE a.assessment_type_id = t.id) AS assessments_in_use
 FROM assessment_types t
@@ -229,23 +199,12 @@ ORDER BY t.display_order, t.name;
 
 -- 6b. REVIEW ONLY - assessments with no type, or pointing at a missing type.
 --     These are left untouched on purpose; assign a type by hand after review.
-SELECT a.id, a.name, a.status, a.assessment_date, a.class_id,
+SELECT a.id, a.name, a.status, a.assessment_date,
        CASE WHEN a.assessment_type_id IS NULL THEN 'no type set' ELSE 'type row missing' END AS issue
 FROM assessments a
 LEFT JOIN assessment_types t ON t.id = a.assessment_type_id
 WHERE a.assessment_type_id IS NULL OR t.id IS NULL
 ORDER BY a.assessment_date DESC;
-
--- 6c. Duplicate names or codes (should return no rows).
-SELECT lower(btrim(name)) AS name_key, count(*) AS occurrences
-FROM assessment_types GROUP BY 1 HAVING count(*) > 1;
-
--- 6d. If 6c finds a duplicate that no assessment uses, remove it explicitly:
---     DELETE FROM assessment_types t WHERE t.name = '<exact name>'
---       AND NOT EXISTS (SELECT 1 FROM assessments a WHERE a.assessment_type_id = t.id);
---     assessments.assessment_type_id is REFERENCES ... (no cascade), so a type
---     that IS in use cannot be deleted by accident.
-
 
 -- ============================================================================
 -- BLOCK 7 — REPAIR MISSING TABLE GRANTS (fixes HTTP 403)
@@ -319,10 +278,10 @@ WHERE lower(email) = 'honoretechgroup@gmail.com';
 
 -- ============================================================================
 -- BLOCK 9 — VERIFY (read-only)
--- Run these after blocks 1-8.
+-- Run these after the blocks above.
 -- ============================================================================
 
--- 6a. Did every object land? Expect 0 rows.
+-- 9a. Did every object land? Expect 0 rows.
 -- (cast to text: to_regclass and to_regprocedure return different types)
 SELECT 'missing objects' AS check_name, count(*) AS problems FROM (
   SELECT to_regprocedure('public.rms_dos_level_audit()')::text AS o
@@ -331,14 +290,14 @@ SELECT 'missing objects' AS check_name, count(*) AS problems FROM (
   UNION ALL SELECT to_regprocedure('public.rms_release_fk_refs(regclass,uuid)')::text
 ) x WHERE o IS NULL;
 
--- 6b. DOS accounts and their level. READ THIS BEFORE ANYTHING ELSE.
+-- 9b. DOS accounts and their level. READ THIS BEFORE ANYTHING ELSE.
 SELECT * FROM public.rms_dos_level_audit();
 
--- 6c. Every restrictive level guard should still be installed (expect 8 rows).
+-- 9c. Every restrictive level guard should still be installed (expect 8 rows).
 SELECT tablename, policyname FROM pg_policies
 WHERE policyname = 'rms_dos_level_guard' ORDER BY tablename;
 
--- 6d. Assessment types must be present (expect 13 or more).
+-- 9d. The four canonical types must be present (CAT, Monthly Test, Weekly Test, Beginning Exam).
 SELECT count(*) AS assessment_types_total FROM public.assessment_types;
 SELECT name, code, default_maximum_mark, status FROM public.assessment_types ORDER BY display_order;
 

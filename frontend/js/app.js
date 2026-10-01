@@ -387,6 +387,9 @@ async function showApp() {
   Sidebar.init();
   registerRoutes();
   Router.init();
+  // Canonical assessment types are defined in code; quietly ensure their rows
+  // exist so every dropdown is populated. Additive, best-effort, never blocks.
+  try { await Utils.ensureAssessmentTypes(); } catch (e) { /* non-fatal */ }
   if (typeof Realtime !== 'undefined') Realtime.init();
 if (typeof NotificationCenter !== 'undefined') {
       NotificationCenter.init();

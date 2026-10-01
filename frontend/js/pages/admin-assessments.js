@@ -2,6 +2,28 @@ let assessFilter = 'all';
 let assessEduLevel = 'all';
 let asfTypes = [];
 
+/* Build the Assessment Type dropdown from the canonical ASSESSMENT_TYPES
+   constant, resolving each name to its assessment_types row so the existing
+   assessments.assessment_type_id foreign key keeps working unchanged. */
+function asfCanonicalOptions() {
+  const canonical = (typeof ASSESSMENT_TYPES !== 'undefined' ? ASSESSMENT_TYPES : Utils.ASSESSMENT_TYPES) || [];
+  return canonical.map((name, i) => {
+    const row = Utils.findTypeRowByName(asfTypes, name);
+    const fallback = (Utils.ASSESSMENT_TYPE_DEFAULTS || {})[name] || {};
+    const max = row ? (row.default_maximum_mark ?? fallback.max ?? 30) : (fallback.max ?? 30);
+    const val = row ? row.id : '';
+    return `<option value="${val}" data-default-max="${max}" ${i === 0 ? 'selected' : ''}>${Utils.escapeHtml(name)}</option>`;
+  }).join('');
+}
+
+function asfDefaultMaxMark() {
+  const first = (typeof ASSESSMENT_TYPES !== 'undefined' ? ASSESSMENT_TYPES : Utils.ASSESSMENT_TYPES)?.[0];
+  if (!first) return 30;
+  const row = Utils.findTypeRowByName(asfTypes, first);
+  if (row && row.default_maximum_mark != null) return row.default_maximum_mark;
+  return (Utils.ASSESSMENT_TYPE_DEFAULTS || {})[first]?.max ?? 30;
+}
+
 async function renderAssessments() {
   setHeader('Assessment Approval', 'Review, approve, or reject teacher-submitted assessments');
   setContent(Utils.loading());
@@ -150,12 +172,15 @@ async function assessView(id) {
 }
 
 async function assessForm() {
+  // Make sure the canonical types exist before the dropdown is built, so it is
+  // never empty. Additive + best-effort; no manual step required.
+  await Utils.ensureAssessmentTypes();
   const [teachers, classes, subjects, years, terms, types] = await Promise.all([
     DB.query('teachers', '*', { status: 'active' }), DB.get('classes'),
     DB.query('subjects', '*', { status: 'active' }), DB.get('academic_years'), DB.get('terms'),
-    getAssessmentTypes()
+    sbClient.from('assessment_types').select('*').then(r => r.data || []).catch(() => [])
   ]);
-  asfTypes = types.filter(t => t.status === 'active');
+  asfTypes = (types || []).filter(t => t.status === 'active');
   const scoped = typeof Scope !== 'undefined' && Scope.isScoped();
   const scopedClasses = scoped ? Scope.filterClasses(classes) : classes;
   const scopedSubjects = scoped ? Scope.filterSubjects(subjects) : subjects;
@@ -183,7 +208,7 @@ async function assessForm() {
     ${scoped ? `<div class="alert alert-info" style="margin-bottom:12px"><i data-lucide="shield-check"></i> Creating for <strong>${Utils.escapeHtml(Scope.label())}</strong> — only ${scoped ? Scope.label() : ''} classes/subjects are listed.</div>` : ''}
     <div class="asf-section">
       <div class="asf-section-title"><i data-lucide="file-text" style="width:14px;height:14px"></i> 1 — What is the assessment?</div>
-      <div class="form-group"><label>Assessment Type <span class="required">*</span></label><select id="asf-type" class="select-field" onchange="assessTypeChanged()">${asfTypes.map((t, i) => `<option value="${t.id}" data-default-max="${t.default_maximum_mark ?? ''}" ${i === 0 ? 'selected' : ''}>${Utils.escapeHtml(t.name)}${t.weight != null ? ' (w=' + t.weight + ')' : ''}</option>`).join('')}</select></div>
+      <div class="form-group"><label>Assessment Type <span class="required">*</span></label><select id="asf-type" class="select-field" onchange="assessTypeChanged()">${asfCanonicalOptions()}</select></div>
       <div id="asf-period-fields"></div>
       <div class="asf-preview"><i data-lucide="eye" style="width:13px;height:13px;vertical-align:middle;margin-right:4px"></i>Will display as: <strong id="asf-display-preview"></strong></div>
     </div>
@@ -198,7 +223,7 @@ async function assessForm() {
       <div class="form-row"><div class="form-group"><label>Academic Year <span class="required">*</span></label><select id="asf-year" class="select-field"><option value="">Select year</option>${years.map(y => `<option value="${y.id}" ${y.id === selYear ? 'selected' : ''}>${Utils.escapeHtml(y.name)}</option>`).join('')}</select></div>
       <div class="form-group"><label>Term <span class="required">*</span></label><select id="asf-term" class="select-field" onchange="asfUpdatePreview()"><option value="">Select term</option>${yearTerms.map(t => `<option value="${t.id}" ${t.id === selTerm ? 'selected' : ''}>${Utils.escapeHtml(t.name)}</option>`).join('')}</select></div></div>
       <div class="form-row">
-        <div class="form-group"><label>Maximum Mark <span class="required">*</span></label><input id="asf-max" type="number" class="input-field" value="${asfTypes[0]?.default_maximum_mark ?? 30}" min="1" max="100"></div>
+        <div class="form-group"><label>Maximum Mark <span class="required">*</span></label><input id="asf-max" type="number" class="input-field" value="${asfDefaultMaxMark()}" min="1" max="100"></div>
         <div class="form-group"><label>Weight <span class="text-muted">(optional, blank = type default)</span></label><input id="asf-weight" type="number" min="0" step="any" class="input-field" placeholder="e.g., 0.3"></div>
       </div>
       <div class="form-group"><label>Date <span class="required">*</span></label><input id="asf-date" type="date" class="input-field" value="${new Date().toISOString().split('T')[0]}"></div>
@@ -234,7 +259,18 @@ function assessTypeChanged() {
 
 function asfSelectedType() {
   const sel = document.getElementById('asf-type');
-  return asfTypes.find(t => String(t.id) === String(sel && sel.value)) || null;
+  if (!sel) return null;
+  const byId = asfTypes.find(t => String(t.id) === String(sel.value));
+  if (byId) return byId;
+  // Fall back to the canonical name so labels/period hints still work even if
+  // the option carries no id (row not present yet).
+  const opt = sel.selectedOptions && sel.selectedOptions[0];
+  const name = opt ? (opt.textContent || '').trim() : '';
+  if (name && Utils.isCanonicalType(name)) {
+    const d = (Utils.ASSESSMENT_TYPE_DEFAULTS || {})[name] || {};
+    return { id: '', name, code: Utils.assessmentTypeCode(name), default_maximum_mark: d.max ?? 30, period_hint: d.hint ?? null };
+  }
+  return null;
 }
 
 function asfUnitNumberValue() {

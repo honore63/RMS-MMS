@@ -1,3 +1,34 @@
+/* ============================================================
+   CANONICAL ASSESSMENT TYPES
+   The single source of truth for which assessment types RMS-MIS
+   offers. Every dropdown, filter and validator reads this list,
+   so the options are always available with no database seed and
+   no manual initialisation step.
+
+   Storage note: assessments.assessment_type_id is a UUID that
+   references assessment_types(id), and that column is preserved.
+   The constant below defines the CANONICAL SET; ensureAssessmentTypes()
+   quietly makes sure a matching row exists for each entry (insert only,
+   never delete/rename), and the UI maps constant name -> row id on save.
+   Legacy types already used by existing assessments keep working and are
+   still displayed in lists/reports, because those resolve the name from
+   the stored row.
+   ============================================================ */
+const ASSESSMENT_TYPES = [
+  'CAT',
+  'Monthly Test',
+  'Weekly Test',
+  'Beginning Exam'
+];
+
+/* Default maximum mark + period hint per canonical type. */
+const ASSESSMENT_TYPE_DEFAULTS = {
+  'CAT': { max: 20, hint: null },
+  'Monthly Test': { max: 20, hint: 'month' },
+  'Weekly Test': { max: 10, hint: 'week' },
+  'Beginning Exam': { max: 50, hint: 'term' }
+};
+
 const Utils = {
   _gradingCache: null,
   _gradingPromise: null,
@@ -115,8 +146,10 @@ const Utils = {
   MONTH_LONG: ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'],
 
   ASSESSMENT_TYPE_HINTS: {
-    'Weekly Test': 'week',
+    'CAT': null,
     'Monthly Test': 'month',
+    'Weekly Test': 'week',
+    'Beginning Exam': 'term',
     'Beginning of Term Exam': 'term',
     'Mid-Term Exam': 'term',
     'End of Term Exam': 'term',
@@ -124,8 +157,72 @@ const Utils = {
     'Other': 'other'
   },
 
-  /* Fallback hint map so the conditional creation form works even before the
-     DB migration has added assessment_types.period_hint. */
+  /* -------- Canonical assessment types -------- */
+
+  ASSESSMENT_TYPES,
+  ASSESSMENT_TYPE_DEFAULTS,
+
+  isCanonicalType(name) {
+    const n = (name || '').trim().toLowerCase();
+    return ASSESSMENT_TYPES.some(t => t.toLowerCase() === n);
+  },
+
+  /* Resolve a canonical name to the assessment_types row that stores it.
+     Matches on name first, then on the derived code, so a row created
+     before the canonical list existed is reused instead of duplicated. */
+  findTypeRowByName(types, name) {
+    if (!Array.isArray(types)) return null;
+    const target = (name || '').trim().toLowerCase();
+    if (!target) return null;
+    return types.find(t => (t.name || '').trim().toLowerCase() === target)
+        || types.find(t => Utils.assessmentTypeCode(t.name) === Utils.assessmentTypeCode(name))
+        || null;
+  },
+
+  /* Short stable code for a canonical type name (CAT, MLT, WKT, BOT). */
+  assessmentTypeCode(name) {
+    const n = (name || '').trim().toLowerCase();
+    if (n === 'cat') return 'CAT';
+    if (n === 'monthly test') return 'MLT';
+    if (n === 'weekly test') return 'WKT';
+    if (n === 'beginning exam' || n === 'beginning of term exam') return 'BOT';
+    return (name || '').replace(/[^A-Za-z]/g, '').slice(0, 4).toUpperCase();
+  },
+
+  /* Makes sure a row exists for every canonical type. Purely additive:
+     inserts only what is missing, never renames or deletes anything.
+     Best-effort: a non-DOS caller is simply denied by RLS and we carry on
+     using whatever rows already exist. */
+  async ensureAssessmentTypes() {
+    if (typeof sbClient === 'undefined') return [];
+    let existing = [];
+    try { existing = (await sbClient.from('assessment_types').select('*'))?.data || []; }
+    catch (e) { return []; }
+    const missing = ASSESSMENT_TYPES
+      .filter(n => !Utils.findTypeRowByName(existing, n))
+      .map(n => {
+        const d = ASSESSMENT_TYPE_DEFAULTS[n] || { max: 30, hint: null };
+        return {
+          name: n, code: Utils.assessmentTypeCode(n),
+          description: n === 'CAT' ? 'Continuous assessment test' : n,
+          default_maximum_mark: d.max, weight: null,
+          contributes_to_combined: true, display_order: ASSESSMENT_TYPES.indexOf(n) + 1,
+          status: 'active', period_hint: d.hint, is_standard: true
+        };
+      });
+    if (missing.length) {
+      try { await sbClient.from('assessment_types').insert(missing); }
+      catch (e) { /* RLS/permission: harmless, rows may already exist */ }
+    }
+    try {
+      const { data } = await sbClient.from('assessment_types').select('*');
+      if (Array.isArray(data) && data.length) Utils.assessmentTypesCache = data;
+    } catch (e) { /* ignore */ }
+    return Utils.assessmentTypesCache || existing;
+  },
+
+  /* Default hint map so the conditional creation form works even before the
+   DB migration has added assessment_types.period_hint. */
   getTypePeriodHint(typeOrName) {
     if (!typeOrName) return null;
     if (typeof typeOrName === 'object') {
