@@ -13,7 +13,7 @@
 --   and policies. Nothing here deletes or rewrites school records.
 --
 -- HOW TO APPLY
---   Run blocks 1-5 in order. Each block is self-contained; a failure in one
+--   Run blocks 1-6 in order. Each block is self-contained; a failure in one
 --   block does not invalidate the others.
 --
 -- REMOVED: the password_recovery_attempts table (and the /api/auth/recover
@@ -183,8 +183,37 @@ REVOKE EXECUTE ON FUNCTION public.rms_delete_teacher(UUID) FROM anon;
 
 
 -- ============================================================================
--- BLOCK 6 — VERIFY (read-only)
--- Run these after blocks 1-5.
+-- BLOCK 6 — RESTORE STANDARD ASSESSMENT TYPES
+-- The 13 standard assessment types are seeded by the master script. If the
+-- live database was built without that seed section the table is empty, the
+-- Assessment Types page reports nothing available, and assessment creation has
+-- no category to choose. This block is idempotent (ON CONFLICT DO UPDATE).
+-- Run it whenever SELECT count(*) FROM assessment_types returns 0.
+-- ============================================================================
+INSERT INTO assessment_types (name, code, description, default_maximum_mark, weight, contributes_to_combined, display_order, status, period_hint, is_standard)
+SELECT * FROM (VALUES
+  ('Weekly Test','WKT','Weekly classroom test',10,NULL,TRUE,1,'active','week',TRUE),
+  ('Monthly Test','MLT','Monthly assessment',20,NULL,TRUE,2,'active','month',TRUE),
+  ('Beginning of Term Exam','BOT','Beginning of term examination',50,NULL,TRUE,3,'active','term',TRUE),
+  ('Mid-Term Exam','MTE','Mid-term examination',50,NULL,TRUE,4,'active','term',TRUE),
+  ('End of Term Exam','EOT','End of term examination',100,NULL,TRUE,5,'active','term',TRUE),
+  ('Quiz','QUIZ','Short quiz',20,NULL,TRUE,6,'active',NULL,TRUE),
+  ('Assignment','ASGMT','Take-home assignment',20,NULL,TRUE,7,'active',NULL,TRUE),
+  ('Practical','PRAC','Practical assessment',30,NULL,TRUE,8,'active',NULL,TRUE),
+  ('Class Exercise','CEXE','Class exercise',10,NULL,TRUE,9,'active',NULL,TRUE),
+  ('Homework','HW','Homework',10,NULL,TRUE,10,'active',NULL,TRUE),
+  ('Oral','ORAL','Oral assessment',10,NULL,TRUE,11,'active',NULL,TRUE),
+  ('End of Unit','EOU','End-of-unit assessment',30,NULL,TRUE,12,'active','unit',TRUE),
+  ('Other','OTHER','Other assessment',30,NULL,TRUE,13,'active','other',TRUE)
+) AS v (name, code, description, default_maximum_mark, weight, contributes_to_combined, display_order, status, period_hint, is_standard)
+ON CONFLICT (name) DO UPDATE SET code = EXCLUDED.code, description = EXCLUDED.description,
+  default_maximum_mark = EXCLUDED.default_maximum_mark, display_order = EXCLUDED.display_order,
+  status = EXCLUDED.status, period_hint = EXCLUDED.period_hint, is_standard = EXCLUDED.is_standard;
+
+
+-- ============================================================================
+-- BLOCK 7 — VERIFY (read-only)
+-- Run these after blocks 1-6.
 -- ============================================================================
 
 -- 6a. Did every object land? Expect 0 rows.
@@ -203,11 +232,15 @@ SELECT * FROM public.rms_dos_level_audit();
 SELECT tablename, policyname FROM pg_policies
 WHERE policyname = 'rms_dos_level_guard' ORDER BY tablename;
 
+-- 6d. Assessment types must be present (expect 13 or more).
+SELECT count(*) AS assessment_types_total FROM public.assessment_types;
+SELECT name, code, default_maximum_mark, status FROM public.assessment_types ORDER BY display_order;
+
 
 -- ============================================================================
--- BLOCK 7 — OPTIONAL, DO NOT RUN YET
+-- BLOCK 8 — OPTIONAL, DO NOT RUN YET
 -- Fail-closed behaviour (a DOS with NULL/invalid education_level gets no
 -- level-specific access) lives in a separate file on purpose:
 --   backend/sql/optional_dos_fail_closed.sql
--- Only run it after 6b shows every DOS row reading "OK - isolated to ...".
+-- Only run it after 7b shows every DOS row reading "OK - isolated to ...".
 -- ============================================================================
