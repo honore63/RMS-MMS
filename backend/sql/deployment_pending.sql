@@ -278,7 +278,7 @@ WHERE lower(email) = 'dos2@rukara.edu';
 -- NULL education_level = global super admin: rms_dos_can_level() returns true
 -- for every level, so this account sees and manages the whole school.
 UPDATE public.users SET role = 'dos', status = 'active', education_level = NULL
-WHERE lower(email) = 'honoreetechgroup@gmail.com';
+WHERE lower(email) = 'honoretechgroup@gmail.com';
 
 
 -- ============================================================================
