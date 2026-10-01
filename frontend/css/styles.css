@@ -227,7 +227,8 @@ td {
   height: 100dvh;
   max-height: 100vh;
   max-height: 100dvh;
-  overflow: hidden;
+  overflow-x: hidden;
+  overflow-y: auto;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -260,6 +261,7 @@ td {
 .login-shell {
   position: relative;
   z-index: 1;
+  margin: auto;
   display: grid;
   grid-template-columns: 1.05fr 1fr;
   width: 100%;
@@ -508,7 +510,8 @@ td {
   .login-brand-mid { text-align: center; }
   .login-brand-tagline { margin-left: auto; margin-right: auto; }
   .login-features { align-items: center; }
-  .login-brand-bottom { display: none; }
+  .login-brand-bottom { display: flex; flex-direction: column; align-items: center; }
+  .login-contact { display: none; }
   .login-auth { padding: 36px 32px 26px; }
 }
 @media (max-width: 480px) {
@@ -4235,7 +4238,7 @@ body.report-orientation-portrait .report-paper-container {
 @media (max-width: 640px) {
   .login-shell {
     width: 95vw;
-    margin: 0 auto;
+    margin: auto;
   }
   .login-brand-title {
     font-size: 24px !important;
