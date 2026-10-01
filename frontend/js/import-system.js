@@ -160,16 +160,45 @@ const ImportSystem = (() => {
 
   function cellText(raw, text) {
     const t = String(text == null ? '' : text).trim();
-    if (typeof raw === 'number' && /[eE]/.test(t)) t.replace(/[eE].*$/, '');
+    // When Excel/SheetJS renders a large number in scientific notation (e.g. 5.41023E+11),
+    // use the raw numeric value converted to a full integer string instead.
+    if (typeof raw === 'number' && /[eE]\+?\d/.test(t)) {
+      return String(Math.round(raw));
+    }
     return t;
   }
 
+  function extractHeaderMeta(rows) {
+    let metaClass = '';
+    for (let r = 0; r < Math.min(rows.length, 12); r++) {
+      const rowArr = rows[r] || [];
+      for (let c = 0; c < rowArr.length; c++) {
+        const val = String(rowArr[c] == null ? '' : rowArr[c]).trim();
+        if (/^Class:\s*/i.test(val)) {
+          metaClass = val.replace(/^Class:\s*/i, '').trim();
+        } else if (val.toLowerCase() === 'class:' && c + 1 < rowArr.length) {
+          metaClass = String(rowArr[c + 1] == null ? '' : rowArr[c + 1]).trim();
+        }
+      }
+    }
+    return { metaClass };
+  }
+
   function buildSheetRows(textRows, rawRows) {
-    if (!textRows.length) return { headers: [], rows: [] };
-    const headers = textRows[0].map(h => String(h == null ? '' : h).trim());
+    if (!textRows.length) return { headers: [], rows: [], meta: {} };
+    const meta = extractHeaderMeta(textRows);
+    let headerIdx = 0;
+    for (let r = 0; r < Math.min(textRows.length, 15); r++) {
+      const rowStr = (textRows[r] || []).map(c => String(c == null ? '' : c).trim()).join(' ');
+      if (rowStr.includes('Student Code') || rowStr.includes('Learner Code') || rowStr.includes('Registration Number') || (rowStr.includes('Code') && rowStr.includes('Name'))) {
+        headerIdx = r;
+        break;
+      }
+    }
+    const headers = textRows[headerIdx].map(h => String(h == null ? '' : h).trim());
     const width = headers.length;
     const rows = [];
-    for (let r = 1; r < textRows.length; r++) {
+    for (let r = headerIdx + 1; r < textRows.length; r++) {
       const tr = textRows[r] || [];
       const rr = rawRows[r] || [];
       const row = [];
@@ -177,7 +206,7 @@ const ImportSystem = (() => {
       if (row.every(v => v === '')) continue;
       rows.push(row);
     }
-    return { headers, rows };
+    return { headers, rows, meta };
   }
 
   function parseCSV(text) {
@@ -203,7 +232,16 @@ const ImportSystem = (() => {
       result.push(current.trim());
       return result;
     };
-    return { headers: parseRow(lines[0]), rows: lines.slice(1).map(parseRow) };
+    const parsedLines = lines.map(parseRow);
+    let headerIdx = 0;
+    for (let r = 0; r < Math.min(parsedLines.length, 15); r++) {
+      const rowStr = (parsedLines[r] || []).join(' ');
+      if (rowStr.includes('Student Code') || rowStr.includes('Learner Code') || rowStr.includes('Registration Number') || (rowStr.includes('Code') && rowStr.includes('Name'))) {
+        headerIdx = r;
+        break;
+      }
+    }
+    return { headers: parsedLines[headerIdx], rows: parsedLines.slice(headerIdx + 1) };
   }
 
   function readFile(file) {
@@ -380,6 +418,7 @@ const ImportSystem = (() => {
     noun: 'students',
     table: 'learners',
     allowUpdate: true,
+    collisionKey: 'learner_code',
     roles: ['dos'],
     view: 'admin/learners',
     filename: 'Student_Import_Template',
@@ -387,10 +426,10 @@ const ImportSystem = (() => {
       { key: 'student_code', label: 'Student Code', req: true, type: 'code11', aliases: ['studentcode', 'studentnumber', 'studentno', 'learnercode', 'admissionnumber', 'admissionno', 'regnumber', 'indexno', 'nationalid', 'sn', 'code'] },
       { key: 'first_name', label: 'First Name', req: false, type: 'text', aliases: ['firstname', 'first', 'givenname'] },
       { key: 'last_name', label: 'Last Name', req: false, type: 'text', aliases: ['lastname', 'last', 'surname', 'familyname'] },
-      { key: 'student_name', label: 'Student Name', req: false, type: 'text', aliases: ['studentname', 'fullname', 'fullnames', 'name', 'names', 'learnername'] },
-      { key: 'gender', label: 'Gender', req: true, type: 'gender', aliases: ['gender', 'sex'] },
+      { key: 'student_name', label: 'Student Name', req: true, type: 'text', aliases: ['studentname', 'fullname', 'fullnames', 'name', 'names', 'learnername', 'student_name'] },
+      { key: 'gender', label: 'Gender', req: false, type: 'gender', aliases: ['gender', 'sex'] },
       { key: 'date_of_birth', label: 'Date of Birth', req: false, type: 'date', aliases: ['dateofbirth', 'dob', 'birthdate', 'birthday', 'birth'] },
-      { key: 'class', label: 'Class', req: true, type: 'class', aliases: ['class', 'classname', 'classroom', 'grade', 'section'] },
+      { key: 'class', label: 'Class', req: false, type: 'class', aliases: ['class', 'classname', 'classroom', 'grade', 'section'] },
       { key: 'stream', label: 'Stream', req: false, type: 'stream', aliases: ['stream', 'div', 'division'] },
       { key: 'academic_year', label: 'Academic Year', req: false, type: 'year', aliases: ['academicyear', 'year', 'acyear', 'schoolyear'] }
     ],
@@ -403,24 +442,22 @@ const ImportSystem = (() => {
       'Student Code may be 11 or 12 digits and must be formatted as TEXT.',
       'Formatting the code as text is critical: it stops Excel from turning long numeric codes into scientific notation.',
       'Codes such as 12345, 5410232501 or ABC54102325012 are rejected.',
-      'Use either "Student Name" alone OR "First Name" + "Last Name".',
-      'Gender: MALE or FEMALE (M / F also accepted).',
-      'Class: an existing RMS class such as P4A, or a grade like P4 plus a Stream like A.',
-      'Academic Year: e.g. 2026-2027. Leave blank to use the active year.',
+      'Use either "Student Name" / "Names" alone OR "First Name" + "Last Name".',
+      'Class: an existing RMS class such as P4A (or auto-detected from SDMS header header info like Class: P2A).',
       'Rows with errors are NEVER imported. Use Download Error Report to fix and re-upload.'
     ],
     load: async function (ctx) {
       const [years, classes, learners] = await Promise.all([
         DB.get('academic_years'),
         DB.get('classes'),
-        DB.query('learners', 'learner_code', {}, null, null)
+        DB.getFreshQuery('learners', 'learner_code', {}, null, null)
       ]);
       ctx.years = years;
       ctx.classes = classes;
       ctx.classesByNorm = {};
       classes.forEach(c => { ctx.classesByNorm[normKey(c.name)] = c.id; });
       ctx.learnersByCode = {};
-      (learners || []).forEach(l => { ctx.learnersByCode[lower(l.learner_code)] = true; });
+      (learners || []).forEach(l => { ctx.learnersByCode[lower(l.learner_code)] = l; });
     },
     validate: function (rec, ctx) {
       const v = rec.values;
@@ -432,31 +469,35 @@ const ImportSystem = (() => {
       }
       const combined = (v.first_name + ' ' + v.last_name).trim();
       const fullName = combined || v.student_name.trim();
-      if (!fullName) rec.errors.push({ field: 'student_name', message: 'Missing student name.', fix: 'Provide "Student Name" or "First Name" + "Last Name".' });
-      const gender = normalizeGender(v.gender);
-      if (!v.gender.trim()) rec.errors.push({ field: 'gender', message: 'Missing gender.', fix: 'Use MALE or FEMALE.' });
-      else if (!gender) rec.errors.push({ field: 'gender', message: 'Invalid gender.', fix: 'Use MALE, FEMALE, M or F.' });
+      if (!fullName) rec.errors.push({ field: 'student_name', message: 'Missing student name.', fix: 'Provide "Student Name" or "Names".' });
+      const gender = normalizeGender(v.gender) || 'M';
+      if (v.gender.trim() && !normalizeGender(v.gender)) {
+        rec.errors.push({ field: 'gender', message: 'Invalid gender.', fix: 'Use MALE, FEMALE, M or F.' });
+      }
       let dob = null;
       if (v.date_of_birth.trim()) {
         dob = parseDateStr(v.date_of_birth);
         if (!dob) rec.errors.push({ field: 'date_of_birth', message: 'Invalid Date of Birth.', fix: 'Use YYYY-MM-DD or DD/MM/YYYY.' });
       }
-      const cls = resolveClass(v.class, v.stream, ctx);
-      if (!v.class.trim()) rec.errors.push({ field: 'class', message: 'Missing class.', fix: 'Add the student\u2019s class, e.g. P4A.' });
-      else if (!cls.id) rec.errors.push({ field: 'class', message: 'Class ' + v.class + ' does not exist in RMS.', fix: 'Create the class in Academic Setup or correct the class name.' });
+      const rawClassStr = (STATE.selection && STATE.selection.targetClass) || v.class.trim() || (STATE.parsed && STATE.parsed.meta && STATE.parsed.meta.metaClass) || '';
+      const cls = resolveClass(rawClassStr, v.stream, ctx);
+      if (!rawClassStr) rec.errors.push({ field: 'class', message: 'Missing class.', fix: 'Select a target class in the dropdown or include a Class column.' });
+      else if (!cls.id) rec.errors.push({ field: 'class', message: 'Class ' + rawClassStr + ' does not exist in RMS.', fix: 'Create the class in Academic Setup or select a valid class.' });
       const year = resolveYear(v.academic_year, ctx, true);
       if (!v.academic_year.trim() && !year && (ctx.years || []).length) {
         rec.errors.push({ field: 'academic_year', message: 'No active academic year to default to.', fix: 'Set a current year first, then re-import.' });
       }
       rec.dupKey = code.toLowerCase();
       let status = rec.errors.length ? 'error' : 'ready';
-      if (ctx.learnersByCode[rec.dupKey]) {
+      const existingLearner = ctx.learnersByCode[rec.dupKey];
+      if (existingLearner && status === 'ready') {
         status = 'exists';
+        rec.existingId = existingLearner.id;
         rec.errors = [{ field: 'student_code', message: 'Student Code already registered.', fix: 'No action needed, or choose "Update existing records" at import time.' }];
       }
       rec.status = status;
-      if (status === 'ready') {
-        rec.dbRow = { learner_code: code, full_name: fullName.toUpperCase(), gender: gender, class_id: cls.id, academic_year_id: year ? year.id : null, date_of_birth: dob, status: 'active' };
+      if (status === 'ready' || status === 'exists') {
+        rec.dbRow = { learner_code: code, full_name: fullName.toUpperCase(), gender: gender, class_id: cls.id, academic_year_id: year ? year.id : null, status: 'active' };
       }
     }
   },
@@ -466,6 +507,7 @@ const ImportSystem = (() => {
     noun: 'teachers',
     table: 'teachers',
     allowUpdate: true,
+    collisionKey: 'teacher_code',
     roles: ['dos'],
     view: 'admin/teachers',
     filename: 'Teacher_Import_Template',
@@ -1091,9 +1133,24 @@ const ImportSystem = (() => {
     API.renderStep1(DEFS.marks);
   };
 
-  API.renderStep1 = def => {
+  API.renderStep1 = async def => {
+    let classSelectHtml = '';
+    if (STATE.type === 'students') {
+      try {
+        const classes = await DB.get('classes');
+        classSelectHtml = `
+          <div class="form-group" style="margin-bottom:14px;background:var(--gray-50);padding:10px 12px;border-radius:var(--radius);border:1px solid var(--gray-200)">
+            <label style="font-weight:600;font-size:13px;color:var(--gray-700)">Target Class (Optional override) <span class="text-xs text-muted" style="font-weight:400">— If your list has no class column, select target class here</span></label>
+            <select id="imp-target-class" class="select-field" style="margin-top:4px" onchange="ImportSystem.setTargetClass(this.value)">
+              <option value="">-- Auto-detect from file or default --</option>
+              ${classes.map(c => `<option value="${es(c.name)}">${es(c.name)}</option>`).join('')}
+            </select>
+          </div>`;
+      } catch (e) {}
+    }
     Modal.show(def.title, `
       ${stepHtml(1)}
+      ${classSelectHtml}
       <div class="flex justify-between items-center" style="flex-wrap:wrap;gap:8px;margin-bottom:12px">
         <p class="text-sm text-muted" style="margin:0">Upload a spreadsheet. Required columns: <strong>${def.columns.filter(c => c.req).map(c => c.label).join(', ')}</strong>.</p>
         <button class="btn btn-secondary" onclick="ImportSystem.downloadTemplate()"><i data-lucide="download"></i> Download Template</button>
@@ -1109,6 +1166,14 @@ const ImportSystem = (() => {
       `<button class="btn btn-secondary" onclick="Modal.close()">Cancel</button>`, true);
     API.bindDropzone();
     if (typeof lucide !== 'undefined') lucide.createIcons();
+  };
+
+  API.setTargetClass = val => {
+    STATE.selection.targetClass = val || null;
+    if (STATE.dataRows && STATE.dataRows.length) {
+      validateAll(DEFS[STATE.type]);
+      API.renderPreview();
+    }
   };
 
   API.bindDropzone = () => {
@@ -1381,9 +1446,18 @@ const ImportSystem = (() => {
       const batchSize = 50;
       for (let i = 0; i < insert.length; i += batchSize) {
         const batch = insert.slice(i, i + batchSize);
-        const { error } = await sbClient.from(def.table).insert(batch);
-        if (error) throw error;
-        imported += batch.length;
+        let added = batch.length;
+        if (def.collisionKey) {
+          const { data, error } = await sbClient.from(def.table)
+            .upsert(batch, { onConflict: def.collisionKey, ignoreDuplicates: true })
+            .select(def.collisionKey);
+          if (error) throw error;
+          added = (data && data.length) ? data.length : batch.length;
+        } else {
+          const { error } = await sbClient.from(def.table).insert(batch);
+          if (error) throw error;
+        }
+        imported += added;
         setProgress(imported + updated);
       }
       for (const u of update) {
@@ -1406,15 +1480,15 @@ const ImportSystem = (() => {
     try {
       const c = STATE.counts;
       const year = (STATE.ctx.years || []).find(y => y.status === 'active' || y.is_current);
-      await DB.insert('audit_logs', {
+      await sbClient.from('audit_logs').insert([{
         user_id: Auth.currentUser && Auth.currentUser.id,
         user_name: Auth.currentUser && Auth.currentUser.full_name,
         role: Auth.currentUser && Auth.currentUser.role,
         action: 'import_' + def.table,
         new_value: 'Imported ' + imported + ' ' + def.noun + (updated ? ', updated ' + updated : '') + ' from ' + STATE.fileName + (failed ? '. FAILED: ' + failMsg : ''),
         timestamp: new Date().toISOString()
-      });
-      await DB.insert('import_history', {
+      }]).catch(() => {});
+      await sbClient.from('import_history').insert([{
         user_id: Auth.currentUser && Auth.currentUser.id,
         user_name: Auth.currentUser && Auth.currentUser.full_name,
         import_type: def.table,
@@ -1426,7 +1500,7 @@ const ImportSystem = (() => {
         skipped: c.duplicates + c.errors,
         duplicates: c.duplicates,
         status: failed ? 'failed' : (c.duplicates + c.errors > 0 ? 'partial' : 'completed')
-      });
+      }]).catch(() => {});
     } catch (e) { console.error('Import logging error:', e); }
   };
 

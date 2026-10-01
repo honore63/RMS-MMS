@@ -38,7 +38,9 @@ async function renderLearners() {
   ]);
   const classes = (typeof Scope !== 'undefined' && Scope.isScoped()) ? Scope.filterClasses(allClasses) : allClasses;
   const classIds = new Set(classes.map(c => String(c.id)));
-  const visibleData = data.filter(l => classIds.has(String(l.class_id)));
+  const visibleData = (typeof Scope !== 'undefined' && Scope.isScoped())
+    ? data.filter(l => l.class_id && classIds.has(String(l.class_id)))
+    : data;
   const filtered = visibleData.filter(l => {
     const matchS = !learnersSearch || (l.full_name + ' ' + l.learner_code).toLowerCase().includes(learnersSearch.toLowerCase());
     const matchC = learnersClass === 'all' || l.class_id === learnersClass;
@@ -92,7 +94,7 @@ async function renderLearners() {
       </div>
       <div class="flex gap-2" style="flex-wrap:wrap">
         <button class="btn btn-secondary" onclick="downloadTemplate()"><i data-lucide="download"></i> Download Template</button>
-        <button class="btn btn-secondary" onclick="openImportModal()"><i data-lucide="upload"></i> Import Learners</button>
+        <button class="btn btn-secondary" onclick="ImportSystem.open('students')"><i data-lucide="upload"></i> Import Learners</button>
         <button class="btn btn-secondary" onclick="learnerPromote()"><i data-lucide="arrow-right-left"></i> Promote</button>
         <button class="btn btn-primary" onclick="learnerForm()"><i data-lucide="user-plus"></i> Register Learner</button>
       </div>
@@ -591,6 +593,13 @@ function importStepHtml(current) {
 
 async function openImportModal() {
   if (!requireDosLearnerAccess()) return;
+  if (typeof Scope !== 'undefined' && Scope.isDos()) {
+    const level = (Auth.currentUser?.education_level || '').toUpperCase();
+    if (level !== 'PRIMARY' && level !== 'SECONDARY') {
+      Utils.toast('Your DOS account has no valid education level set. Ask an administrator to assign one before importing learners.', 'error');
+      return;
+    }
+  }
   resetImportFlow();
   const allImportClasses = await DB.get('classes');
   importFlow.classes = (typeof Scope !== 'undefined' && Scope.isScoped()) ? Scope.filterClasses(allImportClasses) : allImportClasses;
@@ -866,20 +875,23 @@ async function validateImportRows() {
 
     if (!learnerCode) {
       errors.push({ column: 'student_number', message: 'Missing student number', fix: 'Add the student number from the school list.' });
-    } else if (seen.has(codeKey)) {
-      errors.push({ column: 'student_number', message: 'Duplicate student number in uploaded file.', fix: 'Keep one row per student number and remove the duplicate row.' });
     }
     if (!fullName) {
       errors.push({ column: 'student_name', message: 'Missing student name', fix: 'Add the learner\u2019s full name.' });
     }
-    if (genderRaw && genderRaw !== 'M' && genderRaw !== 'F') {
-      errors.push({ column: 'gender', message: 'Invalid gender. Expected MALE or FEMALE (or leave empty).', fix: 'Change the cell to MALE or FEMALE (or M/F), or leave it empty.' });
+    if (!genderRaw) {
+      errors.push({ column: 'gender', message: 'Missing gender', fix: 'Add MALE or FEMALE (or M/F) for this learner.' });
+    } else if (genderRaw !== 'M' && genderRaw !== 'F') {
+      errors.push({ column: 'gender', message: 'Invalid gender. Expected MALE or FEMALE.', fix: 'Change the cell to MALE or FEMALE (or M/F).' });
     }
-    if (learnerCode && !errors.length && importFlow.existingCodes.has(codeKey)) {
+    if (learnerCode && importFlow.existingCodes.has(codeKey)) {
       errors.push({ column: 'student_number', message: 'Student number already exists.', fix: 'This learner is already registered in RMS. No action needed.' });
     }
+    if (learnerCode && !errors.some(e => e.message === 'Student number already exists.') && seen.has(codeKey)) {
+      errors.push({ column: 'student_number', message: 'Duplicate student number in uploaded file.', fix: 'Keep one row per student number and remove the duplicate row.' });
+    }
 
-    if (learnerCode) seen.add(codeKey);
+    if (learnerCode && !errors.length) seen.add(codeKey);
 
     const hasErrors = errors.length > 0;
     let status = 'ready';
@@ -1074,9 +1086,11 @@ async function executeImport() {
         academic_year_id: activeYearId,
         status: 'active'
       }));
-      const { error } = await sbClient.from('learners').insert(batch);
+      const { data, error } = await sbClient.from('learners')
+        .upsert(batch, { onConflict: 'learner_code', ignoreDuplicates: true })
+        .select('id, learner_code');
       if (error) throw error;
-      imported += batch.length;
+      imported += (data || []).length;
       const pct = Math.round((imported / readyRows.length) * 100);
       const txt = document.getElementById('import-progress-text');
       const bar = document.getElementById('import-progress-bar');
@@ -1098,7 +1112,10 @@ async function executeImport() {
     renderLearners();
   } catch (e) {
     Modal.close();
-    Utils.toast('Import error: ' + e.message, 'error');
+    const msg = (e.message || '').includes('rms_account_learner_scope')
+      ? 'Import blocked by security policy. Your DOS account may not have an education level assigned, or the selected class is outside your scope.'
+      : e.message;
+    Utils.toast('Import error: ' + msg, 'error');
   }
 }
 
