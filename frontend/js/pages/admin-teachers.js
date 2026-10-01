@@ -973,31 +973,12 @@ function teacherDelete(t) {
 async function confirmTeacherDelete(id, userId) {
   const delBtn = document.getElementById('teacher-delete-btn');
   if (delBtn) { delBtn.disabled = true; delBtn.innerHTML = '<div class="spinner" style="width:14px;height:14px;border-width:2px"></div> Deleting...'; }
-  const directTeacherDelete = async (tid) => {
-    const { data: removedRows, error } = await sbClient.from('teachers').delete().eq('id', tid).select('id');
-    if (error) throw error;
-    const removed = Array.isArray(removedRows) ? removedRows.length > 0 : !!removedRows;
-    if (!removed) throw new Error('The teacher record could not be deleted. You may lack permission for this teacher\u2019s education level.');
-  };
   try {
-    // Best-effort assignment cleanup (non-fatal): the DB cascade in
-    // database.sql handles all teacher records (assignments, assessments,
-    // marks, registration audit) when the user row is deleted below.
-    const { error: assignErr } = await sbClient.from('teacher_assignments').delete().eq('teacher_id', id);
-    if (assignErr) console.warn('[TEACHER DELETE] Assignment cleanup skipped:', assignErr.message);
-    if (userId) {
-      // Deleting the user cascades to the teacher row, their assessments,
-      // marks, assignments and registration audit.
-      const { data: deletedRows, error } = await sbClient.from('users').delete().eq('id', userId).select('id');
-      if (error) throw error;
-      const removed = Array.isArray(deletedRows) ? deletedRows.length > 0 : !!deletedRows;
-      if (!removed) {
-        // Row not visible/deleted under the DOS scope — delete the teacher row directly.
-        await directTeacherDelete(id);
-      }
-    } else {
-      await directTeacherDelete(id);
-    }
+    // One atomic server-side call: the RPC removes the teacher profile, login
+    // record, assignments, assessments and every mark recorded against them in
+    // a single transaction, so no related record can block the delete.
+    const { error } = await sbClient.rpc('rms_delete_teacher', { p_teacher_id: id });
+    if (error) throw error;
     DB.invalidate('users');
     DB.invalidate('teachers');
     DB.invalidate('teacher_assignments');
@@ -1013,12 +994,20 @@ async function confirmTeacherDelete(id, userId) {
     Utils.toast('Teacher and all related records deleted', 'success');
     renderTeachers();
   } catch (e) {
-    if (/violates foreign key constraint/i.test(e.message || '')) {
+    const msg = e.message || '';
+    if (/not permitted/i.test(msg)) {
       Modal.close();
-      Utils.toast('Cannot delete: some records still reference this teacher. Ensure the database cascade update (assessments ON DELETE CASCADE) has been applied.', 'error');
+      Utils.toast('You do not have permission to delete this teacher.', 'error');
+    } else if (/teacher not found/i.test(msg)) {
+      Modal.close();
+      Utils.toast('This teacher no longer exists. Refresh the list.', 'error');
+      renderTeachers();
+    } else if (/violates foreign key constraint/i.test(msg)) {
+      Modal.close();
+      Utils.toast('Cannot delete: some records still reference this teacher. Please contact the system administrator.', 'error');
     } else {
       if (delBtn) { delBtn.disabled = false; delBtn.innerHTML = '<i data-lucide="trash-2"></i> Delete Teacher'; }
-      Utils.toast('Delete error: ' + e.message, 'error');
+      Utils.toast('Delete error: ' + msg, 'error');
     }
   }
 }

@@ -2180,7 +2180,66 @@ GRANT EXECUTE ON FUNCTION public.send_welcome_notifications(TEXT,TEXT,TEXT,TEXT,
 REVOKE ALL ON FUNCTION public.send_message(UUID, UUID, TEXT, TEXT, TEXT) FROM PUBLIC, anon, authenticated;
 
 -- ============================================================================
--- 13) REALTIME + SCHEDULED PUBLISHER
+-- 13) TEACHER DELETION (atomic, dependency-ordered)
+-- Removes a teacher with everything they own in one transaction: their
+-- assessments and every mark recorded against them, their class/subject
+-- assignments, class headteacher links and registration audit rows, then the
+-- teacher profile and login record. SECURITY DEFINER so dependent rows are
+-- removed regardless of the caller's row-level visibility; the DOS scope check
+-- below is what authorises it. Replaces the RLS DELETE policies on
+-- users/teachers (kept as a fallback for direct deletes).
+-- ============================================================================
+CREATE OR REPLACE FUNCTION public.rms_delete_teacher(p_teacher_id UUID)
+RETURNS BOOLEAN LANGUAGE plpgsql SECURITY DEFINER SET search_path = public, pg_temp AS $fn$
+DECLARE
+  v_user_id UUID;
+BEGIN
+  IF p_teacher_id IS NULL THEN
+    RAISE EXCEPTION 'Teacher not found';
+  END IF;
+  IF public.rms_account_role() <> 'dos' OR NOT public.rms_is_scoped_dos()
+     OR NOT public.rms_teacher_in_scope(p_teacher_id) THEN
+    RAISE EXCEPTION 'Not permitted to delete this teacher';
+  END IF;
+
+  SELECT t.user_id INTO v_user_id FROM public.teachers t WHERE t.id = p_teacher_id;
+  IF NOT FOUND THEN
+    RAISE EXCEPTION 'Teacher not found';
+  END IF;
+
+  -- Marks recorded against this teacher's assessments (before the assessments).
+  DELETE FROM public.marks m
+  WHERE m.assessment_id IN (SELECT a.id FROM public.assessments a WHERE a.teacher_id = p_teacher_id);
+  DELETE FROM public.assessments WHERE teacher_id = p_teacher_id;
+  DELETE FROM public.teacher_assignments WHERE teacher_id = p_teacher_id;
+  DELETE FROM public.teacher_registration_audit WHERE teacher_id = p_teacher_id;
+  UPDATE public.classes SET class_teacher_id = NULL WHERE class_teacher_id = p_teacher_id;
+
+  -- Release any remaining "created by / registered by" pointers to this login
+  -- so the user row can be removed without a foreign-key conflict.
+  IF v_user_id IS NOT NULL THEN
+    UPDATE public.teacher_registration_audit SET registered_by_user_id = NULL
+    WHERE registered_by_user_id = v_user_id;
+    UPDATE public.teachers SET created_by = NULL WHERE created_by = v_user_id;
+    IF EXISTS (SELECT 1 FROM information_schema.columns
+                WHERE table_schema = 'public' AND table_name = 'import_history'
+                  AND column_name = 'created_by') THEN
+      EXECUTE 'UPDATE public.import_history SET created_by = NULL WHERE created_by = $1'
+        USING v_user_id;
+    END IF;
+    DELETE FROM public.users WHERE id = v_user_id;
+  END IF;
+
+  DELETE FROM public.teachers WHERE id = p_teacher_id;
+  RETURN TRUE;
+END;
+$fn$;
+
+GRANT EXECUTE ON FUNCTION public.rms_delete_teacher(UUID) TO authenticated;
+REVOKE EXECUTE ON FUNCTION public.rms_delete_teacher(UUID) FROM anon;
+
+-- ============================================================================
+-- 14) REALTIME + SCHEDULED PUBLISHER
 -- ============================================================================
 DO $do$
 DECLARE v_table TEXT;
@@ -2206,7 +2265,7 @@ END $do$;
 NOTIFY pgrst, 'reload schema';
 
 -- ============================================================================
--- 14) PASSWORD RECOVERY ATTEMPT LOG (on-screen temporary passwords)
+-- 15) PASSWORD RECOVERY ATTEMPT LOG (on-screen temporary passwords)
 -- Rate-limits the /api/auth/recover endpoint. Written only with the
 -- service role (no anon/authenticated policies by design); the endpoint
 -- owns all reads/writes. Idempotent.
