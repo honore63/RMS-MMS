@@ -47,13 +47,33 @@ const TYPE_CATEGORIES = [
 
 // strict = true re-throws so the page can render a real error instead of
 // silently showing an empty list (which is indistinguishable from "no data").
+// Non-strict callers (every other page) go through the sync first and fall
+// back to the canonical list, so no dropdown is ever empty while database
+// permissions or missing rows are being repaired.
 async function getAssessmentTypes(force = false, strict = false) {
   if (Array.isArray(assessmentTypesCache) && !force) return assessmentTypesCache;
   try {
+    if (!strict) await Utils.ensureAssessmentTypes();
     assessmentTypesCache = (await DB.get('assessment_types')) || [];
   } catch (e) {
     if (strict) throw e;
-    assessmentTypesCache = assessmentTypesCache || [];
+    assessmentTypesCache = [];
+  }
+  if (!strict) {
+    const rows = assessmentTypesCache.filter(t => t && t.id);
+    // Add canonical types the database does not have yet (id = null), so every
+    // dropdown lists the full canonical set even before the sync can insert.
+    ASSESSMENT_TYPES.forEach((name) => {
+      if (Utils.findTypeRowByName(rows, name)) return;
+      const d = (Utils.ASSESSMENT_TYPE_DEFAULTS || {})[name] || { max: 30, hint: null };
+      rows.push({
+        id: null, name, code: Utils.assessmentTypeCode(name),
+        description: name, default_maximum_mark: d.max, weight: null,
+        contributes_to_combined: true, display_order: rows.length + 1,
+        status: 'active', period_hint: d.hint, is_standard: true
+      });
+    });
+    assessmentTypesCache = rows;
   }
   return assessmentTypesCache;
 }

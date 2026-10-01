@@ -81,7 +81,7 @@ async function renderAdminMarks() {
         </select>
         <select class="select-field" style="max-width:260px" onchange="marksTypeFilter=this.value;renderAdminMarks()">
            <option value="all">All Types</option>
-           ${types.filter(t => t.status === 'active').map(t=>`<option value="${t.id}" ${marksTypeFilter===t.id?'selected':''}>${Utils.escapeHtml(t.name)}</option>`).join('')}
+           ${types.filter(t => t.status === 'active').map(t=>`<option value="${t.id || ''}" ${marksTypeFilter===t.id?'selected':''}>${Utils.escapeHtml(t.name)}</option>`).join('')}
          </select>
          <select class="select-field" style="max-width:220px" onchange="marksLevelFilter=this.value;renderAdminMarks()">
            <option value="all">All Levels</option>

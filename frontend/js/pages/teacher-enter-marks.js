@@ -224,7 +224,7 @@ async function openCreateAssessment() {
     </style>
     <div class="cas-section">
       <div class="cas-section-title"><i data-lucide="file-text" style="width:14px;height:14px"></i> 1 — What is the assessment?</div>
-      <div class="form-group"><label>Assessment Type <span class="required">*</span></label><select id="cas-type" class="select-field" onchange="casTypeChanged()">${casTypes.map((t, i) => `<option value="${t.id}" data-default-max="${t.default_maximum_mark ?? ''}" ${i === 0 ? 'selected' : ''}>${Utils.escapeHtml(t.name)}${t.weight != null ? ' (w=' + t.weight + ')' : ''}</option>`).join('')}</select></div>
+      <div class="form-group"><label>Assessment Type <span class="required">*</span></label><select id="cas-type" class="select-field" onchange="casTypeChanged()">${casTypes.map((t, i) => `<option value="${t.id || ''}" data-name="${encodeURIComponent(t.name)}" data-default-max="${t.default_maximum_mark ?? ''}" ${i === 0 ? 'selected' : ''}>${Utils.escapeHtml(t.name)}${t.weight != null ? ' (w=' + t.weight + ')' : ''}</option>`).join('')}</select></div>
       <div id="cas-period-fields"></div>
       <div class="cas-preview"><i data-lucide="eye" style="width:13px;height:13px;vertical-align:middle;margin-right:4px"></i>Will display as: <strong id="cas-display-preview"></strong></div>
     </div>
@@ -269,7 +269,16 @@ function casTypeChanged() {
 
 function casSelectedType() {
   const sel = document.getElementById('cas-type');
-  return casTypes.find(t => String(t.id) === String(sel && sel.value)) || null;
+  if (!sel) return null;
+  if (sel.value) {
+    const byId = casTypes.find(t => String(t.id) === String(sel.value));
+    if (byId) return byId;
+  }
+  // Fallback rows have no id (value = ""); resolve by the canonical name the
+  // option carries so period fields and labels still work.
+  const opt = sel.selectedOptions && sel.selectedOptions[0];
+  const name = opt && opt.dataset && opt.dataset.name ? decodeURIComponent(opt.dataset.name) : '';
+  return (name && casTypes.find(t => t.name === name)) || null;
 }
 
 function casUnitNumberValue() {
@@ -363,7 +372,9 @@ async function casSave(mode, btn) {
   const classId = document.getElementById('cas-class').value;
   const typeSelect = document.getElementById('cas-type');
   const typeId = typeSelect ? typeSelect.value : null;
-  const type = casTypes.find(t => String(t.id) === String(typeId)) || null;
+  const type = (typeId ? casTypes.find(t => String(t.id) === String(typeId)) : null)
+    || casSelectedType()
+    || null;
   const hint = Utils.getTypePeriodHint(type);
   const typeName = type ? type.name : 'End-of-Unit Assessment';
 
@@ -440,7 +451,7 @@ async function casSave(mode, btn) {
   const data = {
     name: label,
     display_name: label,
-    assessment_type_id: typeId || null,
+    assessment_type_id: Utils.isValidUuid(typeId) ? typeId : null,
     period_type: periodType,
     period_value: periodValue,
     period_label: periodLabel,

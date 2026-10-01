@@ -185,14 +185,20 @@ const ReportUtils = {
   },
 
   async getAssessmentTypes() {
-    if (this._cache.has('assessmentTypes')) return this._cache.get('assessmentTypes');
-    try {
-      const res = await DB.query('assessment_types', '*', {}, { column: 'name', asc: true });
-      this._cache.set('assessmentTypes', res || []);
-      return res || [];
-    } catch (e) {
-      return [];
-    }
+  if (this._cache.has('assessmentTypes')) return this._cache.get('assessmentTypes');
+  let res = [];
+  try {
+  res = (await DB.query('assessment_types', '*', {}, { column: 'name', asc: true })) || [];
+  } catch (e) { res = []; }
+  // Reports only need names for labels; if the table cannot be read, fall back
+  // to the synced cache / canonical list so report rows are never nameless.
+  if (!res.length) {
+  res = (Utils.assessmentTypesCache && Utils.assessmentTypesCache.length)
+  ? Utils.assessmentTypesCache
+  : Utils.canonicalAssessmentTypeRows();
+  }
+  this._cache.set('assessmentTypes', res);
+  return res;
   },
 
   async getLearners(classId, activeOnly = true) {

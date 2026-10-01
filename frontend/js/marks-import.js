@@ -702,7 +702,7 @@ const MarksImport = (() => {
     if (termSel) {
       termSel.innerHTML = '<option value="">Select term</option>' + terms.map(t => {
         const sel = S.ctx.term && S.ctx.term.id === t.id ? 'selected' : '';
-        return `<option value="${t.id}" ${sel}>${esc(t.name)}</option>`;
+        return `<option value="${t.id || ''}" ${sel}>${esc(t.name)}</option>`;
       }).join('');
       if (S.ctx.term && !terms.find(t => t.id === S.ctx.term.id)) { S.ctx.term = null; termSel.value = ''; }
     }

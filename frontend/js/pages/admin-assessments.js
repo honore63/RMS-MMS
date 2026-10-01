@@ -11,7 +11,7 @@ function asfCanonicalOptions() {
     const row = Utils.findTypeRowByName(asfTypes, name);
     const fallback = (Utils.ASSESSMENT_TYPE_DEFAULTS || {})[name] || {};
     const max = row ? (row.default_maximum_mark ?? fallback.max ?? 30) : (fallback.max ?? 30);
-    const val = row ? row.id : '';
+    const val = (row && row.id) ? row.id : '';
     return `<option value="${val}" data-default-max="${max}" ${i === 0 ? 'selected' : ''}>${Utils.escapeHtml(name)}</option>`;
   }).join('');
 }
@@ -362,7 +362,7 @@ async function assessSave(btn) {
   };
   const type = asfSelectedType();
   if (!type) {
-    return fail('Select an Assessment Type. If the list is empty, restore the standard types from the Assessment Types page.');
+    return fail('Select an Assessment Type. If the list looks wrong, sign in once as a DOS account so the app can sync the standard types.');
   }
   const hint = Utils.getTypePeriodHint(type);
   const typeName = type ? type.name : 'End-of-Unit Assessment';
@@ -410,7 +410,7 @@ async function assessSave(btn) {
   const d = {
     name: label,
     display_name: label,
-    assessment_type_id: document.getElementById('asf-type').value || null,
+    assessment_type_id: Utils.isValidUuid(document.getElementById('asf-type').value) ? document.getElementById('asf-type').value : null,
     period_type: periodType,
     period_value: periodValue,
     period_label: periodLabel,

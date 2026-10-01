@@ -200,11 +200,16 @@ const Utils = {
   ASSESSMENT_TYPES,
   ASSESSMENT_TYPE_DEFAULTS,
 
+  /* Used only when the assessment_types table cannot be read (fresh install or
+     missing GRANT). id is deliberately null - never a fake value - so no
+     invalid UUID can ever be written to assessments.assessment_type_id; the
+     save path turns an empty id into NULL and the sync repairs the real row
+     once permissions allow it. */
   canonicalAssessmentTypeRows() {
     return ASSESSMENT_TYPES.map((name, index) => {
       const d = ASSESSMENT_TYPE_DEFAULTS[name] || { max: 30, hint: null };
       return {
-        id: `canonical-${index}`,
+        id: null,
         name,
         code: this.assessmentTypeCode(name),
         description: name === 'CAT' ? 'Continuous assessment test' : name,
@@ -222,6 +227,14 @@ const Utils = {
   isCanonicalType(name) {
     const n = (name || '').trim().toLowerCase();
     return ASSESSMENT_TYPES.some(t => t.toLowerCase() === n);
+  },
+
+  /* Guards assessments.assessment_type_id against placeholder values coming
+     from fallback rows (id = null), which would otherwise be sent as the
+     literal string "null" or an empty value and fail the UUID column. */
+  isValidUuid(v) {
+    return typeof v === 'string'
+      && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(v);
   },
 
   /* Resolve a canonical name to the assessment_types row that stores it.
@@ -262,21 +275,53 @@ const Utils = {
 
   /* Makes sure a row exists for every canonical type. Purely additive:
      inserts only what is missing, never renames or deletes anything.
-     Best-effort: a non-DOS caller is simply denied by RLS and we carry on
-     using whatever rows already exist. */
+
+     Behaviour:
+       - Runs on login and whenever a page first fetches the type list.
+       - Skips the network when the cache already resolves every canonical
+         name to a real row, so it costs nothing after the first success.
+       - Insert uses ON CONFLICT (name) DO NOTHING, so two tabs or a retry
+         can never produce duplicate-row errors.
+       - Only a DOS account attempts the write (matching the RLS policy);
+         other roles just read.
+       - Every failure is logged with a [sync] prefix so problems are
+         visible in the browser console instead of silently swallowed.
+       - If nothing can be read, returns canonical rows with id = null
+         (never a fake UUID) so the UI still lists every type and the save
+         path writes NULL rather than an invalid foreign key. */
   async ensureAssessmentTypes() {
     if (typeof sbClient === 'undefined') return this.canonicalAssessmentTypeRows();
 
-    const currentRole = (typeof Auth !== 'undefined' && Auth.currentUser && Auth.currentUser.role) || null;
-    const canWriteCanonicalTypes = currentRole === 'dos';
+    // Deduplicate concurrent calls (login + first page render racing), and
+    // never reject: sync is best-effort and must not break any page.
+    if (Utils._ensureTypesPromise) return Utils._ensureTypesPromise;
+    Utils._ensureTypesPromise = this._ensureAssessmentTypesRun()
+      .catch(() => this.canonicalAssessmentTypeRows())
+      .finally(() => { Utils._ensureTypesPromise = null; });
+    return Utils._ensureTypesPromise;
+  },
+
+  async _ensureAssessmentTypesRun() {
+    // Skip the network only when every canonical name already resolves to a
+    // REAL row (id present). Rows with id = null are placeholders, not synced.
+    const cached = Utils.assessmentTypesCache;
+    if (Array.isArray(cached) && ASSESSMENT_TYPES.every(n => {
+      const r = Utils.findTypeRowByName(cached, n);
+      return r && r.id;
+    })) return cached;
+
+    const role = (typeof Auth !== 'undefined' && Auth.getRole) ? Auth.getRole() : null;
+    const canWrite = role === 'dos';
 
     let existing = [];
-    try { existing = (await sbClient.from('assessment_types').select('*'))?.data || []; }
-    catch (e) { return this.canonicalAssessmentTypeRows(); }
-
-    if (!existing.length) {
-      Utils.assessmentTypesCache = this.canonicalAssessmentTypeRows();
-      return Utils.assessmentTypesCache;
+    let readError = null;
+    try {
+      const res = await sbClient.from('assessment_types').select('*');
+      if (res.error) readError = res.error; else existing = res.data || [];
+    } catch (e) { readError = e; }
+    if (readError) {
+      console.warn('[sync] Cannot read assessment_types: ' + (readError.message || readError)
+        + ' — run the GRANT SELECT block (deployment_pending.sql block 7).');
     }
 
     const missing = ASSESSMENT_TYPES
@@ -292,19 +337,42 @@ const Utils = {
         };
       });
 
-    if (missing.length && canWriteCanonicalTypes) {
-      try { await sbClient.from('assessment_types').insert(missing); }
-      catch (e) { /* RLS/permission: harmless, rows may already exist */ }
+    if (missing.length && canWrite) {
+      let writeError = null;
+      try {
+        const res = await sbClient.from('assessment_types')
+          .upsert(missing, { onConflict: 'name', ignoreDuplicates: true });
+        if (res.error) writeError = res.error;
+      } catch (e) { writeError = e; }
+      if (writeError && writeError.code !== '23505') {
+        console.warn('[sync] Could not add ' + missing.length + ' assessment type(s) ('
+          + missing.map(m => m.name).join(', ') + '): ' + (writeError.message || writeError)
+          + (writeError.code === '42501' || /permission|row-level/i.test(writeError.message || '')
+            ? ' — the logged-in user needs role=dos in public.users (block 8).' : ''));
+      } else if (!writeError) {
+        console.info('[sync] Added assessment type(s): ' + missing.map(m => m.name).join(', '));
+      }
+
+      // Re-read so the dropdown gets the generated UUIDs.
+      try {
+        const res = await sbClient.from('assessment_types').select('*');
+        if (!res.error && Array.isArray(res.data) && res.data.length) existing = res.data;
+      } catch (e) { /* keep the previous view */ }
+    } else if (missing.length && !canWrite) {
+      console.warn('[sync] ' + missing.length + ' assessment type(s) missing ('
+        + missing.map(m => m.name).join(', ') + ') and this account cannot add them — '
+        + 'sign in as a DOS account once to complete the sync.');
     }
 
-    try {
-      const { data } = await sbClient.from('assessment_types').select('*');
-      if (Array.isArray(data) && data.length) Utils.assessmentTypesCache = data;
-    } catch (e) { /* ignore */ }
+    const real = (existing || []).filter(r => r && r.id);
+    if (real.length) {
+      Utils.assessmentTypesCache = real;
+      return real;
+    }
 
-    const finalTypes = Utils.assessmentTypesCache && Utils.assessmentTypesCache.length ? Utils.assessmentTypesCache : this.canonicalAssessmentTypeRows();
-    Utils.assessmentTypesCache = finalTypes;
-    return finalTypes;
+    const fallback = this.canonicalAssessmentTypeRows();
+    Utils.assessmentTypesCache = fallback;
+    return fallback;
   },
 
   /* Default hint map so the conditional creation form works even before the

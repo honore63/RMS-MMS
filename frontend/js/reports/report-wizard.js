@@ -768,7 +768,7 @@ const ReportWizard = {
       </div>
       <div class="rw-card-bd">
         <p class="rw-help" style="margin-bottom:8px">Filtered by class ${s.classIds.length? s.classIds.join(','):''}${s.subjectIds.length?' + subjects':''}. Select one, multiple, or all.</p>
-        <div class="form-group" style="max-width:300px"><label>Assessment Type</label><select class="select-field" onchange="ReportWizard.setAssessmentType(this.value)"><option value="all">All Assessment Types</option>${types.map(t=>`<option value="${t.id}" ${String(s.assessmentTypeId)===String(t.id)?'selected':''}>${Utils.escapeHtml(t.name)}</option>`).join('')}</select></div>
+        <div class="form-group" style="max-width:300px"><label>Assessment Type</label><select class="select-field" onchange="ReportWizard.setAssessmentType(this.value)"><option value="all">All Assessment Types</option>${types.map(t=>`<option value="${t.id || ''}" ${String(s.assessmentTypeId)===String(t.id)?'selected':''}>${Utils.escapeHtml(t.name)}</option>`).join('')}</select></div>
         <div class="rw-search"><i data-lucide="search"></i><input id="rw-assess-q" placeholder="Search assessments..." oninput="ReportWizard.renderStep()"></div>
         <div class="rw-list">
           ${list.length? list.map(a=>{
