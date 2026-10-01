@@ -104,7 +104,15 @@ async function restoreStandardTypes() {
         if (match) { await DB.update('assessment_types', match.id, payload); updated++; }
         else { await DB.insert('assessment_types', payload); added++; }
       } catch (e) {
-        failures.push(std.name + ': ' + (e.message || 'failed'));
+        const code = e.code || '';
+        const msg = (e.message || 'failed');
+        // 42501 / "row-level security" means the caller's users row does not
+        // satisfy the DOS write policy (role = 'dos' AND status = 'active').
+        if (code === '42501' || /row-level security/i.test(msg)) {
+          failures.push(std.name + ': your account is not set up as a DOS account');
+        } else {
+          failures.push(std.name + ': ' + msg);
+        }
       }
     }
     assessmentTypesCache = null;
