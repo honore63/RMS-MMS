@@ -1506,8 +1506,7 @@ CREATE POLICY rms_account_users_delete ON public.users FOR DELETE TO authenticat
   USING (public.rms_account_role() = 'dos'
     AND id <> auth.uid()
     AND role = 'teacher'
-    AND EXISTS (SELECT 1 FROM public.teachers t WHERE t.user_id = users.id
-      AND public.rms_teacher_in_scope(t.id)));
+    AND public.rms_account_can_access_user(id));
 
 -- --- teachers ---
 CREATE POLICY rms_account_teacher_self_insert ON public.teachers FOR INSERT TO authenticated
