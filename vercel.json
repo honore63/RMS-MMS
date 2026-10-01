@@ -1,6 +1,7 @@
 {
   "version": 2,
   "rewrites": [
+    { "source": "/api/(.*)", "destination": "/api/$1" },
     { "source": "/public/(.*)", "destination": "/frontend/public/$1" },
     { "source": "/sw.js", "destination": "/frontend/sw.js" },
     { "source": "/manifest.webmanifest", "destination": "/frontend/manifest.webmanifest" },
