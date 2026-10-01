@@ -187,18 +187,56 @@ git commit -m "your message"
 git push origin main
 ```
 
-### 3. Run Locally
+#### Required environment variables (server-side functions)
 
-Serve the `frontend/` folder (it is the document root):
+`api/auth/recover.js` (Forgot Password → temporary password) runs on Vercel and
+needs three variables. Set them in **Vercel → Settings → Environment Variables**
+for both Production and Preview. See `.env.example`.
+
+| Variable | Purpose | Exposure |
+| --- | --- | --- |
+| `SUPABASE_URL` | Project URL | Server-side |
+| `SUPABASE_SERVICE_ROLE_KEY` | Sets temporary passwords via the Supabase Auth admin API | **Server-side only** |
+| `SUPABASE_ANON_KEY` | Validates the signed-in user's own JWT | Public by design |
+
+> **Never** prefix these with `NEXT_PUBLIC_`. Those values are inlined into
+> browser JavaScript at build time, and `SUPABASE_SERVICE_ROLE_KEY` bypasses RLS
+> with full read/write access to every table. The key is used only inside
+> `api/auth/recover.js` and must never appear in `frontend/` or in git.
+
+If these are absent the endpoint returns a safe generic error and logs the exact
+missing variable names to the Vercel function log (Function Logs → `/api/auth/recover`).
+
+### 3. Database changes are NOT automatic
+
+SQL committed to GitHub does not execute against the live Supabase project.
+Schema changes must be applied by hand:
+
+- `backend/sql/database.sql` — full authoritative schema (27 tables, functions,
+  policies, triggers, indexes, storage, realtime). Idempotent.
+- `backend/sql/deployment_pending.sql` — **the only file you need to run** for
+  the current pending work (password-recovery rate-limit table, DOS level
+  helpers, teacher read/write policies, cross-level write guards, atomic
+  teacher deletion). Run blocks 1–6, then block 7 to verify.
+- `backend/sql/optional_dos_fail_closed.sql` — removes the "global DOS"
+  fallback so a DOS with a NULL/invalid level gets no level access.
+  **Only run after `rms_dos_level_audit()` shows every DOS row as `OK`.**
+- `backend/sql/verify_dos_isolation.sql` — read-only RLS test suite for the
+  Primary/Secondary isolation guarantees.
+
+### 4. Run Locally
+
+A plain static server (`python -m http.server`, `npx serve`, Live Server) serves
+the app but **cannot execute `/api/*` functions**, so Forgot Password, teacher
+deletion and PDF reports will return 404/405 locally. To exercise them:
 
 ```bash
-cd frontend
-python -m http.server 8000
-# or
-npx serve .
+npm install          # Node 18+ required
+vercel dev           # serves the frontend AND runs api/* on one port
 ```
 
-Open http://localhost:8000
+`vercel dev` reads `.env.local` automatically — copy `.env.example` to
+`.env.local` and fill in the three values.
 
 > **Cache busting:** script tags in `index.html` use `?v=YYYYMMDD-N`. After any JS/CSS change, bump the version and hard-refresh with `Ctrl+Shift+R`.
 

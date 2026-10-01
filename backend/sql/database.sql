@@ -1530,18 +1530,23 @@ END $do$;
 -- ============================================================================
 
 -- --- users ---
+DROP POLICY IF EXISTS rms_account_users_select ON public.users;
 CREATE POLICY rms_account_users_select ON public.users FOR SELECT TO authenticated
   USING (public.rms_account_can_access_user(id));
+DROP POLICY IF EXISTS rms_account_users_insert ON public.users;
 CREATE POLICY rms_account_users_insert ON public.users FOR INSERT TO authenticated
   WITH CHECK ((id = auth.uid() AND role = 'teacher') OR (public.rms_account_role() = 'dos' AND role = 'teacher'));
+DROP POLICY IF EXISTS rms_account_users_update ON public.users;
 CREATE POLICY rms_account_users_update ON public.users FOR UPDATE TO authenticated
   USING (public.rms_account_can_access_user(id)) WITH CHECK (public.rms_account_can_access_user(id));
+DROP POLICY IF EXISTS rms_account_users_delete ON public.users;
 CREATE POLICY rms_account_users_delete ON public.users FOR DELETE TO authenticated
   USING (public.rms_account_role() = 'dos'
     AND id <> auth.uid()
     AND role = 'teacher'
     AND public.rms_account_can_access_user(id));
 -- A scoped DOS may not relabel a managed account as the opposite level.
+DROP POLICY IF EXISTS rms_dos_user_level_write ON public.users;
 CREATE POLICY rms_dos_user_level_write ON public.users AS RESTRICTIVE FOR UPDATE TO authenticated
   WITH CHECK (NOT public.rms_is_dos() OR public.rms_dos_can_teacher_level(education_level));
 
@@ -1550,125 +1555,163 @@ CREATE POLICY rms_dos_user_level_write ON public.users AS RESTRICTIVE FOR UPDATE
 -- their own. The RESTRICTIVE policies below narrow this to the DOS's own
 -- education level (rms_account_teacher_rows + rms_dos_level_guard), so a
 -- scoped DOS only ever resolves in-scope teachers.
+DROP POLICY IF EXISTS rms_account_teachers_select ON public.teachers;
 CREATE POLICY rms_account_teachers_select ON public.teachers FOR SELECT TO authenticated
   USING (public.rms_account_role() = 'dos' OR user_id = auth.uid());
+DROP POLICY IF EXISTS rms_account_teachers_update ON public.teachers;
 CREATE POLICY rms_account_teachers_update ON public.teachers FOR UPDATE TO authenticated
   USING (public.rms_account_role() = 'dos' OR user_id = auth.uid())
   WITH CHECK (public.rms_account_role() = 'dos' OR user_id = auth.uid());
+DROP POLICY IF EXISTS rms_account_teacher_self_insert ON public.teachers;
 CREATE POLICY rms_account_teacher_self_insert ON public.teachers FOR INSERT TO authenticated
   WITH CHECK (public.rms_account_role() IN ('teacher', 'headteacher') AND user_id = auth.uid());
+DROP POLICY IF EXISTS rms_account_teacher_rows ON public.teachers;
 CREATE POLICY rms_account_teacher_rows ON public.teachers AS RESTRICTIVE FOR ALL TO authenticated
   USING (public.rms_account_can_teacher(id))
   WITH CHECK (public.rms_account_can_teacher(id)
     OR (public.rms_account_role() = 'teacher' AND user_id = auth.uid())
     OR (public.rms_account_role() = 'dos' AND public.rms_is_scoped_dos()));
+DROP POLICY IF EXISTS rms_dos_level_guard ON public.teachers;
 CREATE POLICY rms_dos_level_guard ON public.teachers AS RESTRICTIVE FOR ALL TO authenticated
   USING (NOT public.rms_is_dos() OR (public.rms_is_scoped_dos() AND public.rms_teacher_in_scope(teachers.id)))
   WITH CHECK (NOT public.rms_is_dos() OR public.rms_is_scoped_dos());
 -- A scoped DOS may not create or relabel a teacher as the opposite level.
+DROP POLICY IF EXISTS rms_dos_teacher_level_write ON public.teachers;
 CREATE POLICY rms_dos_teacher_level_write ON public.teachers AS RESTRICTIVE FOR INSERT TO authenticated
   WITH CHECK (NOT public.rms_is_dos() OR public.rms_dos_can_teacher_level(education_level));
+DROP POLICY IF EXISTS rms_dos_teacher_level_write_upd ON public.teachers;
 CREATE POLICY rms_dos_teacher_level_write_upd ON public.teachers AS RESTRICTIVE FOR UPDATE TO authenticated
   WITH CHECK (NOT public.rms_is_dos() OR public.rms_dos_can_teacher_level(education_level));
+DROP POLICY IF EXISTS rms_account_teachers_delete ON public.teachers;
 CREATE POLICY rms_account_teachers_delete ON public.teachers FOR DELETE TO authenticated
   USING (public.rms_account_role() = 'dos'
     AND public.rms_is_scoped_dos()
     AND public.rms_teacher_in_scope(teachers.id));
 
 -- --- classes ---
+DROP POLICY IF EXISTS rms_classes_select ON public.classes;
 CREATE POLICY rms_classes_select ON public.classes FOR SELECT
   USING (public.rms_dos_can_level(classes.education_level));
+DROP POLICY IF EXISTS rms_classes_insert ON public.classes;
 CREATE POLICY rms_classes_insert ON public.classes FOR INSERT
   WITH CHECK (public.rms_is_dos() AND public.rms_dos_can_level(classes.education_level));
+DROP POLICY IF EXISTS rms_classes_update ON public.classes;
 CREATE POLICY rms_classes_update ON public.classes FOR UPDATE
   USING (public.rms_is_dos() AND public.rms_dos_can_level(classes.education_level))
   WITH CHECK (public.rms_is_dos() AND public.rms_dos_can_level(classes.education_level));
+DROP POLICY IF EXISTS rms_classes_delete ON public.classes;
 CREATE POLICY rms_classes_delete ON public.classes FOR DELETE
   USING (public.rms_is_dos() AND public.rms_dos_can_level(classes.education_level));
+DROP POLICY IF EXISTS rms_account_class_scope ON public.classes;
 CREATE POLICY rms_account_class_scope ON public.classes AS RESTRICTIVE FOR ALL TO authenticated
   USING (public.rms_account_can_class(id)) WITH CHECK (public.rms_account_can_class(id));
+DROP POLICY IF EXISTS rms_dos_level_guard ON public.classes;
 CREATE POLICY rms_dos_level_guard ON public.classes AS RESTRICTIVE FOR ALL TO authenticated
   USING (NOT public.rms_is_dos() OR public.rms_dos_can_level(education_level))
   WITH CHECK (NOT public.rms_is_dos() OR public.rms_dos_can_level(education_level));
+DROP POLICY IF EXISTS rms_report_teacher_classes_select ON public.classes;
 CREATE POLICY rms_report_teacher_classes_select ON public.classes FOR SELECT
   USING (public.rms_report_teacher_has_class(classes.id));
 
 -- --- subjects ---
+DROP POLICY IF EXISTS rms_subjects_select ON public.subjects;
 CREATE POLICY rms_subjects_select ON public.subjects FOR SELECT
   USING (public.rms_dos_can_subject(subjects.level));
+DROP POLICY IF EXISTS rms_subjects_insert ON public.subjects;
 CREATE POLICY rms_subjects_insert ON public.subjects FOR INSERT
   WITH CHECK (public.rms_is_dos() AND public.rms_dos_can_subject(subjects.level));
+DROP POLICY IF EXISTS rms_subjects_update ON public.subjects;
 CREATE POLICY rms_subjects_update ON public.subjects FOR UPDATE
   USING (public.rms_is_dos() AND public.rms_dos_can_subject(subjects.level))
   WITH CHECK (public.rms_is_dos() AND public.rms_dos_can_subject(subjects.level));
+DROP POLICY IF EXISTS rms_subjects_delete ON public.subjects;
 CREATE POLICY rms_subjects_delete ON public.subjects FOR DELETE
   USING (public.rms_is_dos() AND public.rms_dos_can_subject(subjects.level));
+DROP POLICY IF EXISTS rms_account_subject_scope ON public.subjects;
 CREATE POLICY rms_account_subject_scope ON public.subjects AS RESTRICTIVE FOR ALL TO authenticated
   USING (public.rms_account_can_subject(id)) WITH CHECK (public.rms_account_can_subject(id));
+DROP POLICY IF EXISTS rms_dos_level_guard ON public.subjects;
 CREATE POLICY rms_dos_level_guard ON public.subjects AS RESTRICTIVE FOR ALL TO authenticated
   USING (NOT public.rms_is_dos() OR public.rms_dos_can_subject(level))
   WITH CHECK (NOT public.rms_is_dos() OR public.rms_dos_can_subject(level));
+DROP POLICY IF EXISTS rms_report_teacher_subjects_select ON public.subjects;
 CREATE POLICY rms_report_teacher_subjects_select ON public.subjects FOR SELECT
   USING (public.rms_report_teacher_has_subject(subjects.id));
 
 -- --- class_subjects ---
+DROP POLICY IF EXISTS rms_dos_level_guard ON public.class_subjects;
 CREATE POLICY rms_dos_level_guard ON public.class_subjects AS RESTRICTIVE FOR ALL TO authenticated
   USING (NOT public.rms_is_dos() OR public.rms_dos_can_level(
     (SELECT c.education_level FROM public.classes c WHERE c.id = class_subjects.class_id)))
   WITH CHECK (NOT public.rms_is_dos() OR public.rms_dos_can_level(
     (SELECT c.education_level FROM public.classes c WHERE c.id = class_id)));
+DROP POLICY IF EXISTS rms_class_subjects_all ON public.class_subjects;
 CREATE POLICY rms_class_subjects_all ON public.class_subjects FOR ALL TO authenticated
   USING (true) WITH CHECK (true);
 
 -- --- education_levels (public reference) ---
+DROP POLICY IF EXISTS "everyone_read_education_levels" ON public.education_levels;
 CREATE POLICY "everyone_read_education_levels" ON public.education_levels FOR SELECT USING (true);
 
 -- --- learners ---
+DROP POLICY IF EXISTS rms_learners_select ON public.learners;
 CREATE POLICY rms_learners_select ON public.learners FOR SELECT
   USING (public.rms_dos_can_level((SELECT c.education_level FROM public.classes c WHERE c.id = learners.class_id)));
+DROP POLICY IF EXISTS rms_learners_insert ON public.learners;
 CREATE POLICY rms_learners_insert ON public.learners FOR INSERT
   WITH CHECK (public.rms_is_dos() AND public.rms_dos_can_level(
     (SELECT c.education_level FROM public.classes c WHERE c.id = class_id)));
+DROP POLICY IF EXISTS rms_learners_update ON public.learners;
 CREATE POLICY rms_learners_update ON public.learners FOR UPDATE
   USING (public.rms_is_dos() AND public.rms_dos_can_level(
     (SELECT c.education_level FROM public.classes c WHERE c.id = learners.class_id)))
   WITH CHECK (public.rms_is_dos() AND public.rms_dos_can_level(
     (SELECT c.education_level FROM public.classes c WHERE c.id = class_id)));
+DROP POLICY IF EXISTS rms_learners_delete ON public.learners;
 CREATE POLICY rms_learners_delete ON public.learners FOR DELETE
   USING (public.rms_is_dos() AND public.rms_dos_can_level(
     (SELECT c.education_level FROM public.classes c WHERE c.id = learners.class_id)));
+DROP POLICY IF EXISTS rms_account_learner_scope ON public.learners;
 CREATE POLICY rms_account_learner_scope ON public.learners AS RESTRICTIVE FOR ALL TO authenticated
   USING (public.rms_account_can_learner(id))
   WITH CHECK (public.rms_account_role() = 'dos' AND public.rms_account_can_class(class_id));
+DROP POLICY IF EXISTS rms_dos_level_guard ON public.learners;
 CREATE POLICY rms_dos_level_guard ON public.learners AS RESTRICTIVE FOR ALL TO authenticated
   USING (NOT public.rms_is_dos() OR public.rms_dos_can_level(
     (SELECT c.education_level FROM public.classes c WHERE c.id = learners.class_id)))
   WITH CHECK (NOT public.rms_is_dos() OR public.rms_dos_can_level(
     (SELECT c.education_level FROM public.classes c WHERE c.id = class_id)));
+DROP POLICY IF EXISTS rms_report_teacher_learners_select ON public.learners;
 CREATE POLICY rms_report_teacher_learners_select ON public.learners FOR SELECT
   USING (public.rms_report_teacher_has_learner(learners.class_id));
 
 -- --- teacher_assignments ---
+DROP POLICY IF EXISTS rms_teacher_assignments_select ON public.teacher_assignments;
 CREATE POLICY rms_teacher_assignments_select ON public.teacher_assignments FOR SELECT
   USING (public.rms_dos_can_level((SELECT c.education_level FROM public.classes c WHERE c.id = teacher_assignments.class_id))
     OR (class_id IS NULL)
     OR EXISTS (SELECT 1 FROM public.teachers t WHERE t.id = teacher_assignments.teacher_id AND t.user_id = auth.uid()));
+DROP POLICY IF EXISTS rms_teacher_assignments_insert ON public.teacher_assignments;
 CREATE POLICY rms_teacher_assignments_insert ON public.teacher_assignments FOR INSERT
   WITH CHECK (public.rms_is_dos()
     AND public.rms_dos_can_level((SELECT c.education_level FROM public.classes c WHERE c.id = class_id))
     AND public.rms_dos_can_subject((SELECT s.level FROM public.subjects s WHERE s.id = subject_id)));
+DROP POLICY IF EXISTS rms_teacher_assignments_update ON public.teacher_assignments;
 CREATE POLICY rms_teacher_assignments_update ON public.teacher_assignments FOR UPDATE
   USING (public.rms_is_dos() AND public.rms_dos_can_level(
     (SELECT c.education_level FROM public.classes c WHERE c.id = teacher_assignments.class_id)))
   WITH CHECK (public.rms_is_dos()
     AND public.rms_dos_can_level((SELECT c.education_level FROM public.classes c WHERE c.id = class_id))
     AND public.rms_dos_can_subject((SELECT s.level FROM public.subjects s WHERE s.id = subject_id)));
+DROP POLICY IF EXISTS rms_teacher_assignments_delete ON public.teacher_assignments;
 CREATE POLICY rms_teacher_assignments_delete ON public.teacher_assignments FOR DELETE
   USING (public.rms_is_dos() AND public.rms_dos_can_level(
     (SELECT c.education_level FROM public.classes c WHERE c.id = teacher_assignments.class_id)));
+DROP POLICY IF EXISTS rms_account_assignment_scope ON public.teacher_assignments;
 CREATE POLICY rms_account_assignment_scope ON public.teacher_assignments AS RESTRICTIVE FOR ALL TO authenticated
   USING (public.rms_account_can_assignment(teacher_id, class_id, subject_id))
   WITH CHECK (public.rms_account_can_assignment(teacher_id, class_id, subject_id));
+DROP POLICY IF EXISTS rms_dos_level_guard ON public.teacher_assignments;
 CREATE POLICY rms_dos_level_guard ON public.teacher_assignments AS RESTRICTIVE FOR ALL TO authenticated
   USING (NOT public.rms_is_dos() OR class_id IS NULL OR public.rms_dos_can_level(
     (SELECT c.education_level FROM public.classes c WHERE c.id = teacher_assignments.class_id)))
@@ -1676,13 +1719,16 @@ CREATE POLICY rms_dos_level_guard ON public.teacher_assignments AS RESTRICTIVE F
     (SELECT c.education_level FROM public.classes c WHERE c.id = class_id)));
 
 -- --- assessments ---
+DROP POLICY IF EXISTS rms_assessments_select ON public.assessments;
 CREATE POLICY rms_assessments_select ON public.assessments FOR SELECT
   USING (public.rms_dos_can_level((SELECT c.education_level FROM public.classes c WHERE c.id = assessments.class_id))
     OR public.rms_teacher_can_view_assessment_row(assessments.teacher_id, assessments.class_id, assessments.subject_id, assessments.academic_year_id));
+DROP POLICY IF EXISTS rms_assessments_insert ON public.assessments;
 CREATE POLICY rms_assessments_insert ON public.assessments FOR INSERT
   WITH CHECK ((public.rms_is_dos() AND public.rms_dos_can_level(
       (SELECT c.education_level FROM public.classes c WHERE c.id = class_id)))
     OR public.rms_teacher_can_assessment_row(teacher_id, class_id, subject_id, academic_year_id));
+DROP POLICY IF EXISTS rms_assessments_update ON public.assessments;
 CREATE POLICY rms_assessments_update ON public.assessments FOR UPDATE
   USING ((public.rms_is_dos() AND public.rms_dos_can_level(
       (SELECT c.education_level FROM public.classes c WHERE c.id = assessments.class_id)))
@@ -1690,20 +1736,26 @@ CREATE POLICY rms_assessments_update ON public.assessments FOR UPDATE
   WITH CHECK ((public.rms_is_dos() AND public.rms_dos_can_level(
       (SELECT c.education_level FROM public.classes c WHERE c.id = class_id)))
     OR (teacher_id = assessments.teacher_id AND public.rms_teacher_can_assessment_row(teacher_id, class_id, subject_id, academic_year_id)));
+DROP POLICY IF EXISTS rms_assessments_delete ON public.assessments;
 CREATE POLICY rms_assessments_delete ON public.assessments FOR DELETE
   USING ((public.rms_is_dos() AND public.rms_dos_can_level(
       (SELECT c.education_level FROM public.classes c WHERE c.id = assessments.class_id)))
     OR (assessments.status = 'draft' AND EXISTS (
       SELECT 1 FROM public.teachers t WHERE t.user_id = auth.uid() AND t.id = assessments.teacher_id)));
+DROP POLICY IF EXISTS rms_account_assessment_select_scope ON public.assessments;
 CREATE POLICY rms_account_assessment_select_scope ON public.assessments AS RESTRICTIVE FOR SELECT TO authenticated
   USING (public.rms_account_can_assessment(id));
+DROP POLICY IF EXISTS rms_account_assessment_insert_scope ON public.assessments;
 CREATE POLICY rms_account_assessment_insert_scope ON public.assessments AS RESTRICTIVE FOR INSERT TO authenticated
   WITH CHECK (public.rms_account_can_assessment_fields(teacher_id, class_id, subject_id, academic_year_id));
+DROP POLICY IF EXISTS rms_account_assessment_update_scope ON public.assessments;
 CREATE POLICY rms_account_assessment_update_scope ON public.assessments AS RESTRICTIVE FOR UPDATE TO authenticated
   USING (public.rms_account_can_assessment(id))
   WITH CHECK (public.rms_account_can_assessment_fields(teacher_id, class_id, subject_id, academic_year_id));
+DROP POLICY IF EXISTS rms_account_assessment_delete_scope ON public.assessments;
 CREATE POLICY rms_account_assessment_delete_scope ON public.assessments AS RESTRICTIVE FOR DELETE TO authenticated
   USING (public.rms_account_can_assessment(id));
+DROP POLICY IF EXISTS rms_dos_level_guard ON public.assessments;
 CREATE POLICY rms_dos_level_guard ON public.assessments AS RESTRICTIVE FOR ALL TO authenticated
   USING (NOT public.rms_is_dos() OR public.rms_dos_can_level(
     (SELECT c.education_level FROM public.classes c WHERE c.id = assessments.class_id)))
@@ -1711,170 +1763,245 @@ CREATE POLICY rms_dos_level_guard ON public.assessments AS RESTRICTIVE FOR ALL T
     (SELECT c.education_level FROM public.classes c WHERE c.id = class_id)));
 
 -- --- marks ---
+DROP POLICY IF EXISTS rms_marks_select ON public.marks;
 CREATE POLICY rms_marks_select ON public.marks FOR SELECT
   USING (public.rms_dos_can_marks(marks.assessment_id) OR public.rms_teacher_can_assessment(marks.assessment_id));
+DROP POLICY IF EXISTS rms_marks_insert ON public.marks;
 CREATE POLICY rms_marks_insert ON public.marks FOR INSERT
   WITH CHECK (public.rms_dos_can_marks(assessment_id) OR public.rms_teacher_can_assessment(assessment_id));
+DROP POLICY IF EXISTS rms_marks_update ON public.marks;
 CREATE POLICY rms_marks_update ON public.marks FOR UPDATE
   USING (public.rms_dos_can_marks(marks.assessment_id) OR public.rms_teacher_can_assessment(marks.assessment_id))
   WITH CHECK (public.rms_dos_can_marks(assessment_id) OR public.rms_teacher_can_assessment(assessment_id));
+DROP POLICY IF EXISTS rms_marks_delete ON public.marks;
 CREATE POLICY rms_marks_delete ON public.marks FOR DELETE
   USING (public.rms_is_dos() AND public.rms_dos_can_marks(marks.assessment_id));
+DROP POLICY IF EXISTS rms_account_marks_select_scope ON public.marks;
 CREATE POLICY rms_account_marks_select_scope ON public.marks AS RESTRICTIVE FOR SELECT TO authenticated
   USING (public.rms_account_can_assessment(assessment_id));
+DROP POLICY IF EXISTS rms_account_marks_insert_scope ON public.marks;
 CREATE POLICY rms_account_marks_insert_scope ON public.marks AS RESTRICTIVE FOR INSERT TO authenticated
   WITH CHECK (public.rms_account_can_assessment(assessment_id));
+DROP POLICY IF EXISTS rms_account_marks_update_scope ON public.marks;
 CREATE POLICY rms_account_marks_update_scope ON public.marks AS RESTRICTIVE FOR UPDATE TO authenticated
   USING (public.rms_account_can_assessment(assessment_id)) WITH CHECK (public.rms_account_can_assessment(assessment_id));
+DROP POLICY IF EXISTS rms_account_marks_delete_scope ON public.marks;
 CREATE POLICY rms_account_marks_delete_scope ON public.marks AS RESTRICTIVE FOR DELETE TO authenticated
   USING (public.rms_account_can_assessment(assessment_id));
+DROP POLICY IF EXISTS rms_dos_level_guard ON public.marks;
 CREATE POLICY rms_dos_level_guard ON public.marks AS RESTRICTIVE FOR ALL TO authenticated
   USING (NOT public.rms_is_dos() OR public.rms_dos_can_marks(assessment_id))
   WITH CHECK (NOT public.rms_is_dos() OR public.rms_dos_can_marks(assessment_id));
 
 -- --- assessment_types / grading / comments / reference (read-shared, DOS writes) ---
+DROP POLICY IF EXISTS rms_assessment_types_select ON public.assessment_types;
 CREATE POLICY rms_assessment_types_select ON public.assessment_types FOR SELECT USING (true);
+DROP POLICY IF EXISTS rms_assessment_types_modify ON public.assessment_types;
 CREATE POLICY rms_assessment_types_modify ON public.assessment_types FOR ALL
   USING (public.rms_is_dos()) WITH CHECK (public.rms_is_dos());
+DROP POLICY IF EXISTS rms_account_assessment_types_select ON public.assessment_types;
 CREATE POLICY rms_account_assessment_types_select ON public.assessment_types FOR SELECT TO authenticated USING (true);
+DROP POLICY IF EXISTS rms_account_assessment_types_insert ON public.assessment_types;
 CREATE POLICY rms_account_assessment_types_insert ON public.assessment_types FOR INSERT TO authenticated
   WITH CHECK (public.rms_account_role() = 'dos');
+DROP POLICY IF EXISTS rms_account_assessment_types_update ON public.assessment_types;
 CREATE POLICY rms_account_assessment_types_update ON public.assessment_types FOR UPDATE TO authenticated
   USING (public.rms_account_role() = 'dos') WITH CHECK (public.rms_account_role() = 'dos');
+DROP POLICY IF EXISTS rms_account_assessment_types_delete ON public.assessment_types;
 CREATE POLICY rms_account_assessment_types_delete ON public.assessment_types FOR DELETE TO authenticated
   USING (public.rms_account_role() = 'dos');
+DROP POLICY IF EXISTS rms_report_reference_assessment_types_select ON public.assessment_types;
 CREATE POLICY rms_report_reference_assessment_types_select ON public.assessment_types FOR SELECT
   USING (auth.uid() IS NOT NULL);
+DROP POLICY IF EXISTS rms_account_grading_scales_select ON public.grading_scales;
 CREATE POLICY rms_account_grading_scales_select ON public.grading_scales FOR SELECT TO authenticated USING (true);
+DROP POLICY IF EXISTS rms_account_grading_scales_insert ON public.grading_scales;
 CREATE POLICY rms_account_grading_scales_insert ON public.grading_scales FOR INSERT TO authenticated
   WITH CHECK (public.rms_account_role() = 'dos');
+DROP POLICY IF EXISTS rms_account_grading_scales_update ON public.grading_scales;
 CREATE POLICY rms_account_grading_scales_update ON public.grading_scales FOR UPDATE TO authenticated
   USING (public.rms_account_role() = 'dos') WITH CHECK (public.rms_account_role() = 'dos');
+DROP POLICY IF EXISTS rms_account_grading_scales_delete ON public.grading_scales;
 CREATE POLICY rms_account_grading_scales_delete ON public.grading_scales FOR DELETE TO authenticated
   USING (public.rms_account_role() = 'dos');
+DROP POLICY IF EXISTS rms_report_reference_grading_select ON public.grading_scales;
 CREATE POLICY rms_report_reference_grading_select ON public.grading_scales FOR SELECT USING (auth.uid() IS NOT NULL);
+DROP POLICY IF EXISTS rms_performance_comments_all ON public.performance_comments;
 CREATE POLICY rms_performance_comments_all ON public.performance_comments FOR ALL USING (true) WITH CHECK (true);
+DROP POLICY IF EXISTS rms_account_performance_comments_select ON public.performance_comments;
 CREATE POLICY rms_account_performance_comments_select ON public.performance_comments FOR SELECT TO authenticated USING (true);
+DROP POLICY IF EXISTS rms_account_performance_comments_insert ON public.performance_comments;
 CREATE POLICY rms_account_performance_comments_insert ON public.performance_comments FOR INSERT TO authenticated
   WITH CHECK (public.rms_account_role() = 'dos');
+DROP POLICY IF EXISTS rms_account_performance_comments_update ON public.performance_comments;
 CREATE POLICY rms_account_performance_comments_update ON public.performance_comments FOR UPDATE TO authenticated
   USING (public.rms_account_role() = 'dos') WITH CHECK (public.rms_account_role() = 'dos');
+DROP POLICY IF EXISTS rms_account_performance_comments_delete ON public.performance_comments;
 CREATE POLICY rms_account_performance_comments_delete ON public.performance_comments FOR DELETE TO authenticated
   USING (public.rms_account_role() = 'dos');
+DROP POLICY IF EXISTS rms_account_academic_years_select ON public.academic_years;
 CREATE POLICY rms_account_academic_years_select ON public.academic_years FOR SELECT TO authenticated USING (true);
+DROP POLICY IF EXISTS rms_account_academic_years_insert ON public.academic_years;
 CREATE POLICY rms_account_academic_years_insert ON public.academic_years FOR INSERT TO authenticated
   WITH CHECK (public.rms_account_role() = 'dos');
+DROP POLICY IF EXISTS rms_account_academic_years_update ON public.academic_years;
 CREATE POLICY rms_account_academic_years_update ON public.academic_years FOR UPDATE TO authenticated
   USING (public.rms_account_role() = 'dos') WITH CHECK (public.rms_account_role() = 'dos');
+DROP POLICY IF EXISTS rms_account_academic_years_delete ON public.academic_years;
 CREATE POLICY rms_account_academic_years_delete ON public.academic_years FOR DELETE TO authenticated
   USING (public.rms_account_role() = 'dos');
+DROP POLICY IF EXISTS rms_report_reference_years_select ON public.academic_years;
 CREATE POLICY rms_report_reference_years_select ON public.academic_years FOR SELECT USING (auth.uid() IS NOT NULL);
+DROP POLICY IF EXISTS rms_account_terms_select ON public.terms;
 CREATE POLICY rms_account_terms_select ON public.terms FOR SELECT TO authenticated USING (true);
+DROP POLICY IF EXISTS rms_account_terms_insert ON public.terms;
 CREATE POLICY rms_account_terms_insert ON public.terms FOR INSERT TO authenticated
   WITH CHECK (public.rms_account_role() = 'dos');
+DROP POLICY IF EXISTS rms_account_terms_update ON public.terms;
 CREATE POLICY rms_account_terms_update ON public.terms FOR UPDATE TO authenticated
   USING (public.rms_account_role() = 'dos') WITH CHECK (public.rms_account_role() = 'dos');
+DROP POLICY IF EXISTS rms_account_terms_delete ON public.terms;
 CREATE POLICY rms_account_terms_delete ON public.terms FOR DELETE TO authenticated
   USING (public.rms_account_role() = 'dos');
+DROP POLICY IF EXISTS rms_report_reference_terms_select ON public.terms;
 CREATE POLICY rms_report_reference_terms_select ON public.terms FOR SELECT USING (auth.uid() IS NOT NULL);
 
 -- --- school_settings (readable pre-login for branding; DOS writes) ---
+DROP POLICY IF EXISTS rms_account_school_settings_select ON public.school_settings;
 CREATE POLICY rms_account_school_settings_select ON public.school_settings FOR SELECT TO anon, authenticated USING (true);
+DROP POLICY IF EXISTS rms_account_school_settings_insert ON public.school_settings;
 CREATE POLICY rms_account_school_settings_insert ON public.school_settings FOR INSERT TO authenticated
   WITH CHECK (public.rms_account_role() = 'dos');
+DROP POLICY IF EXISTS rms_account_school_settings_update ON public.school_settings;
 CREATE POLICY rms_account_school_settings_update ON public.school_settings FOR UPDATE TO authenticated
   USING (public.rms_account_role() = 'dos') WITH CHECK (public.rms_account_role() = 'dos');
+DROP POLICY IF EXISTS rms_account_school_settings_delete ON public.school_settings;
 CREATE POLICY rms_account_school_settings_delete ON public.school_settings FOR DELETE TO authenticated
   USING (public.rms_account_role() = 'dos');
+DROP POLICY IF EXISTS rms_report_reference_settings_select ON public.school_settings;
 CREATE POLICY rms_report_reference_settings_select ON public.school_settings FOR SELECT USING (auth.uid() IS NOT NULL);
 
 -- --- notifications ---
+DROP POLICY IF EXISTS rms_account_notifications_select ON public.notifications;
 CREATE POLICY rms_account_notifications_select ON public.notifications FOR SELECT TO authenticated
   USING (recipient_user_id = auth.uid());
+DROP POLICY IF EXISTS rms_account_notifications_insert ON public.notifications;
 CREATE POLICY rms_account_notifications_insert ON public.notifications FOR INSERT TO authenticated
   WITH CHECK (sender_user_id = auth.uid()
     AND public.rms_account_can_send_notification(recipient_user_id, entity_type, entity_id));
+DROP POLICY IF EXISTS rms_account_notifications_update ON public.notifications;
 CREATE POLICY rms_account_notifications_update ON public.notifications FOR UPDATE TO authenticated
   USING (recipient_user_id = auth.uid()) WITH CHECK (recipient_user_id = auth.uid());
+DROP POLICY IF EXISTS rms_account_notifications_delete ON public.notifications;
 CREATE POLICY rms_account_notifications_delete ON public.notifications FOR DELETE TO authenticated
   USING (recipient_user_id = auth.uid() OR (public.rms_account_role() = 'dos'));
+DROP POLICY IF EXISTS communication_private_notifications_select ON public.notifications;
 CREATE POLICY communication_private_notifications_select ON public.notifications AS RESTRICTIVE FOR SELECT TO authenticated
   USING (entity_type IS DISTINCT FROM 'teacher_message' OR recipient_user_id = auth.uid());
+DROP POLICY IF EXISTS communication_private_notifications_update ON public.notifications;
 CREATE POLICY communication_private_notifications_update ON public.notifications AS RESTRICTIVE FOR UPDATE TO authenticated
   USING (entity_type IS DISTINCT FROM 'teacher_message' OR recipient_user_id = auth.uid())
   WITH CHECK (entity_type IS DISTINCT FROM 'teacher_message' OR recipient_user_id = auth.uid());
 
 -- --- announcements ---
+DROP POLICY IF EXISTS communication_announcements_select ON public.announcements;
 CREATE POLICY communication_announcements_select ON public.announcements FOR SELECT TO authenticated
   USING (public.rms_communication_can_read_announcement(id));
+DROP POLICY IF EXISTS communication_announcements_insert ON public.announcements;
 CREATE POLICY communication_announcements_insert ON public.announcements FOR INSERT TO authenticated
   WITH CHECK (sender_user_id = auth.uid() AND public.rms_communication_dos_scope(education_level));
+DROP POLICY IF EXISTS communication_announcements_update ON public.announcements;
 CREATE POLICY communication_announcements_update ON public.announcements FOR UPDATE TO authenticated
   USING (sender_user_id = auth.uid() AND public.rms_communication_dos_scope(education_level))
   WITH CHECK (sender_user_id = auth.uid() AND public.rms_communication_dos_scope(education_level));
+DROP POLICY IF EXISTS communication_announcements_delete ON public.announcements;
 CREATE POLICY communication_announcements_delete ON public.announcements FOR DELETE TO authenticated
   USING (sender_user_id = auth.uid() AND public.rms_communication_dos_scope(education_level));
+DROP POLICY IF EXISTS rms_announcement_ack_all ON public.announcement_acknowledgements;
 CREATE POLICY rms_announcement_ack_all ON public.announcement_acknowledgements FOR ALL USING (true) WITH CHECK (true);
 
 -- --- messages / attachments ---
+DROP POLICY IF EXISTS communication_messages_select ON public.messages;
 CREATE POLICY communication_messages_select ON public.messages FOR SELECT TO authenticated
   USING (sender_user_id = auth.uid() OR recipient_user_id = auth.uid());
+DROP POLICY IF EXISTS communication_messages_insert ON public.messages;
 CREATE POLICY communication_messages_insert ON public.messages FOR INSERT TO authenticated
   WITH CHECK (sender_user_id = auth.uid()
     AND public.rms_communication_can_send_message(recipient_user_id, class_id, thread_id, parent_message_id));
+DROP POLICY IF EXISTS communication_messages_update_read ON public.messages;
 CREATE POLICY communication_messages_update_read ON public.messages FOR UPDATE TO authenticated
   USING (recipient_user_id = auth.uid()) WITH CHECK (recipient_user_id = auth.uid());
+DROP POLICY IF EXISTS communication_attachments_participant ON public.message_attachments;
 CREATE POLICY communication_attachments_participant ON public.message_attachments FOR SELECT TO authenticated
   USING (EXISTS (SELECT 1 FROM public.messages m WHERE m.id = message_id
     AND (m.sender_user_id = auth.uid() OR m.recipient_user_id = auth.uid())));
+DROP POLICY IF EXISTS communication_attachments_insert ON public.message_attachments;
 CREATE POLICY communication_attachments_insert ON public.message_attachments FOR INSERT TO authenticated
   WITH CHECK (uploaded_by = auth.uid()
     AND EXISTS (SELECT 1 FROM public.messages m WHERE m.id = message_id AND m.sender_user_id = auth.uid()));
 
 -- --- documents ---
+DROP POLICY IF EXISTS rms_account_documents_select ON public.documents;
 CREATE POLICY rms_account_documents_select ON public.documents FOR SELECT TO authenticated
   USING (public.rms_account_can_document(id));
+DROP POLICY IF EXISTS rms_account_documents_insert ON public.documents;
 CREATE POLICY rms_account_documents_insert ON public.documents FOR INSERT TO authenticated
   WITH CHECK (uploaded_by = auth.uid() AND (learner_id IS NULL OR public.rms_account_can_learner(learner_id)));
+DROP POLICY IF EXISTS rms_account_documents_update ON public.documents;
 CREATE POLICY rms_account_documents_update ON public.documents FOR UPDATE TO authenticated
   USING (public.rms_account_can_document(id))
   WITH CHECK (uploaded_by = auth.uid() OR public.rms_account_role() = 'dos');
+DROP POLICY IF EXISTS rms_account_documents_delete ON public.documents;
 CREATE POLICY rms_account_documents_delete ON public.documents FOR DELETE TO authenticated
   USING (public.rms_account_can_document(id));
 
 -- --- audit / import / registration / mail queues ---
+DROP POLICY IF EXISTS rms_account_audit_select ON public.audit_logs;
 CREATE POLICY rms_account_audit_select ON public.audit_logs FOR SELECT TO authenticated
   USING (user_id = auth.uid() OR (public.rms_account_role() = 'dos' AND (
     (assessment_id IS NOT NULL AND public.rms_account_can_assessment(assessment_id))
     OR (learner_id IS NOT NULL AND public.rms_account_can_learner(learner_id)))));
+DROP POLICY IF EXISTS rms_account_audit_insert ON public.audit_logs;
 CREATE POLICY rms_account_audit_insert ON public.audit_logs FOR INSERT TO authenticated
   WITH CHECK (user_id = auth.uid()
     AND (assessment_id IS NULL OR public.rms_account_can_assessment(assessment_id))
     AND (learner_id IS NULL OR public.rms_account_can_learner(learner_id)));
+DROP POLICY IF EXISTS rms_dos_can_insert_audit_logs ON public.audit_logs;
 CREATE POLICY rms_dos_can_insert_audit_logs ON public.audit_logs FOR INSERT TO authenticated
   WITH CHECK (public.rms_is_dos());
+DROP POLICY IF EXISTS rms_account_import_history_select ON public.import_history;
 CREATE POLICY rms_account_import_history_select ON public.import_history FOR SELECT TO authenticated
   USING (user_id = auth.uid());
+DROP POLICY IF EXISTS rms_account_import_history_insert ON public.import_history;
 CREATE POLICY rms_account_import_history_insert ON public.import_history FOR INSERT TO authenticated
   WITH CHECK (user_id = auth.uid());
+DROP POLICY IF EXISTS rms_account_registration_audit_select ON public.teacher_registration_audit;
 CREATE POLICY rms_account_registration_audit_select ON public.teacher_registration_audit FOR SELECT TO authenticated
   USING (user_id = auth.uid() OR registered_by_user_id = auth.uid() OR public.rms_account_can_access_user(user_id));
+DROP POLICY IF EXISTS rms_account_registration_audit_insert ON public.teacher_registration_audit;
 CREATE POLICY rms_account_registration_audit_insert ON public.teacher_registration_audit FOR INSERT TO authenticated
   WITH CHECK (registered_by_user_id = auth.uid() AND public.rms_account_role() = 'dos');
+DROP POLICY IF EXISTS rms_account_registration_audit_update ON public.teacher_registration_audit;
 CREATE POLICY rms_account_registration_audit_update ON public.teacher_registration_audit FOR UPDATE TO authenticated
   USING (registered_by_user_id = auth.uid() AND public.rms_account_role() = 'dos')
   WITH CHECK (registered_by_user_id = auth.uid() AND public.rms_account_role() = 'dos');
+DROP POLICY IF EXISTS rms_account_email_notifications_select ON public.email_notifications;
 CREATE POLICY rms_account_email_notifications_select ON public.email_notifications FOR SELECT TO authenticated
   USING (recipient_user_id = auth.uid() OR public.rms_account_can_access_user(recipient_user_id));
+DROP POLICY IF EXISTS rms_account_email_notifications_insert ON public.email_notifications;
 CREATE POLICY rms_account_email_notifications_insert ON public.email_notifications FOR INSERT TO authenticated
   WITH CHECK (public.rms_account_role() = 'dos' AND public.rms_account_can_access_user(recipient_user_id));
+DROP POLICY IF EXISTS rms_account_email_notifications_update ON public.email_notifications;
 CREATE POLICY rms_account_email_notifications_update ON public.email_notifications FOR UPDATE TO authenticated
   USING (public.rms_account_role() = 'dos' AND public.rms_account_can_access_user(recipient_user_id))
   WITH CHECK (public.rms_account_role() = 'dos' AND public.rms_account_can_access_user(recipient_user_id));
+DROP POLICY IF EXISTS rms_account_sms_notifications_select ON public.sms_notifications;
 CREATE POLICY rms_account_sms_notifications_select ON public.sms_notifications FOR SELECT TO authenticated
   USING (recipient_user_id = auth.uid() OR public.rms_account_can_access_user(recipient_user_id));
+DROP POLICY IF EXISTS rms_account_sms_notifications_insert ON public.sms_notifications;
 CREATE POLICY rms_account_sms_notifications_insert ON public.sms_notifications FOR INSERT TO authenticated
   WITH CHECK (public.rms_account_role() = 'dos' AND public.rms_account_can_access_user(recipient_user_id));
+DROP POLICY IF EXISTS rms_account_sms_notifications_update ON public.sms_notifications;
 CREATE POLICY rms_account_sms_notifications_update ON public.sms_notifications FOR UPDATE TO authenticated
   USING (public.rms_account_role() = 'dos' AND public.rms_account_can_access_user(recipient_user_id))
   WITH CHECK (public.rms_account_role() = 'dos' AND public.rms_account_can_access_user(recipient_user_id));
@@ -2139,31 +2266,42 @@ BEGIN
   END LOOP;
 END $do$;
 
+DROP POLICY IF EXISTS rms_account_documents_storage_select ON storage.objects;
 CREATE POLICY rms_account_documents_storage_select ON storage.objects FOR SELECT TO authenticated
   USING (bucket_id = 'documents' AND EXISTS (
     SELECT 1 FROM public.documents d WHERE d.storage_path = name AND public.rms_account_can_document(d.id)));
+DROP POLICY IF EXISTS rms_account_documents_storage_insert ON storage.objects;
 CREATE POLICY rms_account_documents_storage_insert ON storage.objects FOR INSERT TO authenticated
   WITH CHECK (bucket_id = 'documents' AND public.rms_account_role() = 'dos');
+DROP POLICY IF EXISTS rms_account_documents_storage_update ON storage.objects;
 CREATE POLICY rms_account_documents_storage_update ON storage.objects FOR UPDATE TO authenticated
   USING (bucket_id = 'documents' AND public.rms_account_role() = 'dos')
   WITH CHECK (bucket_id = 'documents' AND public.rms_account_role() = 'dos');
+DROP POLICY IF EXISTS rms_account_documents_storage_delete ON storage.objects;
 CREATE POLICY rms_account_documents_storage_delete ON storage.objects FOR DELETE TO authenticated
   USING (bucket_id = 'documents' AND public.rms_account_role() = 'dos');
+DROP POLICY IF EXISTS communication_message_files_insert ON storage.objects;
 CREATE POLICY communication_message_files_insert ON storage.objects FOR INSERT TO authenticated
   WITH CHECK (bucket_id = 'message-attachments');
+DROP POLICY IF EXISTS communication_message_files_select ON storage.objects;
 CREATE POLICY communication_message_files_select ON storage.objects FOR SELECT TO authenticated
   USING (bucket_id = 'message-attachments');
+DROP POLICY IF EXISTS communication_message_files_delete ON storage.objects;
 CREATE POLICY communication_message_files_delete ON storage.objects FOR DELETE TO authenticated
   USING (bucket_id = 'message-attachments');
+DROP POLICY IF EXISTS "Public Access profile-photos" ON storage.objects;
 CREATE POLICY "Public Access profile-photos" ON storage.objects FOR SELECT USING (bucket_id = 'profile-photos');
+DROP POLICY IF EXISTS rms_profile_photos_owner_insert ON storage.objects;
 CREATE POLICY rms_profile_photos_owner_insert ON storage.objects FOR INSERT TO authenticated
   WITH CHECK (bucket_id = 'profile-photos' AND EXISTS (
     SELECT 1 FROM public.teachers t WHERE t.user_id = auth.uid() AND name LIKE 'teacher-photos/' || t.id::text || '.%'));
+DROP POLICY IF EXISTS rms_profile_photos_owner_update ON storage.objects;
 CREATE POLICY rms_profile_photos_owner_update ON storage.objects FOR UPDATE TO authenticated
   USING (bucket_id = 'profile-photos' AND EXISTS (
     SELECT 1 FROM public.teachers t WHERE t.user_id = auth.uid() AND name LIKE 'teacher-photos/' || t.id::text || '.%'))
   WITH CHECK (bucket_id = 'profile-photos' AND EXISTS (
     SELECT 1 FROM public.teachers t WHERE t.user_id = auth.uid() AND name LIKE 'teacher-photos/' || t.id::text || '.%'));
+DROP POLICY IF EXISTS rms_profile_photos_owner_delete ON storage.objects;
 CREATE POLICY rms_profile_photos_owner_delete ON storage.objects FOR DELETE TO authenticated
   USING (bucket_id = 'profile-photos' AND EXISTS (
     SELECT 1 FROM public.teachers t WHERE t.user_id = auth.uid() AND name LIKE 'teacher-photos/' || t.id::text || '.%'));
