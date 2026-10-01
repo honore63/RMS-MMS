@@ -325,6 +325,9 @@ async function assessSave(btn) {
     Utils.toast(msg, 'error');
   };
   const type = asfSelectedType();
+  if (!type) {
+    return fail('Select an Assessment Type. If the list is empty, restore the standard types from the Assessment Types page.');
+  }
   const hint = Utils.getTypePeriodHint(type);
   const typeName = type ? type.name : 'End-of-Unit Assessment';
 

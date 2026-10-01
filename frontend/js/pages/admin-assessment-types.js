@@ -67,19 +67,20 @@ function getAssessmentTypeName(types, id, fallback) {
 // backend/sql/database.sql. Used by "Restore standard types" so the catalogue
 // can be repaired from the UI without access to the SQL editor.
 const STANDARD_ASSESSMENT_TYPES = [
-  { name: 'Weekly Test',            code: 'WKT',   description: 'Weekly classroom test',          default_maximum_mark: 10,  display_order: 1,  period_hint: 'week',  is_standard: true },
-  { name: 'Monthly Test',           code: 'MLT',   description: 'Monthly assessment',             default_maximum_mark: 20,  display_order: 2,  period_hint: 'month', is_standard: true },
-  { name: 'Beginning of Term Exam', code: 'BOT',   description: 'Beginning of term examination', default_maximum_mark: 50,  display_order: 3,  period_hint: 'term',  is_standard: true },
-  { name: 'Mid-Term Exam',          code: 'MTE',   description: 'Mid-term examination',          default_maximum_mark: 50,  display_order: 4,  period_hint: 'term',  is_standard: true },
-  { name: 'End of Term Exam',       code: 'EOT',   description: 'End of term examination',        default_maximum_mark: 100, display_order: 5,  period_hint: 'term',  is_standard: true },
-  { name: 'Quiz',                   code: 'QUIZ',  description: 'Short quiz',                     default_maximum_mark: 20,  display_order: 6,  period_hint: null,    is_standard: true },
-  { name: 'Assignment',             code: 'ASGMT', description: 'Take-home assignment',           default_maximum_mark: 20,  display_order: 7,  period_hint: null,    is_standard: true },
-  { name: 'Practical',              code: 'PRAC',  description: 'Practical assessment',           default_maximum_mark: 30,  display_order: 8,  period_hint: null,    is_standard: true },
-  { name: 'Class Exercise',         code: 'CEXE',  description: 'Class exercise',                 default_maximum_mark: 10,  display_order: 9,  period_hint: null,    is_standard: true },
-  { name: 'Homework',               code: 'HW',    description: 'Homework',                       default_maximum_mark: 10,  display_order: 10, period_hint: null,    is_standard: true },
-  { name: 'Oral',                   code: 'ORAL',  description: 'Oral assessment',                default_maximum_mark: 10,  display_order: 11, period_hint: null,    is_standard: true },
-  { name: 'End of Unit',            code: 'EOU',   description: 'End-of-unit assessment',         default_maximum_mark: 30,  display_order: 12, period_hint: 'unit',  is_standard: true },
-  { name: 'Other',                  code: 'OTHER', description: 'Other assessment',               default_maximum_mark: 30,  display_order: 13, period_hint: 'other', is_standard: true }
+  { name: 'CAT',                   code: 'CAT',   description: 'Continuous assessment test',    default_maximum_mark: 20,  display_order: 1,  period_hint: null,    is_standard: true },
+  { name: 'Weekly Test',            code: 'WKT',   description: 'Weekly classroom test',          default_maximum_mark: 10,  display_order: 2,  period_hint: 'week',  is_standard: true },
+  { name: 'Monthly Test',           code: 'MLT',   description: 'Monthly assessment',             default_maximum_mark: 20,  display_order: 3,  period_hint: 'month', is_standard: true },
+  { name: 'Beginning Exam',         code: 'BOT',   description: 'Beginning of term examination', default_maximum_mark: 50,  display_order: 4,  period_hint: 'term',  is_standard: true },
+  { name: 'Mid-Term Exam',          code: 'MTE',   description: 'Mid-term examination',          default_maximum_mark: 50,  display_order: 5,  period_hint: 'term',  is_standard: true },
+  { name: 'End of Term Exam',       code: 'EOT',   description: 'End of term examination',        default_maximum_mark: 100, display_order: 6,  period_hint: 'term',  is_standard: true },
+  { name: 'End of Unit',            code: 'EOU',   description: 'End-of-unit assessment',         default_maximum_mark: 30,  display_order: 7,  period_hint: 'unit',  is_standard: true },
+  { name: 'Quiz',                   code: 'QUIZ',  description: 'Short quiz',                     default_maximum_mark: 20,  display_order: 8,  period_hint: null,    is_standard: true },
+  { name: 'Assignment',             code: 'ASGMT', description: 'Take-home assignment',           default_maximum_mark: 20,  display_order: 9,  period_hint: null,    is_standard: true },
+  { name: 'Practical',              code: 'PRAC',  description: 'Practical assessment',           default_maximum_mark: 30,  display_order: 10, period_hint: null,    is_standard: true },
+  { name: 'Class Exercise',         code: 'CEXE',  description: 'Class exercise',                 default_maximum_mark: 10,  display_order: 11, period_hint: null,    is_standard: true },
+  { name: 'Homework',               code: 'HW',    description: 'Homework',                       default_maximum_mark: 10,  display_order: 12, period_hint: null,    is_standard: true },
+  { name: 'Oral',                   code: 'ORAL',  description: 'Oral assessment',                default_maximum_mark: 10,  display_order: 13, period_hint: null,    is_standard: true },
+  { name: 'Other',                  code: 'OTHER', description: 'Other assessment',               default_maximum_mark: 30,  display_order: 14, period_hint: 'other', is_standard: true }
 ];
 
 // Inserts any missing canonical type and refreshes the ones already present.

@@ -183,32 +183,68 @@ REVOKE EXECUTE ON FUNCTION public.rms_delete_teacher(UUID) FROM anon;
 
 
 -- ============================================================================
--- BLOCK 6 — RESTORE STANDARD ASSESSMENT TYPES
--- The 13 standard assessment types are seeded by the master script. If the
--- live database was built without that seed section the table is empty, the
--- Assessment Types page reports nothing available, and assessment creation has
--- no category to choose. This block is idempotent (ON CONFLICT DO UPDATE).
--- Run it whenever SELECT count(*) FROM assessment_types returns 0.
+-- BLOCK 6 — RESTORE ASSESSMENT TYPES (additive, never destructive)
+-- The standard types are reference data for assessments.assessment_type_id.
+--
+-- SAFETY PROPERTIES OF THIS BLOCK
+--   * It only INSERTS. Nothing is deleted, renamed or truncated.
+--   * A type is skipped when a type with the same name (case-insensitive)
+--     already exists, so it cannot create duplicates against live data.
+--   * Existing custom types added by the school are preserved untouched.
+--   * weight is cast (NULL::NUMERIC) because an all-NULL VALUES column would
+--     otherwise be typed as text and fail against the numeric column.
+--
+-- Run it whenever the Assessment Types page is empty or the Create Assessment
+-- dropdown has no options. Safe to run repeatedly.
 -- ============================================================================
 INSERT INTO assessment_types (name, code, description, default_maximum_mark, weight, contributes_to_combined, display_order, status, period_hint, is_standard)
 SELECT * FROM (VALUES
-  ('Weekly Test','WKT','Weekly classroom test',10,NULL::NUMERIC,TRUE,1,'active','week',TRUE),
-  ('Monthly Test','MLT','Monthly assessment',20,NULL::NUMERIC,TRUE,2,'active','month',TRUE),
-  ('Beginning of Term Exam','BOT','Beginning of term examination',50,NULL::NUMERIC,TRUE,3,'active','term',TRUE),
-  ('Mid-Term Exam','MTE','Mid-term examination',50,NULL::NUMERIC,TRUE,4,'active','term',TRUE),
-  ('End of Term Exam','EOT','End of term examination',100,NULL::NUMERIC,TRUE,5,'active','term',TRUE),
-  ('Quiz','QUIZ','Short quiz',20,NULL::NUMERIC,TRUE,6,'active',NULL,TRUE),
-  ('Assignment','ASGMT','Take-home assignment',20,NULL::NUMERIC,TRUE,7,'active',NULL,TRUE),
-  ('Practical','PRAC','Practical assessment',30,NULL::NUMERIC,TRUE,8,'active',NULL,TRUE),
-  ('Class Exercise','CEXE','Class exercise',10,NULL::NUMERIC,TRUE,9,'active',NULL,TRUE),
-  ('Homework','HW','Homework',10,NULL::NUMERIC,TRUE,10,'active',NULL,TRUE),
-  ('Oral','ORAL','Oral assessment',10,NULL::NUMERIC,TRUE,11,'active',NULL,TRUE),
-  ('End of Unit','EOU','End-of-unit assessment',30,NULL::NUMERIC,TRUE,12,'active','unit',TRUE),
-  ('Other','OTHER','Other assessment',30,NULL::NUMERIC,TRUE,13,'active','other',TRUE)
+  ('CAT','CAT','Continuous assessment test',20,NULL::NUMERIC,TRUE,1,'active',NULL,TRUE),
+  ('Weekly Test','WKT','Weekly classroom test',10,NULL::NUMERIC,TRUE,2,'active','week',TRUE),
+  ('Monthly Test','MLT','Monthly assessment',20,NULL::NUMERIC,TRUE,3,'active','month',TRUE),
+  ('Beginning Exam','BOT','Beginning of term examination',50,NULL::NUMERIC,TRUE,4,'active','term',TRUE),
+  ('Mid-Term Exam','MTE','Mid-term examination',50,NULL::NUMERIC,TRUE,5,'active','term',TRUE),
+  ('End of Term Exam','EOT','End of term examination',100,NULL::NUMERIC,TRUE,6,'active','term',TRUE),
+  ('End of Unit','EOU','End-of-unit assessment',30,NULL::NUMERIC,TRUE,7,'active','unit',TRUE),
+  ('Quiz','QUIZ','Short quiz',20,NULL::NUMERIC,TRUE,8,'active',NULL,TRUE),
+  ('Assignment','ASGMT','Take-home assignment',20,NULL::NUMERIC,TRUE,9,'active',NULL,TRUE),
+  ('Practical','PRAC','Practical assessment',30,NULL::NUMERIC,TRUE,10,'active',NULL,TRUE),
+  ('Class Exercise','CEXE','Class exercise',10,NULL::NUMERIC,TRUE,11,'active',NULL,TRUE),
+  ('Homework','HW','Homework',10,NULL::NUMERIC,TRUE,12,'active',NULL,TRUE),
+  ('Oral','ORAL','Oral assessment',10,NULL::NUMERIC,TRUE,13,'active',NULL,TRUE),
+  ('Other','OTHER','Other assessment',30,NULL::NUMERIC,TRUE,14,'active','other',TRUE)
 ) AS v (name, code, description, default_maximum_mark, weight, contributes_to_combined, display_order, status, period_hint, is_standard)
-ON CONFLICT (name) DO UPDATE SET code = EXCLUDED.code, description = EXCLUDED.description,
-  default_maximum_mark = EXCLUDED.default_maximum_mark, display_order = EXCLUDED.display_order,
-  status = EXCLUDED.status, period_hint = EXCLUDED.period_hint, is_standard = EXCLUDED.is_standard;
+WHERE NOT EXISTS (
+  SELECT 1 FROM assessment_types t
+  WHERE lower(btrim(t.name)) = lower(btrim(v.name))
+    OR lower(btrim(t.code)) = lower(btrim(v.code))
+);
+
+-- 6a. Types now present, with how many assessments use each.
+--     assessments_in_use = 0 means the type is safe to remove by hand.
+SELECT t.id, t.name, t.code, t.default_maximum_mark, t.status,
+       (SELECT count(*) FROM assessments a WHERE a.assessment_type_id = t.id) AS assessments_in_use
+FROM assessment_types t
+ORDER BY t.display_order, t.name;
+
+-- 6b. REVIEW ONLY - assessments with no type, or pointing at a missing type.
+--     These are left untouched on purpose; assign a type by hand after review.
+SELECT a.id, a.name, a.status, a.assessment_date, a.class_id,
+       CASE WHEN a.assessment_type_id IS NULL THEN 'no type set' ELSE 'type row missing' END AS issue
+FROM assessments a
+LEFT JOIN assessment_types t ON t.id = a.assessment_type_id
+WHERE a.assessment_type_id IS NULL OR t.id IS NULL
+ORDER BY a.assessment_date DESC;
+
+-- 6c. Duplicate names or codes (should return no rows).
+SELECT lower(btrim(name)) AS name_key, count(*) AS occurrences
+FROM assessment_types GROUP BY 1 HAVING count(*) > 1;
+
+-- 6d. If 6c finds a duplicate that no assessment uses, remove it explicitly:
+--     DELETE FROM assessment_types t WHERE t.name = '<exact name>'
+--       AND NOT EXISTS (SELECT 1 FROM assessments a WHERE a.assessment_type_id = t.id);
+--     assessments.assessment_type_id is REFERENCES ... (no cascade), so a type
+--     that IS in use cannot be deleted by accident.
 
 
 -- ============================================================================
