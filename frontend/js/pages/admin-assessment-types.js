@@ -45,11 +45,14 @@ const TYPE_CATEGORIES = [
   { id: 'performance', label: 'Performance', icon: 'trending-up' }
 ];
 
-async function getAssessmentTypes(force = false) {
+// strict = true re-throws so the page can render a real error instead of
+// silently showing an empty list (which is indistinguishable from "no data").
+async function getAssessmentTypes(force = false, strict = false) {
   if (Array.isArray(assessmentTypesCache) && !force) return assessmentTypesCache;
   try {
     assessmentTypesCache = (await DB.get('assessment_types')) || [];
   } catch (e) {
+    if (strict) throw e;
     assessmentTypesCache = assessmentTypesCache || [];
   }
   return assessmentTypesCache;
@@ -88,7 +91,7 @@ async function renderAssessmentTypes() {
 
   try {
     const [types, assessments] = await Promise.all([
-      getAssessmentTypes(true),
+      getAssessmentTypes(true, true),
       DB.get('assessments', {}, { select: 'id,assessment_type_id' })
     ]);
 
