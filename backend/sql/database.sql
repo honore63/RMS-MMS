@@ -733,19 +733,16 @@ END $do$;
 
 -- DOS can delete a teacher with everything they own: assessments (cascade
 -- deletes their marks), teacher_assignments, classes.class_teacher_id -> NULL,
--- teacher_registration_audit. Ambiguous audit/import creator references are
--- NULLed instead of blocking the user-row delete.
+-- teacher_registration_audit. The only NO-ACTION FK that can block removing a
+-- teacher's login row is teacher_registration_audit.registered_by_user_id
+-- (when the teacher registered other accounts), so that one is NULLed.
+-- NOTE: audit_logs / import_history use a free-form user_id (no FK), so they
+-- never block user deletion.
 DO $do$
 BEGIN
   ALTER TABLE assessments DROP CONSTRAINT IF EXISTS assessments_teacher_id_fkey;
   ALTER TABLE assessments ADD CONSTRAINT assessments_teacher_id_fkey FOREIGN KEY (teacher_id)
     REFERENCES teachers(id) ON DELETE CASCADE;
-  ALTER TABLE audit_logs DROP CONSTRAINT IF EXISTS audit_logs_created_by_fkey;
-  ALTER TABLE audit_logs ADD CONSTRAINT audit_logs_created_by_fkey FOREIGN KEY (created_by)
-    REFERENCES users(id) ON DELETE SET NULL;
-  ALTER TABLE import_history DROP CONSTRAINT IF EXISTS import_history_created_by_fkey;
-  ALTER TABLE import_history ADD CONSTRAINT import_history_created_by_fkey FOREIGN KEY (created_by)
-    REFERENCES users(id) ON DELETE SET NULL;
   ALTER TABLE teacher_registration_audit DROP CONSTRAINT IF EXISTS teacher_registration_audit_registered_by_user_id_fkey;
   ALTER TABLE teacher_registration_audit ADD CONSTRAINT teacher_registration_audit_registered_by_user_id_fkey FOREIGN KEY (registered_by_user_id)
     REFERENCES users(id) ON DELETE SET NULL;
