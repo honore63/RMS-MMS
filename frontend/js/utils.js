@@ -200,6 +200,25 @@ const Utils = {
   ASSESSMENT_TYPES,
   ASSESSMENT_TYPE_DEFAULTS,
 
+  canonicalAssessmentTypeRows() {
+    return ASSESSMENT_TYPES.map((name, index) => {
+      const d = ASSESSMENT_TYPE_DEFAULTS[name] || { max: 30, hint: null };
+      return {
+        id: `canonical-${index}`,
+        name,
+        code: this.assessmentTypeCode(name),
+        description: name === 'CAT' ? 'Continuous assessment test' : name,
+        default_maximum_mark: d.max,
+        weight: null,
+        contributes_to_combined: true,
+        display_order: index + 1,
+        status: 'active',
+        period_hint: d.hint,
+        is_standard: true
+      };
+    });
+  },
+
   isCanonicalType(name) {
     const n = (name || '').trim().toLowerCase();
     return ASSESSMENT_TYPES.some(t => t.toLowerCase() === n);
@@ -246,14 +265,19 @@ const Utils = {
      Best-effort: a non-DOS caller is simply denied by RLS and we carry on
      using whatever rows already exist. */
   async ensureAssessmentTypes() {
-    if (typeof sbClient === 'undefined') return [];
+    if (typeof sbClient === 'undefined') return this.canonicalAssessmentTypeRows();
 
     const currentRole = (typeof Auth !== 'undefined' && Auth.currentUser && Auth.currentUser.role) || null;
     const canWriteCanonicalTypes = currentRole === 'dos';
 
     let existing = [];
     try { existing = (await sbClient.from('assessment_types').select('*'))?.data || []; }
-    catch (e) { return []; }
+    catch (e) { return this.canonicalAssessmentTypeRows(); }
+
+    if (!existing.length) {
+      Utils.assessmentTypesCache = this.canonicalAssessmentTypeRows();
+      return Utils.assessmentTypesCache;
+    }
 
     const missing = ASSESSMENT_TYPES
       .filter(n => !Utils.findTypeRowByName(existing, n))
@@ -277,7 +301,10 @@ const Utils = {
       const { data } = await sbClient.from('assessment_types').select('*');
       if (Array.isArray(data) && data.length) Utils.assessmentTypesCache = data;
     } catch (e) { /* ignore */ }
-    return Utils.assessmentTypesCache || existing;
+
+    const finalTypes = Utils.assessmentTypesCache && Utils.assessmentTypesCache.length ? Utils.assessmentTypesCache : this.canonicalAssessmentTypeRows();
+    Utils.assessmentTypesCache = finalTypes;
+    return finalTypes;
   },
 
   /* Default hint map so the conditional creation form works even before the
