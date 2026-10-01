@@ -18,7 +18,21 @@ const ASSESSMENT_TYPES = [
   'CAT',
   'Monthly Test',
   'Weekly Test',
-  'Beginning Exam'
+  'Beginning Exam',
+  'Mid-Term Exam',
+  'End of Term Exam',
+  'End of Unit',
+  'Assignment',
+  'Quiz',
+  'Project',
+  'Homework',
+  'Classwork',
+  'Practical',
+  'Portfolio',
+  'Oral Test',
+  'Participation',
+  'Diagnostic Test',
+  'Other'
 ];
 
 /* Default maximum mark + period hint per canonical type. */
@@ -26,7 +40,21 @@ const ASSESSMENT_TYPE_DEFAULTS = {
   'CAT': { max: 20, hint: null },
   'Monthly Test': { max: 20, hint: 'month' },
   'Weekly Test': { max: 10, hint: 'week' },
-  'Beginning Exam': { max: 50, hint: 'term' }
+  'Beginning Exam': { max: 50, hint: 'term' },
+  'Mid-Term Exam': { max: 50, hint: 'term' },
+  'End of Term Exam': { max: 70, hint: 'term' },
+  'End of Unit': { max: 100, hint: 'unit' },
+  'Assignment': { max: 20, hint: 'other' },
+  'Quiz': { max: 10, hint: 'week' },
+  'Project': { max: 25, hint: 'unit' },
+  'Homework': { max: 10, hint: 'week' },
+  'Classwork': { max: 15, hint: 'week' },
+  'Practical': { max: 25, hint: 'other' },
+  'Portfolio': { max: 30, hint: 'other' },
+  'Oral Test': { max: 20, hint: 'other' },
+  'Participation': { max: 10, hint: 'other' },
+  'Diagnostic Test': { max: 30, hint: 'term' },
+  'Other': { max: 20, hint: 'other' }
 };
 
 const Utils = {
@@ -154,6 +182,16 @@ const Utils = {
     'Mid-Term Exam': 'term',
     'End of Term Exam': 'term',
     'End of Unit': 'unit',
+    'Assignment': 'other',
+    'Quiz': 'week',
+    'Project': 'unit',
+    'Homework': 'week',
+    'Classwork': 'week',
+    'Practical': 'other',
+    'Portfolio': 'other',
+    'Oral Test': 'other',
+    'Participation': 'other',
+    'Diagnostic Test': 'term',
     'Other': 'other'
   },
 
@@ -186,6 +224,20 @@ const Utils = {
     if (n === 'monthly test') return 'MLT';
     if (n === 'weekly test') return 'WKT';
     if (n === 'beginning exam' || n === 'beginning of term exam') return 'BOT';
+    if (n === 'mid-term exam') return 'MTE';
+    if (n === 'end of term exam') return 'ETE';
+    if (n === 'end of unit') return 'EOU';
+    if (n === 'assignment') return 'ASS';
+    if (n === 'quiz') return 'QUIZ';
+    if (n === 'project') return 'PROJ';
+    if (n === 'homework') return 'HW';
+    if (n === 'classwork') return 'CW';
+    if (n === 'practical') return 'PRA';
+    if (n === 'portfolio') return 'PORT';
+    if (n === 'oral test') return 'ORAL';
+    if (n === 'participation') return 'PART';
+    if (n === 'diagnostic test') return 'DIAG';
+    if (n === 'other') return 'OTH';
     return (name || '').replace(/[^A-Za-z]/g, '').slice(0, 4).toUpperCase();
   },
 
@@ -195,9 +247,14 @@ const Utils = {
      using whatever rows already exist. */
   async ensureAssessmentTypes() {
     if (typeof sbClient === 'undefined') return [];
+
+    const currentRole = (typeof Auth !== 'undefined' && Auth.currentUser && Auth.currentUser.role) || null;
+    const canWriteCanonicalTypes = currentRole === 'dos';
+
     let existing = [];
     try { existing = (await sbClient.from('assessment_types').select('*'))?.data || []; }
     catch (e) { return []; }
+
     const missing = ASSESSMENT_TYPES
       .filter(n => !Utils.findTypeRowByName(existing, n))
       .map(n => {
@@ -210,10 +267,12 @@ const Utils = {
           status: 'active', period_hint: d.hint, is_standard: true
         };
       });
-    if (missing.length) {
+
+    if (missing.length && canWriteCanonicalTypes) {
       try { await sbClient.from('assessment_types').insert(missing); }
       catch (e) { /* RLS/permission: harmless, rows may already exist */ }
     }
+
     try {
       const { data } = await sbClient.from('assessment_types').select('*');
       if (Array.isArray(data) && data.length) Utils.assessmentTypesCache = data;
