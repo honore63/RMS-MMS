@@ -200,12 +200,13 @@ REVOKE EXECUTE ON FUNCTION public.rms_delete_teacher(UUID) FROM anon;
 -- ============================================================================
 
 -- 7a. Did every object land? Expect 0 rows.
+-- (cast to text: to_regclass and to_regprocedure return different types)
 SELECT 'missing objects' AS check_name, count(*) AS problems FROM (
-  SELECT to_regclass('public.password_recovery_attempts') AS o
-  UNION ALL SELECT to_regprocedure('public.rms_dos_level_audit()')
-  UNION ALL SELECT to_regprocedure('public.rms_dos_can_teacher_level(text)')
-  UNION ALL SELECT to_regprocedure('public.rms_delete_teacher(uuid)')
-  UNION ALL SELECT to_regprocedure('public.rms_release_fk_refs(regclass,uuid)')
+  SELECT to_regclass('public.password_recovery_attempts')::text AS o
+  UNION ALL SELECT to_regprocedure('public.rms_dos_level_audit()')::text
+  UNION ALL SELECT to_regprocedure('public.rms_dos_can_teacher_level(text)')::text
+  UNION ALL SELECT to_regprocedure('public.rms_delete_teacher(uuid)')::text
+  UNION ALL SELECT to_regprocedure('public.rms_release_fk_refs(regclass,uuid)')::text
 ) x WHERE o IS NULL;
 
 -- 7b. DOS accounts and their level. READ THIS BEFORE ANYTHING ELSE.
