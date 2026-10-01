@@ -9,7 +9,7 @@ This folder contains historical and backup project files. **It is not part of th
 ## Layout
 
 ```
-backend/sql/archive/
+archive/
 ├── sql/
 │   └── combined-database.sql   # Consolidated reference snapshot (see below)
 └── README.md                   # This file

@@ -139,11 +139,16 @@ rms-eua/
 │   ├── README.md                   # Supabase setup guide
 │   ├── sql/
 │   │   ├── database.sql            # MASTER setup: full schema + RLS + triggers + seeds (run this)
-│   │   ├── clear-data.sql          # Operational utility: wipe imported data, keep logins
-│   │   └── archive/                # Historical migrations (already folded into database.sql)
+│   │   └── clear-data.sql          # Operational utility: wipe imported data, keep logins
 │   └── functions/
 │       └── welcome-teacher/
 │           └── main.ts             # Supabase Edge Function: sends welcome email/SMS
+├── api/
+│   └── reports/
+│       └── pdf.js                  # Vercel serverless PDF endpoint (must stay at root for routing)
+├── archive/                        # Historical reference only (see archive/README.md)
+├── tests/
+│   └── calculation-check.test.js   # Calculation tests (run: node --test tests/)
 ├── vercel.json                     # Vercel deployment config (rewrites + headers)
 ├── .gitignore                      # Git ignore rules
 └── README.md                       # This file

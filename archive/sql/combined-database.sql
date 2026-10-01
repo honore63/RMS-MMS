@@ -3,7 +3,7 @@
 -- ----------------------------------------------------------------------------
 -- WHAT THIS IS:
 --   A historical reference snapshot consolidating every archived SQL file
---   that lived in backend/sql/archive/ as of 2026-10-01. It is NOT loaded
+--   that lived in the archive as of 2026-10-01. It is NOT loaded
 --   by the frontend, NOT part of any deployment, and NOT the live schema.
 --
 -- PROVENANCE:

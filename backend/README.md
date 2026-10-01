@@ -14,14 +14,12 @@ backend/
 │       └── main.ts               # Supabase Edge Function: sends welcome email/SMS
 └── sql/
     ├── database.sql              # MASTER SETUP: complete schema + RLS + triggers + seeds (run this)
-    ├── clear-data.sql            # Operational utility: wipe imported data, keep logins (NOT setup)
-    └── archive/                  # Historical migrations, one-off fixes and diagnostics,
-                                  # all already folded into database.sql (kept for reference only)
+    └── clear-data.sql            # Operational utility: wipe imported data, keep logins (NOT setup)
 ```
 
-> `database.sql` is the single authoritative setup file. The `archive/` folder holds the old
-> incremental `migration-*.sql` files plus one-off fix/diagnostic scripts — do not run them on a
-> fresh project; everything they did is already inside `database.sql`.
+> `database.sql` is the single authoritative setup file. Historical migrations live in the
+> root `archive/` folder (see `archive/README.md`) — do not run them on a fresh project;
+> everything they did is already inside `database.sql`.
 
 ## Setup
 
