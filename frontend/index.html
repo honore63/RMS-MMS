@@ -56,10 +56,21 @@
 <body>
   <div id="app">
     <div id="loading-screen" class="loading-screen">
-      <img src="public/logo.webp" alt="RMS Logo" style="width:56px;height:56px;object-fit:contain;margin-bottom:12px">
+      <img src="public/logo.webp" alt="RMS Logo" style="width:56px;height:56px;object-fit:contain;margin-bottom:12px" onerror="this.style.display='none'">
       <div class="spinner"></div>
       <p style="color:var(--gray-500);font-size:14px;font-weight:500">Loading...</p>
+      <p id="boot-slow-msg" style="display:none;color:var(--gray-500);font-size:12px;margin-top:8px">Taking too long? Check your internet connection, then <a href="#" onclick="location.reload();return false" style="color:var(--blue-600)">refresh the page</a>.</p>
     </div>
+    <script>
+      setTimeout(function() {
+        var loading = document.getElementById('loading-screen');
+        var login = document.getElementById('login-page');
+        if (loading && login && loading.style.display !== 'none' && login.style.display === 'none') {
+          var msg = document.getElementById('boot-slow-msg');
+          if (msg) msg.style.display = 'block';
+        }
+      }, 12000);
+    </script>
 
     <div id="login-page" class="login-page" style="display:none">
       <div class="login-shell">
