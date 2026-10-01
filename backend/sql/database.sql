@@ -2189,10 +2189,43 @@ REVOKE ALL ON FUNCTION public.send_message(UUID, UUID, TEXT, TEXT, TEXT) FROM PU
 -- below is what authorises it. Replaces the RLS DELETE policies on
 -- users/teachers (kept as a fallback for direct deletes).
 -- ============================================================================
+CREATE OR REPLACE FUNCTION public.rms_release_fk_refs(p_parent REGCLASS, p_key UUID)
+RETURNS VOID LANGUAGE plpgsql SECURITY DEFINER SET search_path = public, pg_temp AS $fn$
+DECLARE
+  r RECORD;
+BEGIN
+  IF p_key IS NULL THEN
+    RETURN;
+  END IF;
+  -- Discover every single-column NO ACTION / RESTRICT foreign key that points
+  -- at the given parent row and clear it, so a delete can never be blocked by
+  -- schema drift (older tables added by earlier migrations). Required columns
+  -- are removed with their row; optional ones are nulled (history preserved).
+  FOR r IN
+    SELECT c.conrelid::regclass AS tbl, a.attname AS col, a.attnotnull AS required
+    FROM pg_constraint c
+    JOIN pg_attribute a ON a.attrelid = c.conrelid AND a.attnum = ANY (c.conkey)
+    WHERE c.contype = 'f'
+      AND c.confrelid = p_parent
+      AND c.confdeltype IN ('a', 'r')
+      AND array_length(c.conkey, 1) = 1
+  LOOP
+    IF r.required THEN
+      EXECUTE format('DELETE FROM %s WHERE %I = $1', r.tbl, r.col) USING p_key;
+    ELSE
+      EXECUTE format('UPDATE %s SET %I = NULL WHERE %I = $1', r.tbl, r.col) USING p_key;
+    END IF;
+  END LOOP;
+END;
+$fn$;
+
+REVOKE ALL ON FUNCTION public.rms_release_fk_refs(REGCLASS, UUID) FROM PUBLIC, anon;
+
 CREATE OR REPLACE FUNCTION public.rms_delete_teacher(p_teacher_id UUID)
 RETURNS BOOLEAN LANGUAGE plpgsql SECURITY DEFINER SET search_path = public, pg_temp AS $fn$
 DECLARE
   v_user_id UUID;
+  a_id UUID;
 BEGIN
   IF p_teacher_id IS NULL THEN
     RAISE EXCEPTION 'Teacher not found';
@@ -2207,29 +2240,27 @@ BEGIN
     RAISE EXCEPTION 'Teacher not found';
   END IF;
 
-  -- Marks recorded against this teacher's assessments (before the assessments).
-  DELETE FROM public.marks m
-  WHERE m.assessment_id IN (SELECT a.id FROM public.assessments a WHERE a.teacher_id = p_teacher_id);
+  -- 1) Assessments owned by this teacher: clear anything pointing at them first,
+  --    then their marks, then the assessments themselves.
+  FOR a_id IN SELECT a.id FROM public.assessments a WHERE a.teacher_id = p_teacher_id LOOP
+    PERFORM public.rms_release_fk_refs('public.assessments'::regclass, a_id);
+  END LOOP;
+  DELETE FROM public.marks
+  WHERE assessment_id IN (SELECT a.id FROM public.assessments a WHERE a.teacher_id = p_teacher_id);
   DELETE FROM public.assessments WHERE teacher_id = p_teacher_id;
+
+  -- 2) Everything attached to the teacher.
   DELETE FROM public.teacher_assignments WHERE teacher_id = p_teacher_id;
   DELETE FROM public.teacher_registration_audit WHERE teacher_id = p_teacher_id;
   UPDATE public.classes SET class_teacher_id = NULL WHERE class_teacher_id = p_teacher_id;
 
-  -- Release any remaining "created by / registered by" pointers to this login
-  -- so the user row can be removed without a foreign-key conflict.
+  -- 3) Login record, then the teacher profile (each preceded by a sweep of
+  --    any remaining blocking references).
   IF v_user_id IS NOT NULL THEN
-    UPDATE public.teacher_registration_audit SET registered_by_user_id = NULL
-    WHERE registered_by_user_id = v_user_id;
-    UPDATE public.teachers SET created_by = NULL WHERE created_by = v_user_id;
-    IF EXISTS (SELECT 1 FROM information_schema.columns
-                WHERE table_schema = 'public' AND table_name = 'import_history'
-                  AND column_name = 'created_by') THEN
-      EXECUTE 'UPDATE public.import_history SET created_by = NULL WHERE created_by = $1'
-        USING v_user_id;
-    END IF;
+    PERFORM public.rms_release_fk_refs('public.users'::regclass, v_user_id);
     DELETE FROM public.users WHERE id = v_user_id;
   END IF;
-
+  PERFORM public.rms_release_fk_refs('public.teachers'::regclass, p_teacher_id);
   DELETE FROM public.teachers WHERE id = p_teacher_id;
   RETURN TRUE;
 END;
