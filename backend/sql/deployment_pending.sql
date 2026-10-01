@@ -13,30 +13,17 @@
 --   and policies. Nothing here deletes or rewrites school records.
 --
 -- HOW TO APPLY
---   Run blocks 1-4 in order. Each block is self-contained; a failure in one
+--   Run blocks 1-5 in order. Each block is self-contained; a failure in one
 --   block does not invalidate the others.
+--
+-- REMOVED: the password_recovery_attempts table (and the /api/auth/recover
+-- endpoint that used it) has been deleted from the project, so the
+-- self-service password-recovery flow no longer exists.
 -- ============================================================================
 
 
 -- ============================================================================
--- BLOCK 1 — Password recovery rate-limit store
--- Without this table /api/auth/recover refuses to issue credentials (HTTP 503)
--- rather than running without abuse protection.
--- ============================================================================
-CREATE TABLE IF NOT EXISTS password_recovery_attempts (
-  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-  email TEXT UNIQUE NOT NULL,
-  attempts INT NOT NULL DEFAULT 0,
-  window_start TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-  created_at TIMESTAMPTZ DEFAULT NOW()
-);
-ALTER TABLE password_recovery_attempts ENABLE ROW LEVEL SECURITY;
-CREATE INDEX IF NOT EXISTS idx_recovery_attempts_email ON password_recovery_attempts(email);
--- No RLS policies on purpose: only the service role (server-side) touches it.
-
-
--- ============================================================================
--- BLOCK 2 — DOS level helpers
+-- BLOCK 1 — DOS level helpers
 -- rms_dos_can_teacher_level : stops a scoped DOS writing the opposite level
 --                             onto a teacher or account record.
 -- rms_dos_level_audit       : reports every DOS account and whether its level
@@ -74,7 +61,7 @@ GRANT EXECUTE ON FUNCTION public.rms_dos_level_audit() TO authenticated;
 
 
 -- ============================================================================
--- BLOCK 3 — Teacher table read/write policies
+-- BLOCK 2 — Teacher table read/write policies
 -- The teachers table previously had only RESTRICTIVE policies. A restrictive
 -- policy narrows access but never grants it, so a database built purely from
 -- the master script resolved zero teachers for every role. These two PERMISSIVE
@@ -92,7 +79,7 @@ CREATE POLICY rms_account_teachers_update ON public.teachers FOR UPDATE TO authe
 
 
 -- ============================================================================
--- BLOCK 4 — Cross-level write guards
+-- BLOCK 3 — Cross-level write guards
 -- A scoped DOS may create/update a teacher, and may update a managed account,
 -- but may never label either with the opposite education level.
 -- ============================================================================
@@ -110,7 +97,7 @@ CREATE POLICY rms_dos_user_level_write ON public.users AS RESTRICTIVE FOR UPDATE
 
 
 -- ============================================================================
--- BLOCK 5 — DOS delete policy (from the teacher-deletion work)
+-- BLOCK 4 — DOS delete policy (teacher deletion work)
 -- ============================================================================
 DROP POLICY IF EXISTS rms_account_users_delete ON public.users;
 CREATE POLICY rms_account_users_delete ON public.users FOR DELETE TO authenticated
@@ -121,8 +108,9 @@ CREATE POLICY rms_account_users_delete ON public.users FOR DELETE TO authenticat
 
 
 -- ============================================================================
--- BLOCK 6 — Atomic teacher deletion (drops teacher + login + assignments +
--- assessments + every mark recorded against them, in one transaction)
+-- BLOCK 5 — Atomic teacher deletion
+-- Removes the teacher, their login row, assignments, assessments and every
+-- mark recorded against them, in one transaction.
 -- ============================================================================
 CREATE OR REPLACE FUNCTION public.rms_release_fk_refs(p_parent REGCLASS, p_key UUID)
 RETURNS VOID LANGUAGE plpgsql SECURITY DEFINER SET search_path = public, pg_temp AS $fn$
@@ -195,32 +183,31 @@ REVOKE EXECUTE ON FUNCTION public.rms_delete_teacher(UUID) FROM anon;
 
 
 -- ============================================================================
--- BLOCK 7 — VERIFY (read-only)
--- Run these after blocks 1-6.
+-- BLOCK 6 — VERIFY (read-only)
+-- Run these after blocks 1-5.
 -- ============================================================================
 
--- 7a. Did every object land? Expect 0 rows.
+-- 6a. Did every object land? Expect 0 rows.
 -- (cast to text: to_regclass and to_regprocedure return different types)
 SELECT 'missing objects' AS check_name, count(*) AS problems FROM (
-  SELECT to_regclass('public.password_recovery_attempts')::text AS o
-  UNION ALL SELECT to_regprocedure('public.rms_dos_level_audit()')::text
+  SELECT to_regprocedure('public.rms_dos_level_audit()')::text AS o
   UNION ALL SELECT to_regprocedure('public.rms_dos_can_teacher_level(text)')::text
   UNION ALL SELECT to_regprocedure('public.rms_delete_teacher(uuid)')::text
   UNION ALL SELECT to_regprocedure('public.rms_release_fk_refs(regclass,uuid)')::text
 ) x WHERE o IS NULL;
 
--- 7b. DOS accounts and their level. READ THIS BEFORE ANYTHING ELSE.
+-- 6b. DOS accounts and their level. READ THIS BEFORE ANYTHING ELSE.
 SELECT * FROM public.rms_dos_level_audit();
 
--- 7c. Every restrictive level guard should still be installed.
+-- 6c. Every restrictive level guard should still be installed (expect 8 rows).
 SELECT tablename, policyname FROM pg_policies
 WHERE policyname = 'rms_dos_level_guard' ORDER BY tablename;
 
 
 -- ============================================================================
--- BLOCK 8 — OPTIONAL, DO NOT RUN YET
+-- BLOCK 7 — OPTIONAL, DO NOT RUN YET
 -- Fail-closed behaviour (a DOS with NULL/invalid education_level gets no
 -- level-specific access) lives in a separate file on purpose:
 --   backend/sql/optional_dos_fail_closed.sql
--- Only run it after 7b shows every DOS row reading "OK - isolated to ...".
+-- Only run it after 6b shows every DOS row reading "OK - isolated to ...".
 -- ============================================================================

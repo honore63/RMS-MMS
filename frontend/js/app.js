@@ -35,15 +35,6 @@ function showLogin(message) {
   form.removeEventListener('submit', handleLogin);
   form.addEventListener('submit', handleLogin);
 
-  const forgot = document.getElementById('forgot-link');
-  forgot.onclick = (e) => { e.preventDefault(); showResetView(); };
-
-  const back = document.getElementById('reset-back');
-  back.onclick = () => showSignInView();
-
-  const reset = document.getElementById('reset-form');
-  reset.onsubmit = submitForgot;
-
   const eye = document.getElementById('toggle-password');
   eye.onclick = togglePasswordVisibility;
 
@@ -140,35 +131,9 @@ function hideLoginError() {
 
 function showSignInView() {
   document.getElementById('login-signin-view').style.display = '';
-  const resetView = document.getElementById('login-reset-view');
-  if (resetView) resetView.style.display = 'none';
   const npView = document.getElementById('login-newpass-view');
   if (npView) npView.style.display = 'none';
   hideLoginError();
-  const resetMsg = document.getElementById('reset-message');
-  if (resetMsg) resetMsg.style.display = 'none';
-  const tempBox = document.getElementById('reset-temp-box');
-  if (tempBox) tempBox.style.display = 'none';
-}
-
-function showResetView() {
-  document.getElementById('login-signin-view').style.display = 'none';
-  document.getElementById('login-reset-view').style.display = '';
-  const npView = document.getElementById('login-newpass-view');
-  if (npView) npView.style.display = 'none';
-  hideLoginError();
-  const resetMsg = document.getElementById('reset-message');
-  if (resetMsg) {
-    resetMsg.className = 'login-reset-message';
-    resetMsg.style.display = 'none';
-  }
-  const tempBox = document.getElementById('reset-temp-box');
-  if (tempBox) tempBox.style.display = 'none';
-  const form = document.getElementById('reset-form');
-  if (form) form.style.display = '';
-  const ident = document.getElementById('login-identifier');
-  const re = document.getElementById('reset-email');
-  if (re) re.value = ident ? ident.value.trim() : '';
 }
 
 function showCreatePassword(opts) {
@@ -178,8 +143,6 @@ function showCreatePassword(opts) {
   document.getElementById('login-page').style.display = 'flex';
   document.getElementById('app-layout').style.display = 'none';
   document.getElementById('login-signin-view').style.display = 'none';
-  const resetView = document.getElementById('login-reset-view');
-  if (resetView) resetView.style.display = 'none';
   const view = document.getElementById('login-newpass-view');
   view.style.display = '';
   const sub = view.querySelector('.login-card-sub');
@@ -233,106 +196,6 @@ function mapLoginError(message) {
   return 'Something went wrong while signing you in. Please try again.';
 }
 
-async function submitForgot(e) {
-  e.preventDefault();
-  const email = document.getElementById('reset-email').value.trim();
-  const credential = document.getElementById('reset-credential').value.trim();
-  const btn = document.getElementById('reset-btn');
-  const msgEl = document.getElementById('reset-message');
-  const tempBox = document.getElementById('reset-temp-box');
-  const form = document.getElementById('reset-form');
-
-  msgEl.style.display = 'none';
-  if (tempBox) tempBox.style.display = 'none';
-
-  const plain = (msg) => {
-    msgEl.className = 'login-reset-message';
-    msgEl.style.display = 'flex';
-    msgEl.innerHTML = '<i data-lucide="alert-circle"></i><span>' + msg + '</span>';
-    if (typeof lucide !== 'undefined') lucide.createIcons();
-  };
-  const fail = (msg) => {
-    msgEl.className = 'login-reset-message login-reset-message--error';
-    msgEl.style.display = 'flex';
-    msgEl.innerHTML = '<i data-lucide="x-circle"></i><span><strong>Verification Failed</strong>' + msg + '</span>';
-    if (typeof lucide !== 'undefined') lucide.createIcons();
-  };
-  if (!email || !credential) {
-    plain('Please enter your registered email and teacher code.');
-    return;
-  }
-  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
-    plain('Please enter a valid email address.');
-    return;
-  }
-
-  btn.innerHTML = '<div class="spinner" style="width:18px;height:18px;border-width:2px"></div> Verifying...';
-  btn.disabled = true;
-
-  try {
-    const r = await fetch('/api/auth/recover', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ action: 'issue', email, credential })
-    });
-    let data = {};
-    try { data = await r.json(); } catch (e) { /* ignore */ }
-    if (r.status === 429) {
-      fail(data && data.error ? Utils.escapeHtml(data.error) : 'Too many attempts. Please try again later.');
-      return;
-    }
-    if (!r.ok || !data.tempPassword) {
-      fail(data && data.error ? Utils.escapeHtml(data.error) : 'The information provided does not match our records. Please check your details and try again.');
-      return;
-    }
-    document.getElementById('reset-temp-value').textContent = data.tempPassword;
-    const expEl = document.getElementById('reset-temp-expiry');
-    if (expEl && data.expiresAt) {
-      expEl.textContent = 'Valid until ' + new Date(data.expiresAt).toLocaleString() + '.';
-    }
-    if (form) form.style.display = 'none';
-    tempBox.style.display = 'block';
-    document.getElementById('reset-credential').value = '';
-    bindResetCopy();
-    if (typeof lucide !== 'undefined') lucide.createIcons();
-  } catch (err) {
-    fail('We couldn\u2019t reach the RMS server. Please check your internet connection and try again.');
-  } finally {
-    btn.innerHTML = '<i data-lucide="send" style="width:18px;height:18px"></i> Verify & Generate Password';
-    btn.disabled = false;
-    if (typeof lucide !== 'undefined') lucide.createIcons();
-  }
-}
-
-function bindResetCopy() {
-  const copyBtn = document.getElementById('reset-copy');
-  if (!copyBtn) return;
-  const defaultValue = '<i data-lucide="copy" style="width:16px;height:16px"></i> Copy Password';
-  copyBtn.onclick = async () => {
-    const value = document.getElementById('reset-temp-value').textContent;
-    if (!value) return;
-    try {
-      await navigator.clipboard.writeText(value);
-    } catch (e) {
-      const ta = document.createElement('textarea');
-      ta.value = value;
-      ta.style.position = 'fixed';
-      ta.style.opacity = '0';
-      document.body.appendChild(ta);
-      ta.select();
-      document.execCommand('copy');
-      ta.remove();
-    }
-    copyBtn.innerHTML = '<i data-lucide="check" style="width:16px;height:16px"></i> Copied!';
-    copyBtn.disabled = true;
-    if (typeof lucide !== 'undefined') lucide.createIcons();
-    setTimeout(() => {
-      copyBtn.innerHTML = defaultValue;
-      copyBtn.disabled = false;
-      if (typeof lucide !== 'undefined') lucide.createIcons();
-    }, 1600);
-  };
-}
 
 async function submitNewPassword(e) {
   e.preventDefault();
@@ -352,41 +215,30 @@ async function submitNewPassword(e) {
   if (p1 !== p2) { fail('The two passwords do not match. Please try again.'); return; }
 
   btn.disabled = true;
-  btn.innerHTML = '<div class="spinner" style="width:18px;height:18px;border-width:2px"></div> Resetting...';
+  btn.innerHTML = '<div class="spinner" style="width:18px;height:18px;border-width:2px"></div> Saving...';
   try {
     const { error } = await sbClient.auth.updateUser({ password: p1 });
     if (error) throw error;
-    // Retire the temporary password: server confirmation first, own-row
-    // update as fallback (users may update their own row per RLS).
-    let cleared = false;
+    // Retire the temporary-password flag on the signed-in user's own row
+    // (permitted by the users UPDATE RLS policy).
     try {
       const { data: { session } } = await sbClient.auth.getSession();
-      if (session && session.access_token) {
-        const r = await fetch('/api/auth/recover', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + session.access_token },
-          body: JSON.stringify({ action: 'complete' })
-        });
-        cleared = r.ok;
-      }
-      if (!cleared && session && session.user) {
-        const { error: directErr } = await sbClient.from('users').update({
+      if (session && session.user) {
+        await sbClient.from('users').update({
           must_change_password: false, temporary_password_hash: null, password_reset_expires_at: null
         }).eq('id', session.user.id);
-        cleared = !directErr;
       }
-    } catch (e) { /* fall through to error below */ }
-    if (!cleared) throw new Error('FLAG_NOT_CLEARED');
+    } catch (e) { /* flag cleanup is best-effort */ }
     if (Auth.currentUser) Auth.currentUser.must_change_password = false;
     window._forcedPasswordChange = false;
     showApp();
     if (typeof Utils !== 'undefined' && Utils.toast) {
-      Utils.toast('Your password has been successfully reset. You can now sign in with your new password.', 'success');
+      Utils.toast('Your password has been changed successfully.', 'success');
     }
   } catch (err) {
-    fail('We couldn\u2019t reset your password. The temporary password may have expired \u2014 please request a new one.');
+    fail('We couldn\u2019t change your password. Please try again.');
   } finally {
-    btn.innerHTML = '<i data-lucide="check" style="width:18px;height:18px"></i> Reset Password';
+    btn.innerHTML = '<i data-lucide="check" style="width:18px;height:18px"></i> Save Password';
     btn.disabled = false;
     if (typeof lucide !== 'undefined') lucide.createIcons();
   }
@@ -523,15 +375,8 @@ function yearById(id, years) {
 }
 
 async function showApp() {
-  // Temporary-password holders must set a personal password before entering.
+  // Accounts flagged must_change_password must set a personal password first.
   if (Auth.currentUser && Auth.currentUser.must_change_password) {
-    const exp = Auth.currentUser.password_reset_expires_at;
-    if (exp && new Date(exp).getTime() < Date.now()) {
-      await Auth.signOut();
-      showLogin();
-      showLoginError('Your temporary password has expired. Please request a new one.');
-      return;
-    }
     showCreatePassword({ forced: true });
     return;
   }

@@ -187,37 +187,32 @@ git commit -m "your message"
 git push origin main
 ```
 
-#### Required environment variables (server-side functions)
+#### Environment variables
 
-`api/auth/recover.js` (Forgot Password → temporary password) runs on Vercel and
-needs three variables. Set them in **Vercel → Settings → Environment Variables**
-for both Production and Preview. See `.env.example`.
+**None are currently required.** The only serverless function is
+`api/reports/pdf.js` (PDF generation), which needs no credentials. The
+password-recovery endpoint that required `SUPABASE_SERVICE_ROLE_KEY` has been
+removed, so this project no longer stores or needs a service-role key.
 
-| Variable | Purpose | Exposure |
-| --- | --- | --- |
-| `SUPABASE_URL` | Project URL | Server-side |
-| `SUPABASE_SERVICE_ROLE_KEY` | Sets temporary passwords via the Supabase Auth admin API | **Server-side only** |
-| `SUPABASE_ANON_KEY` | Validates the signed-in user's own JWT | Public by design |
+Should a future server function need secrets, set them in
+**Vercel → Settings → Environment Variables** and see `.env.example`.
 
-> **Never** prefix these with `NEXT_PUBLIC_`. Those values are inlined into
-> browser JavaScript at build time, and `SUPABASE_SERVICE_ROLE_KEY` bypasses RLS
-> with full read/write access to every table. The key is used only inside
-> `api/auth/recover.js` and must never appear in `frontend/` or in git.
-
-If these are absent the endpoint returns a safe generic error and logs the exact
-missing variable names to the Vercel function log (Function Logs → `/api/auth/recover`).
+> **Never** prefix a secret with `NEXT_PUBLIC_`. Those values are inlined into
+> browser JavaScript at build time, and a service-role key bypasses RLS with
+> full read/write access to every table. Secrets must never appear in
+> `frontend/` or in git.
 
 ### 3. Database changes are NOT automatic
 
 SQL committed to GitHub does not execute against the live Supabase project.
 Schema changes must be applied by hand:
 
-- `backend/sql/database.sql` — full authoritative schema (27 tables, functions,
+- `backend/sql/database.sql` — full authoritative schema (tables, functions,
   policies, triggers, indexes, storage, realtime). Idempotent.
 - `backend/sql/deployment_pending.sql` — **the only file you need to run** for
-  the current pending work (password-recovery rate-limit table, DOS level
-  helpers, teacher read/write policies, cross-level write guards, atomic
-  teacher deletion). Run blocks 1–6, then block 7 to verify.
+  the current pending work (DOS level helpers, teacher read/write policies,
+  cross-level write guards, atomic teacher deletion). Run blocks 1–5, then
+  block 6 to verify.
 - `backend/sql/optional_dos_fail_closed.sql` — removes the "global DOS"
   fallback so a DOS with a NULL/invalid level gets no level access.
   **Only run after `rms_dos_level_audit()` shows every DOS row as `OK`.**
@@ -226,17 +221,18 @@ Schema changes must be applied by hand:
 
 ### 4. Run Locally
 
-A plain static server (`python -m http.server`, `npx serve`, Live Server) serves
-the app but **cannot execute `/api/*` functions**, so Forgot Password, teacher
-deletion and PDF reports will return 404/405 locally. To exercise them:
+A plain static server (Live Server, VS Code) serves the app fine — login,
+classes, learners, marks, assessments, analytics, notifications and **teacher
+deletion** (a Supabase RPC) all work, because they talk to Supabase directly.
 
-```bash
-npm install          # Node 18+ required
-vercel dev           # serves the frontend AND runs api/* on one port
-```
+The only feature that needs a Vercel server is **PDF report generation**
+(`/api/reports/pdf`, requires Puppeteer). Test that on the deployed URL.
 
-`vercel dev` reads `.env.local` automatically — copy `.env.example` to
-`.env.local` and fill in the three values.
+Serve `frontend/` as the document root, otherwise root-absolute paths such as
+`/public/logo.webp` and `/sw.js` return 404:
+
+- VS Code: right-click `frontend/index.html` → **Open with Live Server**
+- or run a static server from inside `frontend/`
 
 > **Cache busting:** script tags in `index.html` use `?v=YYYYMMDD-N`. After any JS/CSS change, bump the version and hard-refresh with `Ctrl+Shift+R`.
 
