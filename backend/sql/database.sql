@@ -2096,19 +2096,19 @@ WHERE NOT EXISTS (SELECT 1 FROM subjects s WHERE UPPER(TRIM(s.name)) = UPPER(TRI
 
 INSERT INTO assessment_types (name, code, description, default_maximum_mark, weight, contributes_to_combined, display_order, status, period_hint, is_standard)
 SELECT * FROM (VALUES
-  ('Weekly Test','WKT','Weekly classroom test',10,NULL,TRUE,1,'active','week',TRUE),
-  ('Monthly Test','MLT','Monthly assessment',20,NULL,TRUE,2,'active','month',TRUE),
-  ('Beginning of Term Exam','BOT','Beginning of term examination',50,NULL,TRUE,3,'active','term',TRUE),
-  ('Mid-Term Exam','MTE','Mid-term examination',50,NULL,TRUE,4,'active','term',TRUE),
-  ('End of Term Exam','EOT','End of term examination',100,NULL,TRUE,5,'active','term',TRUE),
-  ('Quiz','QUIZ','Short quiz',20,NULL,TRUE,6,'active',NULL,TRUE),
-  ('Assignment','ASGMT','Take-home assignment',20,NULL,TRUE,7,'active',NULL,TRUE),
-  ('Practical','PRAC','Practical assessment',30,NULL,TRUE,8,'active',NULL,TRUE),
-  ('Class Exercise','CEXE','Class exercise',10,NULL,TRUE,9,'active',NULL,TRUE),
-  ('Homework','HW','Homework',10,NULL,TRUE,10,'active',NULL,TRUE),
-  ('Oral','ORAL','Oral assessment',10,NULL,TRUE,11,'active',NULL,TRUE),
-  ('End of Unit','EOU','End-of-unit assessment',30,NULL,TRUE,12,'active','unit',TRUE),
-  ('Other','OTHER','Other assessment',30,NULL,TRUE,13,'active','other',TRUE)
+  ('Weekly Test','WKT','Weekly classroom test',10,NULL::NUMERIC,TRUE,1,'active','week',TRUE),
+  ('Monthly Test','MLT','Monthly assessment',20,NULL::NUMERIC,TRUE,2,'active','month',TRUE),
+  ('Beginning of Term Exam','BOT','Beginning of term examination',50,NULL::NUMERIC,TRUE,3,'active','term',TRUE),
+  ('Mid-Term Exam','MTE','Mid-term examination',50,NULL::NUMERIC,TRUE,4,'active','term',TRUE),
+  ('End of Term Exam','EOT','End of term examination',100,NULL::NUMERIC,TRUE,5,'active','term',TRUE),
+  ('Quiz','QUIZ','Short quiz',20,NULL::NUMERIC,TRUE,6,'active',NULL,TRUE),
+  ('Assignment','ASGMT','Take-home assignment',20,NULL::NUMERIC,TRUE,7,'active',NULL,TRUE),
+  ('Practical','PRAC','Practical assessment',30,NULL::NUMERIC,TRUE,8,'active',NULL,TRUE),
+  ('Class Exercise','CEXE','Class exercise',10,NULL::NUMERIC,TRUE,9,'active',NULL,TRUE),
+  ('Homework','HW','Homework',10,NULL::NUMERIC,TRUE,10,'active',NULL,TRUE),
+  ('Oral','ORAL','Oral assessment',10,NULL::NUMERIC,TRUE,11,'active',NULL,TRUE),
+  ('End of Unit','EOU','End-of-unit assessment',30,NULL::NUMERIC,TRUE,12,'active','unit',TRUE),
+  ('Other','OTHER','Other assessment',30,NULL::NUMERIC,TRUE,13,'active','other',TRUE)
 ) AS v (name, code, description, default_maximum_mark, weight, contributes_to_combined, display_order, status, period_hint, is_standard)
 ON CONFLICT (name) DO UPDATE SET code = EXCLUDED.code, description = EXCLUDED.description,
   default_maximum_mark = EXCLUDED.default_maximum_mark, display_order = EXCLUDED.display_order,
