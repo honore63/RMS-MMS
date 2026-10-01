@@ -2193,6 +2193,7 @@ CREATE OR REPLACE FUNCTION public.rms_release_fk_refs(p_parent REGCLASS, p_key U
 RETURNS VOID LANGUAGE plpgsql SECURITY DEFINER SET search_path = public, pg_temp AS $fn$
 DECLARE
   r RECORD;
+  v_sql TEXT;
 BEGIN
   IF p_key IS NULL THEN
     RETURN;
@@ -2202,7 +2203,7 @@ BEGIN
   -- schema drift (older tables added by earlier migrations). Required columns
   -- are removed with their row; optional ones are nulled (history preserved).
   FOR r IN
-    SELECT c.conrelid::regclass AS tbl, a.attname AS col, a.attnotnull AS required
+    SELECT c.conrelid::regclass::text AS tbl, a.attname::text AS col, a.attnotnull AS required
     FROM pg_constraint c
     JOIN pg_attribute a ON a.attrelid = c.conrelid AND a.attnum = ANY (c.conkey)
     WHERE c.contype = 'f'
@@ -2211,10 +2212,11 @@ BEGIN
       AND array_length(c.conkey, 1) = 1
   LOOP
     IF r.required THEN
-      EXECUTE format('DELETE FROM %s WHERE %I = $1', r.tbl, r.col) USING p_key;
+      v_sql := 'DELETE FROM ' || r.tbl || ' WHERE ' || quote_ident(r.col) || ' = $1';
     ELSE
-      EXECUTE format('UPDATE %s SET %I = NULL WHERE %I = $1', r.tbl, r.col) USING p_key;
+      v_sql := 'UPDATE ' || r.tbl || ' SET ' || quote_ident(r.col) || ' = NULL WHERE ' || quote_ident(r.col) || ' = $1';
     END IF;
+    EXECUTE v_sql USING p_key;
   END LOOP;
 END;
 $fn$;
