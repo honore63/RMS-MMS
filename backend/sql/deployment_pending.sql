@@ -13,7 +13,7 @@
 --   and policies. Nothing here deletes or rewrites school records.
 --
 -- HOW TO APPLY
---   Run blocks 1-7 in order. Each block is self-contained; a failure in one
+--   Run blocks 1-8 in order. Each block is self-contained; a failure in one
 --   block does not invalidate the others.
 --
 -- REMOVED: the password_recovery_attempts table (and the /api/auth/recover
@@ -254,8 +254,36 @@ REVOKE ALL ON TABLE public.message_attachments FROM anon;
 
 
 -- ============================================================================
--- BLOCK 8 — VERIFY (read-only)
--- Run these after blocks 1-7.
+-- BLOCK 8 — PROVISION THE THREE ADMINISTRATOR ACCOUNTS
+-- Run this so the DOS accounts do not depend on the legacy email-substring
+-- role guess in frontend/js/auth.js.
+--   dos@rukara.edu              -> Primary DOS   (education_level PRIMARY)
+--   dos2@rukara.edu             -> Secondary DOS (education_level SECONDARY)
+--   honoretechgroup@gmail.com   -> Super admin   (education_level NULL = whole
+--                                  school, both levels)
+--
+-- These accounts must already exist in Supabase Auth (Authentication > Users);
+-- create them there first if they have never signed in. This only fixes the
+-- public.users profile rows. Run from the SQL Editor, where auth.uid() is NULL
+-- so the self-service role guard in rms_account_guard_user_fields is bypassed
+-- (a signed-in user cannot change their own role - by design).
+-- Idempotent.
+-- ============================================================================
+UPDATE public.users SET role = 'dos', status = 'active', education_level = 'PRIMARY'
+WHERE lower(email) = 'dos@rukara.edu';
+
+UPDATE public.users SET role = 'dos', status = 'active', education_level = 'SECONDARY'
+WHERE lower(email) = 'dos2@rukara.edu';
+
+-- NULL education_level = global super admin: rms_dos_can_level() returns true
+-- for every level, so this account sees and manages the whole school.
+UPDATE public.users SET role = 'dos', status = 'active', education_level = NULL
+WHERE lower(email) = 'honoreetechgroup@gmail.com';
+
+
+-- ============================================================================
+-- BLOCK 9 — VERIFY (read-only)
+-- Run these after blocks 1-8.
 -- ============================================================================
 
 -- 6a. Did every object land? Expect 0 rows.
@@ -280,9 +308,9 @@ SELECT name, code, default_maximum_mark, status FROM public.assessment_types ORD
 
 
 -- ============================================================================
--- BLOCK 9 — OPTIONAL, DO NOT RUN YET
+-- BLOCK 10 — OPTIONAL, DO NOT RUN YET
 -- Fail-closed behaviour (a DOS with NULL/invalid education_level gets no
 -- level-specific access) lives in a separate file on purpose:
 --   backend/sql/optional_dos_fail_closed.sql
--- Only run it after 8b shows every DOS row reading "OK - isolated to ...".
+-- DO NOT RUN while a global super admin (NULL education_level) is required - see the warning inside that file.
 -- ============================================================================

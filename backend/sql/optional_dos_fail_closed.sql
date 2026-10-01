@@ -1,15 +1,21 @@
 -- ============================================================================
 -- OPTIONAL — make DOS education level fail-closed
 -- ============================================================================
--- !! DO NOT RUN UNTIL rms_dos_level_audit() SHOWS EVERY DOS ROW AS
---    "OK - isolated to PRIMARY" or "OK - isolated to SECONDARY" !!
+-- !! DO NOT RUN IF YOU USE A GLOBAL SUPER ADMIN ACCOUNT !! !!
+--
+--   honoretechgroup@gmail.com is configured as a whole-school super admin
+--   with education_level = NULL. This script makes a NULL level mean "no
+--   level-specific access", so running it would LOCK THAT ACCOUNT OUT of all
+--   Primary and Secondary data. Only run this if every DOS is level-bound
+--   (dos@rukara.edu = PRIMARY, dos2@rukara.edu = SECONDARY) and you no longer
+--   need a global super admin.
 --
 -- Today a DOS account whose users.education_level is NULL is treated as a
 -- whole-school administrator and can read/write BOTH levels. This script
 -- removes that fallback: a DOS with a missing or invalid level gets no
 -- level-specific access at all.
 --
--- Run backend/sql/deployment_pending.sql block 7b first and paste the result if
+-- Run backend/sql/deployment_pending.sql block 9b first and paste the result if
 -- you are unsure. To assign a level to a specific account first:
 --
 --   UPDATE public.users SET education_level = 'PRIMARY'   WHERE email = '...';
