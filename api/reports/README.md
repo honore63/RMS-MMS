@@ -1,16 +1,15 @@
 Server-side PDF endpoints
 
-This folder provides two serverless endpoints used by the frontend to generate production-grade PDFs:
+This folder provides the serverless endpoint used by the frontend to generate production-grade PDFs:
 
 - `POST /api/reports/pdf` - accepts JSON { html, filename } and returns a PDF blob.
-- `POST /api/reports/zip` - accepts JSON { items: [{ html, filename }, ...] } and returns a ZIP containing separate PDFs.
 
 Dependencies
 
 Install the required packages in the project root:
 
 ```bash
-npm install puppeteer archiver
+npm install puppeteer
 ```
 
 Deployment notes
