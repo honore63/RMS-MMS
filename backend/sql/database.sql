@@ -2309,8 +2309,14 @@ CREATE POLICY rms_profile_photos_owner_delete ON storage.objects FOR DELETE TO a
 -- ============================================================================
 -- 12) GRANTS + FUNCTION LOCKDOWN (least privilege)
 -- ============================================================================
+-- NOTE: "GRANT ... ON ALL TABLES IN SCHEMA" is a one-time snapshot. It only
+-- covers tables that already exist when it runs, so a table created afterwards
+-- gets no grant and PostgREST answers 403 (not an empty list). ALTER DEFAULT
+-- PRIVILEGES below is what keeps newly created tables accessible.
 GRANT ALL ON ALL TABLES IN SCHEMA public TO authenticated;
 GRANT ALL ON ALL SEQUENCES IN SCHEMA public TO anon, authenticated;
+ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON TABLES TO authenticated;
+ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON SEQUENCES TO anon, authenticated;
 GRANT SELECT ON TABLE public.education_levels TO authenticated, anon;
 GRANT SELECT ON TABLE public.performance_comments TO anon, authenticated;
 GRANT SELECT ON TABLE public.school_settings TO anon;

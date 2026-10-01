@@ -13,7 +13,7 @@
 --   and policies. Nothing here deletes or rewrites school records.
 --
 -- HOW TO APPLY
---   Run blocks 1-6 in order. Each block is self-contained; a failure in one
+--   Run blocks 1-7 in order. Each block is self-contained; a failure in one
 --   block does not invalidate the others.
 --
 -- REMOVED: the password_recovery_attempts table (and the /api/auth/recover
@@ -212,8 +212,50 @@ ON CONFLICT (name) DO UPDATE SET code = EXCLUDED.code, description = EXCLUDED.de
 
 
 -- ============================================================================
--- BLOCK 7 — VERIFY (read-only)
--- Run these after blocks 1-6.
+-- BLOCK 7 — REPAIR MISSING TABLE GRANTS (fixes HTTP 403)
+-- Symptom: reading a table returns 403 from PostgREST, e.g.
+--   .../rest/v1/assessment_types?select=*  ->  403
+-- and the page shows "no data" because RLS/grants deny the read entirely.
+-- Cause: "GRANT ... ON ALL TABLES IN SCHEMA" is a snapshot that only covers
+-- tables existing when it ran, so any table created later has no privilege for
+-- the authenticated role.
+--
+-- 7a. FIND the affected tables (run this first, read-only).
+-- ============================================================================
+-- SELECT c.relname AS table_missing_select_grant
+-- FROM pg_class c
+-- JOIN pg_namespace n ON n.oid = c.relnamespace
+-- WHERE n.nspname = 'public' AND c.relkind = 'r'
+--   AND NOT has_table_privilege('authenticated', c.oid, 'SELECT')
+-- ORDER BY 1;
+
+-- 7b. APPLY. Grants the authenticated role full CRUD on every table in public
+--      (RLS still decides which ROWS each role may see, so this does not widen
+--      data visibility), and makes it automatic for tables created later.
+GRANT ALL ON ALL TABLES IN SCHEMA public TO authenticated;
+GRANT ALL ON ALL SEQUENCES IN SCHEMA public TO anon, authenticated;
+ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON TABLES TO authenticated;
+ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON SEQUENCES TO anon, authenticated;
+
+-- 7c. Re-apply the narrower grants the master intends for a few tables, so
+--      7b does not leave them wider than designed.
+GRANT SELECT, INSERT ON public.messages TO authenticated;
+REVOKE ALL ON TABLE public.messages FROM anon;
+REVOKE ALL ON TABLE public.message_attachments FROM anon;
+
+-- 7d. Targeted alternative if you only want assessment_types fixed:
+-- GRANT SELECT, INSERT, UPDATE, DELETE ON public.assessment_types TO authenticated;
+
+-- 7e. VERIFY: must return 0 rows.
+-- SELECT c.relname FROM pg_class c
+-- JOIN pg_namespace n ON n.oid = c.relnamespace
+-- WHERE n.nspname = 'public' AND c.relkind = 'r'
+--   AND NOT has_table_privilege('authenticated', c.oid, 'SELECT');
+
+
+-- ============================================================================
+-- BLOCK 8 — VERIFY (read-only)
+-- Run these after blocks 1-7.
 -- ============================================================================
 
 -- 6a. Did every object land? Expect 0 rows.
@@ -238,9 +280,9 @@ SELECT name, code, default_maximum_mark, status FROM public.assessment_types ORD
 
 
 -- ============================================================================
--- BLOCK 8 — OPTIONAL, DO NOT RUN YET
+-- BLOCK 9 — OPTIONAL, DO NOT RUN YET
 -- Fail-closed behaviour (a DOS with NULL/invalid education_level gets no
 -- level-specific access) lives in a separate file on purpose:
 --   backend/sql/optional_dos_fail_closed.sql
--- Only run it after 7b shows every DOS row reading "OK - isolated to ...".
+-- Only run it after 8b shows every DOS row reading "OK - isolated to ...".
 -- ============================================================================
