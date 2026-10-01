@@ -231,7 +231,7 @@ CREATE TABLE IF NOT EXISTS assessments (
   unit TEXT,
   class_id UUID REFERENCES classes(id),
   subject_id UUID REFERENCES subjects(id),
-  teacher_id UUID REFERENCES teachers(id),
+  teacher_id UUID REFERENCES teachers(id) ON DELETE CASCADE,
   academic_year_id UUID REFERENCES academic_years(id) ON DELETE CASCADE,
   term_id UUID REFERENCES terms(id) ON DELETE SET NULL,
   assessment_type_id UUID REFERENCES assessment_types(id),
@@ -728,6 +728,27 @@ BEGIN
   ALTER TABLE assessments DROP CONSTRAINT IF EXISTS assessments_term_id_fkey;
   ALTER TABLE assessments ADD CONSTRAINT assessments_term_id_fkey FOREIGN KEY (term_id)
     REFERENCES terms(id) ON DELETE SET NULL;
+EXCEPTION WHEN others THEN NULL;
+END $do$;
+
+-- DOS can delete a teacher with everything they own: assessments (cascade
+-- deletes their marks), teacher_assignments, classes.class_teacher_id -> NULL,
+-- teacher_registration_audit. Ambiguous audit/import creator references are
+-- NULLed instead of blocking the user-row delete.
+DO $do$
+BEGIN
+  ALTER TABLE assessments DROP CONSTRAINT IF EXISTS assessments_teacher_id_fkey;
+  ALTER TABLE assessments ADD CONSTRAINT assessments_teacher_id_fkey FOREIGN KEY (teacher_id)
+    REFERENCES teachers(id) ON DELETE CASCADE;
+  ALTER TABLE audit_logs DROP CONSTRAINT IF EXISTS audit_logs_created_by_fkey;
+  ALTER TABLE audit_logs ADD CONSTRAINT audit_logs_created_by_fkey FOREIGN KEY (created_by)
+    REFERENCES users(id) ON DELETE SET NULL;
+  ALTER TABLE import_history DROP CONSTRAINT IF EXISTS import_history_created_by_fkey;
+  ALTER TABLE import_history ADD CONSTRAINT import_history_created_by_fkey FOREIGN KEY (created_by)
+    REFERENCES users(id) ON DELETE SET NULL;
+  ALTER TABLE teacher_registration_audit DROP CONSTRAINT IF EXISTS teacher_registration_audit_registered_by_user_id_fkey;
+  ALTER TABLE teacher_registration_audit ADD CONSTRAINT teacher_registration_audit_registered_by_user_id_fkey FOREIGN KEY (registered_by_user_id)
+    REFERENCES users(id) ON DELETE SET NULL;
 EXCEPTION WHEN others THEN NULL;
 END $do$;
 
@@ -1484,6 +1505,12 @@ CREATE POLICY rms_account_users_insert ON public.users FOR INSERT TO authenticat
   WITH CHECK ((id = auth.uid() AND role = 'teacher') OR (public.rms_account_role() = 'dos' AND role = 'teacher'));
 CREATE POLICY rms_account_users_update ON public.users FOR UPDATE TO authenticated
   USING (public.rms_account_can_access_user(id)) WITH CHECK (public.rms_account_can_access_user(id));
+CREATE POLICY rms_account_users_delete ON public.users FOR DELETE TO authenticated
+  USING (public.rms_account_role() = 'dos'
+    AND id <> auth.uid()
+    AND role = 'teacher'
+    AND EXISTS (SELECT 1 FROM public.teachers t WHERE t.user_id = users.id
+      AND public.rms_teacher_in_scope(t.id)));
 
 -- --- teachers ---
 CREATE POLICY rms_account_teacher_self_insert ON public.teachers FOR INSERT TO authenticated
@@ -1496,6 +1523,10 @@ CREATE POLICY rms_account_teacher_rows ON public.teachers AS RESTRICTIVE FOR ALL
 CREATE POLICY rms_dos_level_guard ON public.teachers AS RESTRICTIVE FOR ALL TO authenticated
   USING (NOT public.rms_is_dos() OR (public.rms_is_scoped_dos() AND public.rms_teacher_in_scope(teachers.id)))
   WITH CHECK (NOT public.rms_is_dos() OR public.rms_is_scoped_dos());
+CREATE POLICY rms_account_teachers_delete ON public.teachers FOR DELETE TO authenticated
+  USING (public.rms_account_role() = 'dos'
+    AND public.rms_is_scoped_dos()
+    AND public.rms_teacher_in_scope(teachers.id));
 
 -- --- classes ---
 CREATE POLICY rms_classes_select ON public.classes FOR SELECT

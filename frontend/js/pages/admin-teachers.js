@@ -962,8 +962,7 @@ function teacherDelete(t) {
       <div style="width:52px;height:52px;margin:0 auto 12px;border-radius:50%;background:var(--red-50);color:var(--red-500);display:flex;align-items:center;justify-content:center"><i data-lucide="trash-2" style="width:24px;height:24px"></i></div>
       <p style="font-size:15px;color:var(--gray-800)">Delete <strong>${Utils.escapeHtml(t.full_name || 'Teacher')}</strong> permanently?</p>
     </div>
-    <div class="alert alert-danger" style="margin:0 0 16px"><i data-lucide="alert-triangle"></i> This removes the teacher, their login account and all their assignments. This cannot be undone.</div>
-    <div class="alert alert-warning" style="margin-bottom:0"><i data-lucide="info"></i> If the teacher already owns assessments, delete those assessments first — otherwise the delete is blocked.</div>`,
+    <div class="alert alert-danger" style="margin:0 0 16px"><i data-lucide="alert-triangle"></i> This permanently deletes the teacher, their login account, and everything they own — all assignments, all assessments and their recorded marks. This cannot be undone.</div>`,
     `<button class="btn btn-secondary" data-close-modal="true">Cancel</button>
      <button class="btn btn-danger" id="teacher-delete-btn"><i data-lucide="trash-2"></i> Delete Teacher</button>`, true);
 
@@ -974,16 +973,30 @@ function teacherDelete(t) {
 async function confirmTeacherDelete(id, userId) {
   const delBtn = document.getElementById('teacher-delete-btn');
   if (delBtn) { delBtn.disabled = true; delBtn.innerHTML = '<div class="spinner" style="width:14px;height:14px;border-width:2px"></div> Deleting...'; }
+  const directTeacherDelete = async (tid) => {
+    const { data: removedRows, error } = await sbClient.from('teachers').delete().eq('id', tid).select('id');
+    if (error) throw error;
+    const removed = Array.isArray(removedRows) ? removedRows.length > 0 : !!removedRows;
+    if (!removed) throw new Error('The teacher record could not be deleted. You may lack permission for this teacher\u2019s education level.');
+  };
   try {
-    // Remove assignments explicitly first (covers DBs without ON DELETE CASCADE).
+    // Best-effort assignment cleanup (non-fatal): the DB cascade in
+    // database.sql handles all teacher records (assignments, assessments,
+    // marks, registration audit) when the user row is deleted below.
     const { error: assignErr } = await sbClient.from('teacher_assignments').delete().eq('teacher_id', id);
-    if (assignErr) throw assignErr;
+    if (assignErr) console.warn('[TEACHER DELETE] Assignment cleanup skipped:', assignErr.message);
     if (userId) {
-      // Deleting the user cascades to the teacher row and registration audit.
-      const { error } = await sbClient.from('users').delete().eq('id', userId);
+      // Deleting the user cascades to the teacher row, their assessments,
+      // marks, assignments and registration audit.
+      const { data: deletedRows, error } = await sbClient.from('users').delete().eq('id', userId).select('id');
       if (error) throw error;
+      const removed = Array.isArray(deletedRows) ? deletedRows.length > 0 : !!deletedRows;
+      if (!removed) {
+        // Row not visible/deleted under the DOS scope — delete the teacher row directly.
+        await directTeacherDelete(id);
+      }
     } else {
-      await DB.remove('teachers', id);
+      await directTeacherDelete(id);
     }
     DB.invalidate('users');
     DB.invalidate('teachers');
@@ -997,12 +1010,12 @@ async function confirmTeacherDelete(id, userId) {
       });
     } catch (logErr) { console.warn('[TEACHER DELETE] Audit log failed:', logErr); }
     Modal.close();
-    Utils.toast('Teacher deleted', 'success');
+    Utils.toast('Teacher and all related records deleted', 'success');
     renderTeachers();
   } catch (e) {
     if (/violates foreign key constraint/i.test(e.message || '')) {
       Modal.close();
-      Utils.toast('Cannot delete: teacher owns assessments or learners. Delete or reassign those records first.', 'error');
+      Utils.toast('Cannot delete: some records still reference this teacher. Ensure the database cascade update (assessments ON DELETE CASCADE) has been applied.', 'error');
     } else {
       if (delBtn) { delBtn.disabled = false; delBtn.innerHTML = '<i data-lucide="trash-2"></i> Delete Teacher'; }
       Utils.toast('Delete error: ' + e.message, 'error');
