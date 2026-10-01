@@ -49,6 +49,9 @@ async function renderTeacherDashboard() {
       </button>`).join('');
 
     setContent(`
+      <div style="display:flex;justify-content:flex-end;margin-bottom:12px">
+        <a href="https://rukaramodelschool.com/" target="_blank" rel="noopener" title="Visit Rukara Model School website" aria-label="Visit Rukara Model School website" style="display:inline-flex;align-items:center;justify-content:center;width:36px;height:36px;border-radius:50%;background:var(--blue-600);color:#fff;text-decoration:none;flex:none"><i data-lucide="globe" style="width:18px;height:18px"></i></a>
+      </div>
       <div class="grid-4 card-in-stagger mb-6">
         <div class="stat-card">
           <div class="stat-icon" style="background:var(--blue-50);color:var(--blue-600)"><i data-lucide="link"></i></div>

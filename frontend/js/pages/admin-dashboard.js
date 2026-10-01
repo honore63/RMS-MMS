@@ -97,6 +97,7 @@ async function renderAdminDashboard() {
           <div style="font-weight:700;color:var(--blue-800)"><i data-lucide="shield-check" style="width:16px;height:16px;vertical-align:middle"></i> Your Scope:</div>
           <div><span class="badge badge-info" style="font-size:12px;font-weight:700">${Utils.escapeHtml(Scope.label())}</span>
           <span class="text-sm text-muted" style="margin-left:10px">${Scope.isPrimary() ? '📗 Primary (P1-P6)' : '📘📙 Secondary (S1-S6)'}</span></div>
+          <a href="https://rukaramodelschool.com/" target="_blank" rel="noopener" title="Visit Rukara Model School website" aria-label="Visit Rukara Model School website" style="display:inline-flex;align-items:center;justify-content:center;width:36px;height:36px;border-radius:50%;background:var(--blue-600);color:#fff;text-decoration:none;margin-left:auto;flex:none"><i data-lucide="globe" style="width:18px;height:18px"></i></a>
         </div>
       </div>
     ` : `
@@ -109,6 +110,7 @@ async function renderAdminDashboard() {
             <option value="Lower Secondary" ${adminDashboardEduLevel==='Lower Secondary'?'selected':''}>📘 Lower Secondary (S1-S3)</option>
             <option value="Upper Secondary" ${adminDashboardEduLevel==='Upper Secondary'?'selected':''}>📙 Upper Secondary (S4-S6)</option>
           </select>
+          <a href="https://rukaramodelschool.com/" target="_blank" rel="noopener" title="Visit Rukara Model School website" aria-label="Visit Rukara Model School website" style="display:inline-flex;align-items:center;justify-content:center;width:36px;height:36px;border-radius:50%;background:var(--blue-600);color:#fff;text-decoration:none;margin-left:auto;flex:none"><i data-lucide="globe" style="width:18px;height:18px"></i></a>
         </div>
       </div>
     `;
