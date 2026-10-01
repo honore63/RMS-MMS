@@ -113,11 +113,6 @@ const Auth = {
     return data;
   },
 
-  async resetPassword(email) {
-    const { error } = await sbClient.auth.resetPasswordForEmail(email);
-    return error;
-  },
-
   async init() {
     const { data: { session } } = await sbClient.auth.getSession();
     if (session?.user) {

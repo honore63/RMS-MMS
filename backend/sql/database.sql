@@ -2179,6 +2179,22 @@ END $do$;
 NOTIFY pgrst, 'reload schema';
 
 -- ============================================================================
+-- 14) PASSWORD RECOVERY ATTEMPT LOG (on-screen temporary passwords)
+-- Rate-limits the /api/auth/recover endpoint. Written only with the
+-- service role (no anon/authenticated policies by design); the endpoint
+-- owns all reads/writes. Idempotent.
+-- ============================================================================
+CREATE TABLE IF NOT EXISTS password_recovery_attempts (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  email TEXT UNIQUE NOT NULL,
+  attempts INT NOT NULL DEFAULT 0,
+  window_start TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  created_at TIMESTAMPTZ DEFAULT NOW()
+);
+ALTER TABLE password_recovery_attempts ENABLE ROW LEVEL SECURITY;
+CREATE INDEX IF NOT EXISTS idx_recovery_attempts_email ON password_recovery_attempts(email);
+
+-- ============================================================================
 -- END OF MASTER SETUP. Verification (run after applying):
 --   SELECT tablename, rowsecurity FROM pg_tables WHERE schemaname='public' ORDER BY 1;
 --   SELECT tablename, policyname, cmd FROM pg_policies WHERE schemaname='public' ORDER BY 1,2;

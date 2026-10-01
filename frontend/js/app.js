@@ -1,20 +1,8 @@
 async function initApp() {
   try {
     document.getElementById('login-year').textContent = String(new Date().getFullYear());
-    // Password-recovery landing: the email link returns here with a recovery
-    // token (?code= / type=recovery). Give Supabase a moment to exchange it
-    // for a session before deciding where to route.
-    const recoveryLanding = /[?#&](code=|token=|type=recovery)/.test(window.location.href);
-    if (recoveryLanding) {
-      await waitForRecoverySession(10000);
-    }
     const hasSession = await Auth.init();
     document.getElementById('loading-screen').style.display = 'none';
-
-    if (hasSession && recoveryLanding) {
-      showCreatePassword();
-      return;
-    }
 
     if (hasSession) {
       if (Auth.currentUser && Auth.currentUser.status === 'inactive') {
@@ -159,8 +147,8 @@ function showSignInView() {
   hideLoginError();
   const resetMsg = document.getElementById('reset-message');
   if (resetMsg) resetMsg.style.display = 'none';
-  const okMsg = document.getElementById('login-success');
-  if (okMsg) okMsg.style.display = 'none';
+  const tempBox = document.getElementById('reset-temp-box');
+  if (tempBox) tempBox.style.display = 'none';
 }
 
 function showResetView() {
@@ -171,18 +159,26 @@ function showResetView() {
   hideLoginError();
   const resetMsg = document.getElementById('reset-message');
   if (resetMsg) resetMsg.style.display = 'none';
+  const tempBox = document.getElementById('reset-temp-box');
+  if (tempBox) tempBox.style.display = 'none';
   const ident = document.getElementById('login-identifier');
   const re = document.getElementById('reset-email');
   if (re) re.value = ident ? ident.value.trim() : '';
 }
 
-function showCreatePassword() {
+function showCreatePassword(opts) {
+  opts = opts || {};
+  const forced = !!opts.forced;
+  window._forcedPasswordChange = forced;
   document.getElementById('login-page').style.display = 'flex';
   document.getElementById('app-layout').style.display = 'none';
   document.getElementById('login-signin-view').style.display = 'none';
   const resetView = document.getElementById('login-reset-view');
   if (resetView) resetView.style.display = 'none';
-  document.getElementById('login-newpass-view').style.display = '';
+  const view = document.getElementById('login-newpass-view');
+  view.style.display = '';
+  const sub = view.querySelector('.login-card-sub');
+  if (sub && forced) sub.textContent = 'You signed in with a temporary password. Create your personal password to continue.';
   hideLoginError();
   const errEl = document.getElementById('newpass-error');
   if (errEl) errEl.style.display = 'none';
@@ -196,32 +192,15 @@ function showCreatePassword() {
     form.addEventListener('submit', submitNewPassword);
   }
   const back = document.getElementById('newpass-back');
-  if (back) back.onclick = () => showSignInView();
-  if (typeof lucide !== 'undefined') lucide.createIcons();
-}
-
-function showLoginSuccess(message) {
-  showSignInView();
-  const el = document.getElementById('login-success');
-  if (!el) return;
-  el.innerHTML = '<i data-lucide="check-circle-2"></i><span>' + Utils.escapeHtml(message) + '</span>';
-  el.style.display = 'flex';
-  if (typeof lucide !== 'undefined') lucide.createIcons();
-}
-
-// Polls for the recovery session Supabase builds from the email-link token.
-function waitForRecoverySession(timeoutMs) {
-  const start = Date.now();
-  return (async () => {
-    while (Date.now() - start < timeoutMs) {
-      try {
-        const { data } = await sbClient.auth.getSession();
-        if (data && data.session && data.session.user) return true;
-      } catch (e) { /* keep waiting */ }
-      await new Promise(r => setTimeout(r, 500));
+  if (back) {
+    if (forced) {
+      back.style.display = 'none';
+    } else {
+      back.style.display = '';
+      back.onclick = () => showSignInView();
     }
-    return false;
-  })();
+  }
+  if (typeof lucide !== 'undefined') lucide.createIcons();
 }
 
 function mapLoginError(message) {
@@ -252,45 +231,60 @@ function mapLoginError(message) {
 async function submitForgot(e) {
   e.preventDefault();
   const email = document.getElementById('reset-email').value.trim();
+  const credential = document.getElementById('reset-credential').value.trim();
   const btn = document.getElementById('reset-btn');
   const msgEl = document.getElementById('reset-message');
+  const tempBox = document.getElementById('reset-temp-box');
 
   msgEl.style.display = 'none';
+  if (tempBox) tempBox.style.display = 'none';
 
-  if (!email) {
+  const note = (msg) => {
     msgEl.className = 'login-reset-message';
     msgEl.style.display = 'flex';
-    msgEl.innerHTML = '<i data-lucide="alert-circle"></i><span>Please enter your email address.</span>';
+    msgEl.innerHTML = '<i data-lucide="alert-circle"></i><span>' + msg + '</span>';
     if (typeof lucide !== 'undefined') lucide.createIcons();
+  };
+  if (!email || !credential) {
+    note('Please enter your registered email and teacher code.');
     return;
   }
-
   if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
-    msgEl.className = 'login-reset-message';
-    msgEl.style.display = 'flex';
-    msgEl.innerHTML = '<i data-lucide="alert-circle"></i><span>Please enter a valid email address.</span>';
-    if (typeof lucide !== 'undefined') lucide.createIcons();
+    note('Please enter a valid email address.');
     return;
   }
 
-  btn.innerHTML = '<div class="spinner" style="width:18px;height:18px;border-width:2px"></div> Sending...';
+  btn.innerHTML = '<div class="spinner" style="width:18px;height:18px;border-width:2px"></div> Verifying...';
   btn.disabled = true;
 
   try {
-    const error = await Auth.resetPassword(email);
-    if (error) {
-      throw new Error(error.message);
+    const r = await fetch('/api/auth/recover', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'issue', email, credential })
+    });
+    let data = {};
+    try { data = await r.json(); } catch (e) { /* ignore */ }
+    if (r.status === 429) {
+      note('Too many attempts. Please try again later.');
+      return;
     }
-    msgEl.className = 'login-reset-message';
-    msgEl.style.display = 'flex';
-    msgEl.innerHTML = '<i data-lucide="check-circle-2"></i><span>If an account exists for this email, password-reset instructions have been sent.</span>';
+    if (!r.ok || !data.tempPassword) {
+      note(data && data.error ? Utils.escapeHtml(data.error) : 'Verification failed. Check your details and try again.');
+      return;
+    }
+    document.getElementById('reset-temp-value').textContent = data.tempPassword;
+    const expEl = document.getElementById('reset-temp-expiry');
+    if (expEl && data.expiresAt) {
+      expEl.textContent = 'Valid until ' + new Date(data.expiresAt).toLocaleString() + '.';
+    }
+    tempBox.style.display = 'block';
+    document.getElementById('reset-credential').value = '';
+    if (typeof lucide !== 'undefined') lucide.createIcons();
   } catch (err) {
-    msgEl.className = 'login-reset-message';
-    msgEl.style.display = 'flex';
-    msgEl.innerHTML = '<i data-lucide="alert-circle"></i><span>We couldn\u2019t send a reset link right now. ' +
-      'Please try again in a few minutes or contact the school administrator.</span>';
+    note('We couldn\u2019t reach the RMS server. Please check your internet connection and try again.');
   } finally {
-    btn.innerHTML = '<i data-lucide="send" style="width:18px;height:18px"></i> Send Reset Link';
+    btn.innerHTML = '<i data-lucide="send" style="width:18px;height:18px"></i> Verify & Generate Password';
     btn.disabled = false;
     if (typeof lucide !== 'undefined') lucide.createIcons();
   }
@@ -318,10 +312,35 @@ async function submitNewPassword(e) {
   try {
     const { error } = await sbClient.auth.updateUser({ password: p1 });
     if (error) throw error;
-    await Auth.signOut();
-    showLoginSuccess('Your password has been successfully reset. You can now sign in with your new password.');
+    // Retire the temporary password: server confirmation first, own-row
+    // update as fallback (users may update their own row per RLS).
+    let cleared = false;
+    try {
+      const { data: { session } } = await sbClient.auth.getSession();
+      if (session && session.access_token) {
+        const r = await fetch('/api/auth/recover', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + session.access_token },
+          body: JSON.stringify({ action: 'complete' })
+        });
+        cleared = r.ok;
+      }
+      if (!cleared && session && session.user) {
+        const { error: directErr } = await sbClient.from('users').update({
+          must_change_password: false, temporary_password_hash: null, password_reset_expires_at: null
+        }).eq('id', session.user.id);
+        cleared = !directErr;
+      }
+    } catch (e) { /* fall through to error below */ }
+    if (!cleared) throw new Error('FLAG_NOT_CLEARED');
+    if (Auth.currentUser) Auth.currentUser.must_change_password = false;
+    window._forcedPasswordChange = false;
+    showApp();
+    if (typeof Utils !== 'undefined' && Utils.toast) {
+      Utils.toast('Your password has been successfully reset. You can now sign in with your new password.', 'success');
+    }
   } catch (err) {
-    fail('We couldn\u2019t reset your password. The link may have expired \u2014 please request a new one.');
+    fail('We couldn\u2019t reset your password. The temporary password may have expired \u2014 please request a new one.');
   } finally {
     btn.innerHTML = '<i data-lucide="check" style="width:18px;height:18px"></i> Reset Password';
     btn.disabled = false;
@@ -460,6 +479,18 @@ function yearById(id, years) {
 }
 
 async function showApp() {
+  // Temporary-password holders must set a personal password before entering.
+  if (Auth.currentUser && Auth.currentUser.must_change_password) {
+    const exp = Auth.currentUser.password_reset_expires_at;
+    if (exp && new Date(exp).getTime() < Date.now()) {
+      await Auth.signOut();
+      showLogin();
+      showLoginError('Your temporary password has expired. Please request a new one.');
+      return;
+    }
+    showCreatePassword({ forced: true });
+    return;
+  }
   document.getElementById('login-page').style.display = 'none';
   document.getElementById('app-layout').style.display = 'flex';
   const role = Auth.getRole();
