@@ -158,9 +158,14 @@ function showResetView() {
   if (npView) npView.style.display = 'none';
   hideLoginError();
   const resetMsg = document.getElementById('reset-message');
-  if (resetMsg) resetMsg.style.display = 'none';
+  if (resetMsg) {
+    resetMsg.className = 'login-reset-message';
+    resetMsg.style.display = 'none';
+  }
   const tempBox = document.getElementById('reset-temp-box');
   if (tempBox) tempBox.style.display = 'none';
+  const form = document.getElementById('reset-form');
+  if (form) form.style.display = '';
   const ident = document.getElementById('login-identifier');
   const re = document.getElementById('reset-email');
   if (re) re.value = ident ? ident.value.trim() : '';
@@ -235,22 +240,29 @@ async function submitForgot(e) {
   const btn = document.getElementById('reset-btn');
   const msgEl = document.getElementById('reset-message');
   const tempBox = document.getElementById('reset-temp-box');
+  const form = document.getElementById('reset-form');
 
   msgEl.style.display = 'none';
   if (tempBox) tempBox.style.display = 'none';
 
-  const note = (msg) => {
+  const plain = (msg) => {
     msgEl.className = 'login-reset-message';
     msgEl.style.display = 'flex';
     msgEl.innerHTML = '<i data-lucide="alert-circle"></i><span>' + msg + '</span>';
     if (typeof lucide !== 'undefined') lucide.createIcons();
   };
+  const fail = (msg) => {
+    msgEl.className = 'login-reset-message login-reset-message--error';
+    msgEl.style.display = 'flex';
+    msgEl.innerHTML = '<i data-lucide="x-circle"></i><span><strong>Verification Failed</strong>' + msg + '</span>';
+    if (typeof lucide !== 'undefined') lucide.createIcons();
+  };
   if (!email || !credential) {
-    note('Please enter your registered email and teacher code.');
+    plain('Please enter your registered email and teacher code.');
     return;
   }
   if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
-    note('Please enter a valid email address.');
+    plain('Please enter a valid email address.');
     return;
   }
 
@@ -266,11 +278,11 @@ async function submitForgot(e) {
     let data = {};
     try { data = await r.json(); } catch (e) { /* ignore */ }
     if (r.status === 429) {
-      note('Too many attempts. Please try again later.');
+      fail(data && data.error ? Utils.escapeHtml(data.error) : 'Too many attempts. Please try again later.');
       return;
     }
     if (!r.ok || !data.tempPassword) {
-      note(data && data.error ? Utils.escapeHtml(data.error) : 'Verification failed. Check your details and try again.');
+      fail(data && data.error ? Utils.escapeHtml(data.error) : 'The information provided does not match our records. Please check your details and try again.');
       return;
     }
     document.getElementById('reset-temp-value').textContent = data.tempPassword;
@@ -278,16 +290,48 @@ async function submitForgot(e) {
     if (expEl && data.expiresAt) {
       expEl.textContent = 'Valid until ' + new Date(data.expiresAt).toLocaleString() + '.';
     }
+    if (form) form.style.display = 'none';
     tempBox.style.display = 'block';
     document.getElementById('reset-credential').value = '';
+    bindResetCopy();
     if (typeof lucide !== 'undefined') lucide.createIcons();
   } catch (err) {
-    note('We couldn\u2019t reach the RMS server. Please check your internet connection and try again.');
+    fail('We couldn\u2019t reach the RMS server. Please check your internet connection and try again.');
   } finally {
     btn.innerHTML = '<i data-lucide="send" style="width:18px;height:18px"></i> Verify & Generate Password';
     btn.disabled = false;
     if (typeof lucide !== 'undefined') lucide.createIcons();
   }
+}
+
+function bindResetCopy() {
+  const copyBtn = document.getElementById('reset-copy');
+  if (!copyBtn) return;
+  const defaultValue = '<i data-lucide="copy" style="width:16px;height:16px"></i> Copy Password';
+  copyBtn.onclick = async () => {
+    const value = document.getElementById('reset-temp-value').textContent;
+    if (!value) return;
+    try {
+      await navigator.clipboard.writeText(value);
+    } catch (e) {
+      const ta = document.createElement('textarea');
+      ta.value = value;
+      ta.style.position = 'fixed';
+      ta.style.opacity = '0';
+      document.body.appendChild(ta);
+      ta.select();
+      document.execCommand('copy');
+      ta.remove();
+    }
+    copyBtn.innerHTML = '<i data-lucide="check" style="width:16px;height:16px"></i> Copied!';
+    copyBtn.disabled = true;
+    if (typeof lucide !== 'undefined') lucide.createIcons();
+    setTimeout(() => {
+      copyBtn.innerHTML = defaultValue;
+      copyBtn.disabled = false;
+      if (typeof lucide !== 'undefined') lucide.createIcons();
+    }, 1600);
+  };
 }
 
 async function submitNewPassword(e) {

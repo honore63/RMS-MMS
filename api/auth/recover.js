@@ -28,7 +28,7 @@ const WINDOW_MINUTES = 15;
 const TEMP_LENGTH = 12;
 const TEMP_ALPHABET = 'ABCDEFGHJKMNPQRSTUVWXYZabcdefghjkmnpqrstuvwxyz23456789'; // no 0/O/1/l/I
 
-const GENERIC_FAIL = 'Verification failed. Check your details and try again.';
+const GENERIC_FAIL = 'The information provided does not match our records. Please check your details and try again.';
 
 function svcHeaders(json) {
   const h = { apikey: SERVICE_KEY, Authorization: 'Bearer ' + SERVICE_KEY };
