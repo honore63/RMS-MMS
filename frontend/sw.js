@@ -1,9 +1,9 @@
 /* ============================================================
-  RMS-MIS — Service Worker v6
+  RMS-MIS — Service Worker v7
    Production-ready: caching, offline, push, background sync
    ============================================================ */
 
-const CACHE_NAME = 'rms-mis-v6';
+const CACHE_NAME = 'rms-mis-v7';
 const APP_SHELL = [
   '/',
   '/index.html',
