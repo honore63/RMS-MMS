@@ -850,6 +850,40 @@ RETURNS boolean LANGUAGE sql STABLE AS $fn$
   END;
 $fn$;
 
+-- Teacher / user record level labels. A scoped DOS may never write the
+-- opposite level onto a record it manages. NULL and 'BOTH' stay writable so
+-- existing unlabelled/shared records remain editable (no functional break).
+CREATE OR REPLACE FUNCTION public.rms_dos_can_teacher_level(p_level TEXT)
+RETURNS boolean LANGUAGE sql STABLE AS $fn$
+  SELECT CASE
+    WHEN NOT public.rms_is_dos() THEN true
+    WHEN public.rms_dos_education_level() IS NULL THEN true
+    WHEN p_level IS NULL THEN true
+    WHEN upper(p_level) = 'BOTH' OR upper(p_level) = 'ALL' THEN true
+    WHEN public.rms_dos_education_level() = 'PRIMARY' THEN upper(p_level) <> 'SECONDARY'
+    WHEN public.rms_dos_education_level() = 'SECONDARY' THEN upper(p_level) <> 'PRIMARY'
+    ELSE false
+  END;
+$fn$;
+
+-- Audit helper: DOS accounts and whether they carry a valid education level.
+CREATE OR REPLACE FUNCTION public.rms_dos_level_audit()
+RETURNS TABLE(full_name TEXT, email TEXT, education_level TEXT, scope_status TEXT)
+LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public, pg_temp AS $fn$
+  SELECT u.full_name, u.email, u.education_level,
+    CASE
+      WHEN u.education_level IS NULL THEN 'GLOBAL - no level assigned (sees whole school)'
+      WHEN upper(u.education_level) NOT IN ('PRIMARY', 'SECONDARY') THEN 'INVALID - must be PRIMARY or SECONDARY'
+      ELSE 'OK - isolated to ' || upper(u.education_level)
+    END
+  FROM public.users u
+  WHERE u.role = 'dos' AND u.status = 'active'
+  ORDER BY u.full_name;
+$fn$;
+
+REVOKE ALL ON FUNCTION public.rms_dos_level_audit() FROM PUBLIC, anon;
+GRANT EXECUTE ON FUNCTION public.rms_dos_level_audit() TO authenticated;
+
 -- Legacy helper (kept for compatibility; scoping is assignment-derived).
 CREATE OR REPLACE FUNCTION public.rms_dos_can_teacher(p_level TEXT)
 RETURNS boolean LANGUAGE sql STABLE AS $fn$
@@ -1507,8 +1541,20 @@ CREATE POLICY rms_account_users_delete ON public.users FOR DELETE TO authenticat
     AND id <> auth.uid()
     AND role = 'teacher'
     AND public.rms_account_can_access_user(id));
+-- A scoped DOS may not relabel a managed account as the opposite level.
+CREATE POLICY rms_dos_user_level_write ON public.users AS RESTRICTIVE FOR UPDATE TO authenticated
+  WITH CHECK (NOT public.rms_is_dos() OR public.rms_dos_can_teacher_level(education_level));
 
 -- --- teachers ---
+-- Permissive baseline: DOS may address any teacher row, everyone else only
+-- their own. The RESTRICTIVE policies below narrow this to the DOS's own
+-- education level (rms_account_teacher_rows + rms_dos_level_guard), so a
+-- scoped DOS only ever resolves in-scope teachers.
+CREATE POLICY rms_account_teachers_select ON public.teachers FOR SELECT TO authenticated
+  USING (public.rms_account_role() = 'dos' OR user_id = auth.uid());
+CREATE POLICY rms_account_teachers_update ON public.teachers FOR UPDATE TO authenticated
+  USING (public.rms_account_role() = 'dos' OR user_id = auth.uid())
+  WITH CHECK (public.rms_account_role() = 'dos' OR user_id = auth.uid());
 CREATE POLICY rms_account_teacher_self_insert ON public.teachers FOR INSERT TO authenticated
   WITH CHECK (public.rms_account_role() IN ('teacher', 'headteacher') AND user_id = auth.uid());
 CREATE POLICY rms_account_teacher_rows ON public.teachers AS RESTRICTIVE FOR ALL TO authenticated
@@ -1519,6 +1565,11 @@ CREATE POLICY rms_account_teacher_rows ON public.teachers AS RESTRICTIVE FOR ALL
 CREATE POLICY rms_dos_level_guard ON public.teachers AS RESTRICTIVE FOR ALL TO authenticated
   USING (NOT public.rms_is_dos() OR (public.rms_is_scoped_dos() AND public.rms_teacher_in_scope(teachers.id)))
   WITH CHECK (NOT public.rms_is_dos() OR public.rms_is_scoped_dos());
+-- A scoped DOS may not create or relabel a teacher as the opposite level.
+CREATE POLICY rms_dos_teacher_level_write ON public.teachers AS RESTRICTIVE FOR INSERT TO authenticated
+  WITH CHECK (NOT public.rms_is_dos() OR public.rms_dos_can_teacher_level(education_level));
+CREATE POLICY rms_dos_teacher_level_write_upd ON public.teachers AS RESTRICTIVE FOR UPDATE TO authenticated
+  WITH CHECK (NOT public.rms_is_dos() OR public.rms_dos_can_teacher_level(education_level));
 CREATE POLICY rms_account_teachers_delete ON public.teachers FOR DELETE TO authenticated
   USING (public.rms_account_role() = 'dos'
     AND public.rms_is_scoped_dos()

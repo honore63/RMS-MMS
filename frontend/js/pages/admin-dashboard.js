@@ -96,6 +96,7 @@ async function renderAdminDashboard() {
         <div style="display:flex;align-items:center;gap:16px">
           <div style="font-weight:700;color:var(--blue-800)"><i data-lucide="shield-check" style="width:16px;height:16px;vertical-align:middle"></i> Your Scope:</div>
           <div><span class="badge badge-info" style="font-size:12px;font-weight:700">${Utils.escapeHtml(Scope.label())}</span>
+          <span class="text-sm text-muted" style="margin-left:10px">Education Level: <strong>${Utils.escapeHtml((Scope.eduLevel() || '').toUpperCase())}</strong></span>
           <span class="text-sm text-muted" style="margin-left:10px">${Scope.isPrimary() ? '📗 Primary (P1-P6)' : '📘📙 Secondary (S1-S6)'}</span></div>
           <a href="https://rukaramodelschool.com/" target="_blank" rel="noopener" title="Visit Rukara Model School website" aria-label="Visit public website of Rukara Model School" style="display:inline-flex;align-items:center;gap:8px;margin-left:auto;flex:none;text-decoration:none;color:var(--blue-800);font-size:12.5px;font-weight:700"><span style="display:inline-flex;align-items:center;justify-content:center;width:32px;height:32px;border-radius:50%;background:var(--blue-600);color:#fff;flex:none"><i data-lucide="globe" style="width:17px;height:17px"></i></span>Visit public website</a>
         </div>
