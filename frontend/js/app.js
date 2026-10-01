@@ -1,8 +1,20 @@
 async function initApp() {
   try {
     document.getElementById('login-year').textContent = String(new Date().getFullYear());
+    // Password-recovery landing: the email link returns here with a recovery
+    // token (?code= / type=recovery). Give Supabase a moment to exchange it
+    // for a session before deciding where to route.
+    const recoveryLanding = /[?#&](code=|token=|type=recovery)/.test(window.location.href);
+    if (recoveryLanding) {
+      await waitForRecoverySession(10000);
+    }
     const hasSession = await Auth.init();
     document.getElementById('loading-screen').style.display = 'none';
+
+    if (hasSession && recoveryLanding) {
+      showCreatePassword();
+      return;
+    }
 
     if (hasSession) {
       if (Auth.currentUser && Auth.currentUser.status === 'inactive') {
@@ -142,18 +154,74 @@ function showSignInView() {
   document.getElementById('login-signin-view').style.display = '';
   const resetView = document.getElementById('login-reset-view');
   if (resetView) resetView.style.display = 'none';
+  const npView = document.getElementById('login-newpass-view');
+  if (npView) npView.style.display = 'none';
   hideLoginError();
   const resetMsg = document.getElementById('reset-message');
   if (resetMsg) resetMsg.style.display = 'none';
+  const okMsg = document.getElementById('login-success');
+  if (okMsg) okMsg.style.display = 'none';
 }
 
 function showResetView() {
   document.getElementById('login-signin-view').style.display = 'none';
   document.getElementById('login-reset-view').style.display = '';
+  const npView = document.getElementById('login-newpass-view');
+  if (npView) npView.style.display = 'none';
   hideLoginError();
   const resetMsg = document.getElementById('reset-message');
   if (resetMsg) resetMsg.style.display = 'none';
-  document.getElementById('reset-email').value = document.getElementById('login-email').value.trim();
+  const ident = document.getElementById('login-identifier');
+  const re = document.getElementById('reset-email');
+  if (re) re.value = ident ? ident.value.trim() : '';
+}
+
+function showCreatePassword() {
+  document.getElementById('login-page').style.display = 'flex';
+  document.getElementById('app-layout').style.display = 'none';
+  document.getElementById('login-signin-view').style.display = 'none';
+  const resetView = document.getElementById('login-reset-view');
+  if (resetView) resetView.style.display = 'none';
+  document.getElementById('login-newpass-view').style.display = '';
+  hideLoginError();
+  const errEl = document.getElementById('newpass-error');
+  if (errEl) errEl.style.display = 'none';
+  const p1 = document.getElementById('newpass-password');
+  const p2 = document.getElementById('newpass-confirm');
+  if (p1) p1.value = '';
+  if (p2) p2.value = '';
+  const form = document.getElementById('newpass-form');
+  if (form) {
+    form.removeEventListener('submit', submitNewPassword);
+    form.addEventListener('submit', submitNewPassword);
+  }
+  const back = document.getElementById('newpass-back');
+  if (back) back.onclick = () => showSignInView();
+  if (typeof lucide !== 'undefined') lucide.createIcons();
+}
+
+function showLoginSuccess(message) {
+  showSignInView();
+  const el = document.getElementById('login-success');
+  if (!el) return;
+  el.innerHTML = '<i data-lucide="check-circle-2"></i><span>' + Utils.escapeHtml(message) + '</span>';
+  el.style.display = 'flex';
+  if (typeof lucide !== 'undefined') lucide.createIcons();
+}
+
+// Polls for the recovery session Supabase builds from the email-link token.
+function waitForRecoverySession(timeoutMs) {
+  const start = Date.now();
+  return (async () => {
+    while (Date.now() - start < timeoutMs) {
+      try {
+        const { data } = await sbClient.auth.getSession();
+        if (data && data.session && data.session.user) return true;
+      } catch (e) { /* keep waiting */ }
+      await new Promise(r => setTimeout(r, 500));
+    }
+    return false;
+  })();
 }
 
 function mapLoginError(message) {
@@ -197,6 +265,14 @@ async function submitForgot(e) {
     return;
   }
 
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+    msgEl.className = 'login-reset-message';
+    msgEl.style.display = 'flex';
+    msgEl.innerHTML = '<i data-lucide="alert-circle"></i><span>Please enter a valid email address.</span>';
+    if (typeof lucide !== 'undefined') lucide.createIcons();
+    return;
+  }
+
   btn.innerHTML = '<div class="spinner" style="width:18px;height:18px;border-width:2px"></div> Sending...';
   btn.disabled = true;
 
@@ -207,8 +283,7 @@ async function submitForgot(e) {
     }
     msgEl.className = 'login-reset-message';
     msgEl.style.display = 'flex';
-    msgEl.innerHTML = '<i data-lucide="check-circle-2"></i><span>A password reset link has been sent to <strong>' +
-      email + '</strong>. Please check your inbox and follow the instructions.</span>';
+    msgEl.innerHTML = '<i data-lucide="check-circle-2"></i><span>If an account exists for this email, password-reset instructions have been sent.</span>';
   } catch (err) {
     msgEl.className = 'login-reset-message';
     msgEl.style.display = 'flex';
@@ -216,6 +291,39 @@ async function submitForgot(e) {
       'Please try again in a few minutes or contact the school administrator.</span>';
   } finally {
     btn.innerHTML = '<i data-lucide="send" style="width:18px;height:18px"></i> Send Reset Link';
+    btn.disabled = false;
+    if (typeof lucide !== 'undefined') lucide.createIcons();
+  }
+}
+
+async function submitNewPassword(e) {
+  e.preventDefault();
+  const p1 = document.getElementById('newpass-password').value;
+  const p2 = document.getElementById('newpass-confirm').value;
+  const errEl = document.getElementById('newpass-error');
+  const btn = document.getElementById('newpass-btn');
+  const fail = (msg) => {
+    errEl.innerHTML = '<i data-lucide="alert-circle"></i><span>' + msg + '</span>';
+    errEl.style.display = 'flex';
+    if (typeof lucide !== 'undefined') lucide.createIcons();
+  };
+  errEl.style.display = 'none';
+
+  if (!p1 || !p2) { fail('Please enter your new password twice.'); return; }
+  if (p1.length < 6) { fail('Your password must be at least 6 characters long.'); return; }
+  if (p1 !== p2) { fail('The two passwords do not match. Please try again.'); return; }
+
+  btn.disabled = true;
+  btn.innerHTML = '<div class="spinner" style="width:18px;height:18px;border-width:2px"></div> Resetting...';
+  try {
+    const { error } = await sbClient.auth.updateUser({ password: p1 });
+    if (error) throw error;
+    await Auth.signOut();
+    showLoginSuccess('Your password has been successfully reset. You can now sign in with your new password.');
+  } catch (err) {
+    fail('We couldn\u2019t reset your password. The link may have expired \u2014 please request a new one.');
+  } finally {
+    btn.innerHTML = '<i data-lucide="check" style="width:18px;height:18px"></i> Reset Password';
     btn.disabled = false;
     if (typeof lucide !== 'undefined') lucide.createIcons();
   }

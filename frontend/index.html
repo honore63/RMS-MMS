@@ -107,6 +107,7 @@
             <h2 class="login-card-title">System Access</h2>
 
             <div id="login-error" class="login-error" style="display:none" role="alert"></div>
+            <div id="login-success" class="login-reset-message" style="display:none" role="status"></div>
 
             <form id="login-form" novalidate>
               <div class="form-group">
@@ -161,6 +162,38 @@
             </form>
 
             <button type="button" class="forgot-link reset-back" id="reset-back">
+              <i data-lucide="arrow-left"></i> Back to Sign In
+            </button>
+          </div>
+
+          <div class="login-card" id="login-newpass-view" style="display:none">
+            <div class="login-card-icon"><i data-lucide="key-round"></i></div>
+            <h2 class="login-card-title">Create New Password</h2>
+            <p class="login-card-sub">Enter your new password below.</p>
+
+            <div id="newpass-error" class="login-error" style="display:none" role="alert"></div>
+
+            <form id="newpass-form" novalidate>
+              <div class="form-group">
+                <label for="newpass-password">New Password</label>
+                <div class="input-wrap">
+                  <input type="password" id="newpass-password" class="input-field" placeholder="Enter your new password"
+                         autocomplete="new-password">
+                </div>
+              </div>
+              <div class="form-group">
+                <label for="newpass-confirm">Confirm New Password</label>
+                <div class="input-wrap">
+                  <input type="password" id="newpass-confirm" class="input-field" placeholder="Re-enter your new password"
+                         autocomplete="new-password">
+                </div>
+              </div>
+              <button type="submit" id="newpass-btn" class="btn btn-primary btn-full login-submit">
+                <i data-lucide="check" style="width:18px;height:18px"></i> Reset Password
+              </button>
+            </form>
+
+            <button type="button" class="forgot-link reset-back" id="newpass-back">
               <i data-lucide="arrow-left"></i> Back to Sign In
             </button>
           </div>
@@ -306,7 +339,7 @@
   <script src="js/import-system.js?v=20260929-1"></script>
   <script src="js/sync-registry.js?v=20260924-10"></script>
   <script src="js/communication-center.js?v=20260929-2"></script>
-  <script src="js/app.js?v=20260928-7"></script>
+  <script src="js/app.js?v=20261001-1"></script>
 
   <!-- PWA Install Banner -->
   <div id="pwa-install-banner" style="display:none;position:fixed;bottom:0;left:0;right:0;z-index:9999;background:linear-gradient(135deg,#0d2f6b,#2563eb);color:#fff;padding:14px 20px;box-shadow:0 -4px 20px rgba(0,0,0,.2);font-family:'Poppins',sans-serif;transform:translateY(100%);transition:transform .4s ease;">
