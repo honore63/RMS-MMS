@@ -531,6 +531,12 @@ const Utils = {
   }
 };
 
+if (typeof window !== 'undefined') {
+  window.ASSESSMENT_TYPES = ASSESSMENT_TYPES;
+  window.ASSESSMENT_TYPE_DEFAULTS = ASSESSMENT_TYPE_DEFAULTS;
+  window.Utils = Utils;
+}
+
 function assessmentTypeName(types, id, fallback) {
   const type = Utils._findType(types, id);
   if (id && !type) {
