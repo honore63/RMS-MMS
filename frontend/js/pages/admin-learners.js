@@ -226,6 +226,25 @@ async function learnerSave() {
     });
     if (error) throw error;
     DB.invalidate('learners');
+
+    // Provision parent/student performance account
+    try {
+      const { data: learnerRow } = await sbClient.from('learners').select('id').eq('learner_code', code).maybeSingle();
+      if (learnerRow) {
+        const parentEmail = `${code}@rukara.edu`;
+        const { error: signUpErr } = await sbClient.auth.signUp({
+          email: parentEmail,
+          password: code,
+          options: { data: { full_name: name.toUpperCase(), role: 'parent' } }
+        });
+        if (!signUpErr) {
+          await sbClient.from('users').update({ role: 'parent', learner_id: learnerRow.id }).eq('email', parentEmail);
+        }
+      }
+    } catch (parentErr) {
+      console.warn('Parent account provisioning failed:', parentErr.message);
+    }
+
     Modal.close();
     Utils.toast('Learner added successfully', 'success');
     renderLearners();

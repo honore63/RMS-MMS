@@ -2,6 +2,7 @@ const Auth = {
   currentUser: null,
   userProfile: null,
   teacherProfile: null,
+  parentLearner: null,
 
   async signIn(email, password) {
     const { data, error } = await sbClient.auth.signInWithPassword({ email, password });
@@ -72,8 +73,11 @@ const Auth = {
 
     if (!data) {
       try {
-        const isAdmin = authUser.email.includes('dos') || authUser.email.includes('admin');
-        const role = isAdmin ? 'dos' : 'teacher';
+        const email = authUser.email.toLowerCase();
+        let role = 'teacher';
+        if (email.includes('dos') || email.includes('admin')) role = 'dos';
+        else if (email.includes('principal') || email.includes('headteacher') || email.includes('head-teacher')) role = 'principal';
+        else if (email.includes('parent') || email.includes('student') || email.includes('learner')) role = 'parent';
         const name = authUser.email.split('@')[0].replace(/[._]/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
 
         ({ data, error: selectError } = await sbClient.from('users').insert([{
@@ -101,7 +105,6 @@ const Auth = {
     if (data && data.role === 'teacher') {
       const { data: t, error: tErr } = await sbClient.from('teachers').select('*').eq('user_id', authUser.id).maybeSingle();
       if (!t && !tErr) {
-        // users row exists but teachers row is missing — recover by creating it
         await this.ensureTeacherRow(data, authUser);
         const { data: t2 } = await sbClient.from('teachers').select('*').eq('user_id', authUser.id).maybeSingle();
         this.teacherProfile = t2 || null;
@@ -109,6 +112,11 @@ const Auth = {
       } else {
         this.teacherProfile = t || null;
       }
+    }
+
+    if (data && data.role === 'parent' && data.learner_id) {
+      const { data: l } = await sbClient.from('learners').select('*').eq('id', data.learner_id).maybeSingle();
+      this.parentLearner = l || null;
     }
     return data;
   },
@@ -126,6 +134,9 @@ const Auth = {
   getRole() { return this.currentUser?.role || null; },
   getTeacherId() { return this.teacherProfile?.id || null; },
   getEducationLevel() { return this.currentUser?.education_level || null; },
+  getLearnerId() { return this.currentUser?.learner_id || null; },
   isAdmin() { return this.getRole() === 'dos'; },
-  isTeacher() { return this.getRole() === 'teacher'; }
+  isTeacher() { return this.getRole() === 'teacher'; },
+  isPrincipal() { return this.getRole() === 'principal'; },
+  isParent() { return this.getRole() === 'parent'; }
 };

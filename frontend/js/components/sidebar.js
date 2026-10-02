@@ -45,15 +45,23 @@ const Sidebar = {
   },
 
   render(role) {
-    const menu = role === 'dos' ? this.adminMenu() : this.teacherMenu();
+    let menu;
+    if (role === 'dos') menu = this.adminMenu();
+    else if (role === 'principal') menu = this.principalMenu();
+    else if (role === 'parent') menu = this.parentMenu();
+    else menu = this.teacherMenu();
     const user = Auth.currentUser;
-    // Profile photo: account-level photo first, then the linked teacher
-    // record's photo (teachers can upload one from My Account); initials fallback.
     const photoURL = user?.profile_photo_url || Auth.teacherProfile?.profile_photo_url || '';
     const initials = Utils.initials(user?.full_name);
     const avatarHtml = photoURL
       ? `<img src="${Utils.escapeHtml(photoURL)}" alt="${Utils.escapeHtml(user?.full_name || 'Profile photo')}" onerror="this.remove()">`
       : initials;
+    const roleLabel = role === 'dos' && typeof Scope !== 'undefined' ? Utils.escapeHtml(Scope.label())
+      : role === 'principal' ? 'Principal'
+      : role === 'parent' ? 'Parent'
+      : Utils.escapeHtml(user?.role || '');
+    const roleSub = role === 'dos' && typeof Scope !== 'undefined' && Scope.subLabel() ? `<div class="role-sub">${Utils.escapeHtml(Scope.subLabel())}</div>` : '';
+    const settingsBtn = (role === 'dos' || role === 'principal') ? `<button class="btn-logout" onclick="Router.go('admin/settings')" title="Settings" aria-label="Settings"><i data-lucide="settings"></i></button>` : '';
     document.getElementById('sidebar').innerHTML = `
       <div class="sidebar-header">
         <div class="sidebar-logo">
@@ -70,10 +78,10 @@ const Sidebar = {
         <div class="user-avatar">${avatarHtml}</div>
         <div class="user-info">
           <div class="name">${Utils.escapeHtml(user?.full_name || '')}</div>
-          <div class="role">${role === 'dos' && typeof Scope !== 'undefined' ? Utils.escapeHtml(Scope.label()) : Utils.escapeHtml(user?.role || '')}</div>
-          ${role === 'dos' && typeof Scope !== 'undefined' && Scope.subLabel() ? `<div class="role-sub">${Utils.escapeHtml(Scope.subLabel())}</div>` : ''}
+          <div class="role">${roleLabel}</div>
+          ${roleSub}
         </div>
-        ${role === 'dos' ? `<button class="btn-logout" onclick="Router.go('admin/settings')" title="Settings" aria-label="Settings"><i data-lucide="settings"></i></button>` : ''}
+        ${settingsBtn}
         <button class="btn-logout" onclick="App.logout()" title="Sign Out" aria-label="Sign Out"><i data-lucide="log-out"></i></button>
       </div>`;
     if (typeof lucide !== 'undefined') lucide.createIcons();
@@ -190,6 +198,74 @@ const Sidebar = {
         <a class="nav-link" data-route="teacher/account" onclick="Router.go('teacher/account')">
           <i data-lucide="user-cog"></i> My Account</a>
       </div>`;
+  },
+
+  principalMenu() {
+    return `
+      <a class="nav-link" data-route="principal/dashboard" onclick="Router.go('principal/dashboard')">
+        <i data-lucide="layout-dashboard"></i> Dashboard</a>
+      <div class="sidebar-section">
+        <div class="sidebar-section-title">School Management</div>
+        <a class="nav-link" data-route="admin/classes" onclick="Router.go('admin/classes')">
+          <i data-lucide="school"></i> Classes</a>
+        <a class="nav-link" data-route="admin/subjects" onclick="Router.go('admin/subjects')">
+          <i data-lucide="book-open"></i> Subjects</a>
+        <a class="nav-link" data-route="admin/teachers" onclick="Router.go('admin/teachers')">
+          <i data-lucide="users"></i> Teachers</a>
+        <a class="nav-link" data-route="admin/learners" onclick="Router.go('admin/learners')">
+          <i data-lucide="user-check"></i> Learners</a>
+        <a class="nav-link" data-route="admin/assignments" onclick="Router.go('admin/assignments')">
+          <i data-lucide="link"></i> Assignments</a>
+      </div>
+      <div class="sidebar-section">
+        <div class="sidebar-section-title">Evaluations</div>
+        <a class="nav-link" data-route="admin/assessments" onclick="Router.go('admin/assessments')">
+          <i data-lucide="file-text"></i> Assessments</a>
+        <a class="nav-link" data-route="admin/assessment-types" onclick="Router.go('admin/assessment-types')">
+          <i data-lucide="tags"></i> Assessment Types</a>
+        <a class="nav-link" data-route="admin/marks" onclick="Router.go('admin/marks')">
+          <i data-lucide="list-checks"></i> Marks</a>
+      </div>
+      <div class="sidebar-section">
+        <div class="sidebar-section-title">Reports</div>
+        <a class="nav-link nav-parent" data-navgroup="principal-reports" onclick="Sidebar.toggleGroup('principal-reports')">
+          <i data-lucide="bar-chart-3"></i> Reports <i data-lucide="chevron-down" class="nav-chevron"></i></a>
+        <div class="nav-sub" id="nav-sub-principal-reports">
+          <a class="nav-link nav-sub-link" data-route="admin/reports" onclick="Router.go('admin/reports')">
+            <i data-lucide="layout-grid"></i> All Reports</a>
+          <a class="nav-link nav-sub-link" data-route="admin/reports/cards" onclick="Router.go('admin/reports/cards')">
+            <i data-lucide="file-badge"></i> Student Report Cards</a>
+          <a class="nav-link nav-sub-link" data-route="admin/reports/class" onclick="Router.go('admin/reports/class')">
+            <i data-lucide="school"></i> Class Report</a>
+          <a class="nav-link nav-sub-link" data-route="admin/reports/subject" onclick="Router.go('admin/reports/subject')">
+            <i data-lucide="book-open"></i> Subject Report</a>
+          <a class="nav-link nav-sub-link" data-route="admin/reports/assessment" onclick="Router.go('admin/reports/assessment')">
+            <i data-lucide="clipboard-check"></i> Assessment Report</a>
+          <a class="nav-link nav-sub-link" data-route="admin/reports/school" onclick="Router.go('admin/reports/school')">
+            <i data-lucide="building-2"></i> School Performance</a>
+        </div>
+      </div>
+      <div class="sidebar-section">
+        <div class="sidebar-section-title">System Insights</div>
+        <a class="nav-link" data-route="admin/analytics" onclick="Router.go('admin/analytics')">
+          <i data-lucide="trending-up"></i> Analytics</a>
+        <a class="nav-link" data-route="admin/audit-logs" onclick="Router.go('admin/audit-logs')">
+          <i data-lucide="history"></i> Audit Logs</a>
+      </div>
+      <a class="nav-link" href="#admin/notifications" data-route="admin/notifications" onclick="Router.go('admin/notifications')" id="nav-notifications-link" aria-label="Notifications">
+        <i data-lucide="bell" aria-hidden="true"></i> Notifications <span class="nav-badge" id="notif-badge" aria-hidden="true"></span></a>`;
+  },
+
+  parentMenu() {
+    return `
+      <a class="nav-link" data-route="parent/dashboard" onclick="Router.go('parent/dashboard')">
+        <i data-lucide="layout-dashboard"></i> Dashboard</a>
+      <a class="nav-link" data-route="parent/performance" onclick="Router.go('parent/performance')">
+        <i data-lucide="graduation-cap"></i> My Academic Performance</a>
+      <a class="nav-link" data-route="parent/reports" onclick="Router.go('parent/reports')">
+        <i data-lucide="file-text"></i> Reports</a>
+      <a class="nav-link" href="#parent/notifications" data-route="parent/notifications" onclick="Router.go('parent/notifications')" id="nav-notifications-link" aria-label="Notifications">
+        <i data-lucide="bell" aria-hidden="true"></i> Notifications <span class="nav-badge" id="notif-badge" aria-hidden="true"></span></a>`;
   },
 
 highlight() {

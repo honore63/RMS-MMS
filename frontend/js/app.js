@@ -412,6 +412,8 @@ if (typeof NotificationCenter !== 'undefined') {
   });
   if (!window.location.hash || window.location.hash === '#') {
     if (role === 'dos') Router.go('admin/dashboard');
+    else if (role === 'principal') Router.go('principal/dashboard');
+    else if (role === 'parent') Router.go('parent/dashboard');
     else if (role === 'teacher') Router.go('teacher/dashboard');
     else Router.go('admin/dashboard');
   } else {
@@ -459,6 +461,12 @@ function registerRoutes() {
   Router.register('teacher/messages', () => CommunicationCenter.render());
   Router.register('teacher/notifications', renderNotifications);
   Router.register('teacher/account', renderTeacherAccount);
+
+  Router.register('principal/dashboard', renderPrincipalDashboard);
+  Router.register('parent/dashboard', renderParentDashboard);
+  Router.register('parent/performance', renderParentPerformance);
+  Router.register('parent/reports', renderParentReports);
+  Router.register('parent/notifications', renderNotifications);
 }
 
 function renderNotifications() {
