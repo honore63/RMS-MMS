@@ -84,9 +84,9 @@ function getAssessmentTypeName(types, id, fallback) {
 
 function getCategoryForType(type) {
   const code = (type.code || '').toUpperCase();
-  if (['EOU', 'QUIZ', 'HOMEWORK', 'PRACTICE'].includes(code)) return 'formative';
-  if (['EXAM', 'TEST', 'PROJECT', 'PORTFOLIO'].includes(code)) return 'summative';
-  if (code === 'DIAGNOSTIC') return 'diagnostic';
+  if (['EOU', 'QUIZ', 'HW', 'ASS', 'CW', 'PRA', 'ORAL', 'PART'].includes(code)) return 'formative';
+  if (['BOT', 'MTE', 'ETE', 'PROJ', 'PORT', 'TEST', 'EXAM', 'PROJECT', 'PORTFOLIO'].includes(code)) return 'summative';
+  if (code === 'DIAG') return 'diagnostic';
   return 'performance';
 }
 

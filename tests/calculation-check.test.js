@@ -62,10 +62,25 @@ test('DOS assessment type catalog should include exactly the official RMS-MIS se
     'CAT',
     'Monthly Test',
     'Weekly Test',
-    'Beginning Exam'
+    'Beginning Exam',
+    'Mid-Term Exam',
+    'End of Term Exam',
+    'End of Unit',
+    'Assignment',
+    'Quiz',
+    'Project',
+    'Homework',
+    'Classwork',
+    'Practical',
+    'Portfolio',
+    'Oral Test',
+    'Participation',
+    'Diagnostic Test',
+    'Other'
   ];
 
   assert.deepEqual(Utils.ASSESSMENT_TYPES, required);
+  assert.deepEqual([...new Set(Utils.ASSESSMENT_TYPES)], Utils.ASSESSMENT_TYPES);
   for (const type of required) {
     assert.ok(Utils.ASSESSMENT_TYPES.includes(type), `Missing assessment type: ${type}`);
   }
