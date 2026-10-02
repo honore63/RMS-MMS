@@ -13,6 +13,7 @@
 const DB = {
   _cache: new Map(),          // key -> { data, ts, table }
   _pending: new Map(),        // key -> Promise (request dedup)
+  _tableGen: new Map(),       // table -> invalidation generation
   _uid: null,                 // auth user scope for cache keys
   _gen: 0,                    // generation: bump clears without race
   debug: false,               // set true to log [CACHE HIT/MISS/...]
@@ -158,10 +159,11 @@ const DB = {
   _revalidate(key, table, select, filters, order, limit) {
     if (this._pending.has(key)) return;
     const gen = this._gen;
+    const tableGen = this._tableGen.get(table) || 0;
     this._log('REFRESH', key);
     this._dedup(key, async () => {
       const result = await this._runQuery(table, select, filters, order, limit);
-      if (this._gen === gen) this._setCache(key, table, result);
+      if (this._gen === gen && (this._tableGen.get(table) || 0) === tableGen) this._setCache(key, table, result);
       return result;
     }).catch(() => { /* background refresh must never throw */ });
   },
@@ -186,9 +188,10 @@ const DB = {
     if (!cache) this._log('BYPASS', key);
     else this._stats.misses++;
 
+    const tableGen = this._tableGen.get(table) || 0;
     return this._dedup(key, async () => {
       const result = await this._runQuery(table, select, filters, order, limit);
-      if (cache) this._setCache(key, table, result);
+      if (cache && (this._tableGen.get(table) || 0) === tableGen) this._setCache(key, table, result);
       return result;
     });
   },
@@ -233,10 +236,17 @@ const DB = {
   /* Invalidate every cache entry for a table (partial key match by table field). */
   invalidate(table) {
     if (!table) { this._cache.clear(); this._stats.invalidations++; this._log('CLEAR', '*'); return; }
+    this._tableGen.set(table, (this._tableGen.get(table) || 0) + 1);
     let n = 0;
     for (const [key, entry] of this._cache.entries()) {
       if (entry.table === table || key.startsWith(`${table}:`)) {
         this._cache.delete(key);
+        n++;
+      }
+    }
+    for (const key of this._pending.keys()) {
+      if (key.startsWith(`${table}:`)) {
+        this._pending.delete(key);
         n++;
       }
     }

@@ -9,6 +9,10 @@ let assessmentTypesCategory = 'all';
 let assessmentTypesStatus = 'all';
 let typeModalMode = 'add';
 
+function invalidateAssessmentTypesPageCache() {
+  assessmentTypesCache = null;
+}
+
 const TYPE_ICONS = {
   EOU: 'clipboard-check',
   QUIZ: 'clipboard-list',
@@ -53,8 +57,12 @@ const TYPE_CATEGORIES = [
 async function getAssessmentTypes(force = false, strict = false) {
   if (Array.isArray(assessmentTypesCache) && !force) return assessmentTypesCache;
   try {
-    if (!strict) await Utils.ensureAssessmentTypes();
-    assessmentTypesCache = (await DB.get('assessment_types')) || [];
+    if (force) {
+      assessmentTypesCache = await Utils.ensureAssessmentTypes({ forceRefresh: true });
+    } else {
+      if (!strict) await Utils.ensureAssessmentTypes();
+      assessmentTypesCache = (await DB.get('assessment_types')) || [];
+    }
   } catch (e) {
     if (strict) throw e;
     assessmentTypesCache = [];
@@ -109,9 +117,7 @@ async function renderAssessmentTypes() {
   setContent(Utils.loading());
 
   try {
-    // Canonical types are defined in code (ASSESSMENT_TYPES in utils.js); this keeps
-    // the backing rows in sync automatically - no manual restore step.
-    await Utils.ensureAssessmentTypes();
+    // Force a fresh backing-table read so returning to this page cannot reuse a stale list.
     const [types, assessments] = await Promise.all([
       getAssessmentTypes(true, true),
       DB.get('assessments', {}, { select: 'id,assessment_type_id' })
@@ -655,7 +661,7 @@ async function saveType(id) {
   try {
     if (id) { await DB.update('assessment_types', id, d); Utils.toast('Assessment type updated', 'success'); }
     else { await DB.insert('assessment_types', d); Utils.toast('Assessment type created', 'success'); }
-    assessmentTypesCache = null;
+    Utils.invalidateAssessmentTypeCaches();
     Modal.close();
     renderAssessmentTypes();
   } catch (e) {
@@ -667,7 +673,7 @@ async function saveType(id) {
 async function toggleTypeStatus(id, status) {
   try {
     await DB.update('assessment_types', id, { status });
-    assessmentTypesCache = null;
+    Utils.invalidateAssessmentTypeCaches();
     Utils.toast('Type ' + (status === 'active' ? 'activated' : 'deactivated'), 'success');
     renderAssessmentTypes();
   } catch (e) { Utils.toast('Error: ' + (e.message || 'Could not update'), 'error'); }
@@ -695,7 +701,7 @@ async function confirmDeleteType(id) {
 async function deleteType(id) {
   try {
     await DB.remove('assessment_types', id);
-    assessmentTypesCache = null;
+    Utils.invalidateAssessmentTypeCaches();
     Modal.close();
     Utils.toast('Assessment type deleted', 'success');
     renderAssessmentTypes();

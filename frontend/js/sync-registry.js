@@ -101,9 +101,17 @@ Realtime.route('teacher/analytics', ['assessments', 'assessment_types', 'marks',
   });
   Realtime.on('terms', () => DB.invalidate('terms'));
   Realtime.on('users', () => DB.invalidate('users'));
+  let assessmentTypesRenderTimer = null;
   Realtime.on('assessment_types', () => {
-    DB.invalidate('assessment_types');
-    if (typeof ReportUtils !== 'undefined') ReportUtils.invalidate('assessmentTypes');
+    if (typeof Utils !== 'undefined') Utils.invalidateAssessmentTypeCaches();
+    else DB.invalidate('assessment_types');
+    if (typeof AnalyticsEngine !== 'undefined') AnalyticsEngine.resetContext();
+    clearTimeout(assessmentTypesRenderTimer);
+    assessmentTypesRenderTimer = setTimeout(() => {
+      assessmentTypesRenderTimer = null;
+      if (Realtime.baseRoute(Realtime.activeRoute()) === 'admin/assessment-types'
+          && typeof renderAssessmentTypes === 'function') renderAssessmentTypes();
+    }, 100);
   });
   Realtime.on('audit_logs', () => DB.invalidate('audit_logs'));
 

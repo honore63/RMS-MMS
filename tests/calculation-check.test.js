@@ -4,7 +4,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const vm = require('node:vm');
 
-function loadUtils() {
+function loadUtils(overrides = {}) {
   const code = fs.readFileSync(path.join(__dirname, '..', 'frontend', 'js', 'utils.js'), 'utf8');
   const context = {
     console,
@@ -37,8 +37,10 @@ function loadUtils() {
         }
         return { grade: 'F', descriptor: 'Fail', isPass: false };
       }
-    }
+    },
+    ...overrides
   };
+  context.window = context;
 
   vm.runInNewContext(code, context);
   return context.Utils;
@@ -84,4 +86,64 @@ test('DOS assessment type catalog should include exactly the official RMS-MIS se
   for (const type of required) {
     assert.ok(Utils.ASSESSMENT_TYPES.includes(type), `Missing assessment type: ${type}`);
   }
+});
+
+test('forced assessment type refresh bypasses the in-memory and DB caches', async () => {
+  let databaseRows = [];
+  let refreshCount = 0;
+  const Utils = loadUtils({
+    DB: {
+      invalidate(table) { assert.equal(table, 'assessment_types'); },
+      async getFresh(table) {
+        assert.equal(table, 'assessment_types');
+        refreshCount++;
+        return databaseRows;
+      }
+    },
+    sbClient: {},
+    Auth: { getRole: () => 'teacher' }
+  });
+  databaseRows = Utils.canonicalAssessmentTypeRows().map((row, index) => ({ ...row, id: `fresh-${index}` }));
+  Utils.assessmentTypesCache = [{ id: 'stale', name: 'Old Type' }];
+
+  const rows = await Utils.ensureAssessmentTypes({ forceRefresh: true });
+
+  assert.equal(refreshCount, 1);
+  assert.equal(rows[0].id, 'fresh-0');
+  assert.equal(Utils.assessmentTypesCache, rows);
+});
+
+test('forced assessment type synchronization seeds missing canonical rows for DOS', async () => {
+  let databaseRows = [];
+  let refreshCount = 0;
+  const Utils = loadUtils({
+    DB: {
+      invalidate(table) { assert.equal(table, 'assessment_types'); },
+      async getFresh(table) {
+        assert.equal(table, 'assessment_types');
+        refreshCount++;
+        return databaseRows;
+      }
+    },
+    sbClient: {
+      from(table) {
+        assert.equal(table, 'assessment_types');
+        return {
+          async upsert(rows) {
+            databaseRows = databaseRows.concat(rows.map((row, index) => ({ ...row, id: `seeded-${index}` })));
+            return { error: null };
+          }
+        };
+      }
+    },
+    Auth: { getRole: () => 'dos' }
+  });
+  databaseRows = Utils.canonicalAssessmentTypeRows().slice(0, -1)
+    .map((row, index) => ({ ...row, id: `existing-${index}` }));
+
+  const rows = await Utils.ensureAssessmentTypes({ forceRefresh: true });
+
+  assert.equal(refreshCount, 2);
+  assert.equal(rows.length, Utils.ASSESSMENT_TYPES.length);
+  assert.ok(rows.some(row => row.name === 'Other' && row.id.startsWith('seeded-')));
 });

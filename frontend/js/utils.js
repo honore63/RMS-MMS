@@ -60,6 +60,8 @@ const ASSESSMENT_TYPE_DEFAULTS = {
 const Utils = {
   _gradingCache: null,
   _gradingPromise: null,
+  assessmentTypesCache: null,
+  _ensureTypesPromise: null,
 
   pct(mark, max) {
     if (!max || (!mark && mark !== 0)) return 0;
@@ -273,6 +275,13 @@ const Utils = {
     return (name || '').replace(/[^A-Za-z]/g, '').slice(0, 4).toUpperCase();
   },
 
+  invalidateAssessmentTypeCaches() {
+    this.assessmentTypesCache = null;
+    if (typeof DB !== 'undefined' && DB.invalidate) DB.invalidate('assessment_types');
+    if (typeof ReportUtils !== 'undefined') ReportUtils.invalidate('assessmentTypes');
+    if (typeof invalidateAssessmentTypesPageCache === 'function') invalidateAssessmentTypesPageCache();
+  },
+
   /* Makes sure a row exists for every canonical type. Purely additive:
      inserts only what is missing, never renames or deletes anything.
 
@@ -289,23 +298,34 @@ const Utils = {
        - If nothing can be read, returns canonical rows with id = null
          (never a fake UUID) so the UI still lists every type and the save
          path writes NULL rather than an invalid foreign key. */
-  async ensureAssessmentTypes() {
+  async ensureAssessmentTypes(options = {}) {
     if (typeof sbClient === 'undefined') return this.canonicalAssessmentTypeRows();
+
+    const forceRefresh = options === true || options.forceRefresh === true;
 
     // Deduplicate concurrent calls (login + first page render racing), and
     // never reject: sync is best-effort and must not break any page.
-    if (Utils._ensureTypesPromise) return Utils._ensureTypesPromise;
-    Utils._ensureTypesPromise = this._ensureAssessmentTypesRun()
-      .catch(() => this.canonicalAssessmentTypeRows())
+    if (Utils._ensureTypesPromise) {
+      if (!forceRefresh) return Utils._ensureTypesPromise;
+      await Utils._ensureTypesPromise;
+    }
+    Utils._ensureTypesPromise = this._ensureAssessmentTypesRun(forceRefresh)
+      .catch(() => {
+        const fallback = this.canonicalAssessmentTypeRows();
+        Utils.assessmentTypesCache = fallback;
+        return fallback;
+      })
       .finally(() => { Utils._ensureTypesPromise = null; });
     return Utils._ensureTypesPromise;
   },
 
-  async _ensureAssessmentTypesRun() {
+  async _ensureAssessmentTypesRun(forceRefresh = false) {
+    if (forceRefresh) this.invalidateAssessmentTypeCaches();
+
     // Skip the network only when every canonical name already resolves to a
     // REAL row (id present). Rows with id = null are placeholders, not synced.
     const cached = Utils.assessmentTypesCache;
-    if (Array.isArray(cached) && ASSESSMENT_TYPES.every(n => {
+    if (!forceRefresh && Array.isArray(cached) && ASSESSMENT_TYPES.every(n => {
       const r = Utils.findTypeRowByName(cached, n);
       return r && r.id;
     })) return cached;
@@ -316,8 +336,12 @@ const Utils = {
     let existing = [];
     let readError = null;
     try {
-      const res = await sbClient.from('assessment_types').select('*');
-      if (res.error) readError = res.error; else existing = res.data || [];
+      if (typeof DB !== 'undefined' && DB.getFresh) {
+        existing = await DB.getFresh('assessment_types');
+      } else {
+        const res = await sbClient.from('assessment_types').select('*');
+        if (res.error) readError = res.error; else existing = res.data || [];
+      }
     } catch (e) { readError = e; }
     if (readError) {
       console.warn('[sync] Cannot read assessment_types: ' + (readError.message || readError)
@@ -355,8 +379,13 @@ const Utils = {
 
       // Re-read so the dropdown gets the generated UUIDs.
       try {
-        const res = await sbClient.from('assessment_types').select('*');
-        if (!res.error && Array.isArray(res.data) && res.data.length) existing = res.data;
+        if (typeof DB !== 'undefined' && DB.getFresh) {
+          DB.invalidate('assessment_types');
+          existing = await DB.getFresh('assessment_types');
+        } else {
+          const res = await sbClient.from('assessment_types').select('*');
+          if (!res.error && Array.isArray(res.data) && res.data.length) existing = res.data;
+        }
       } catch (e) { /* keep the previous view */ }
     } else if (missing.length && !canWrite) {
       console.warn('[sync] ' + missing.length + ' assessment type(s) missing ('
@@ -367,6 +396,7 @@ const Utils = {
     const real = (existing || []).filter(r => r && r.id);
     if (real.length) {
       Utils.assessmentTypesCache = real;
+      if (typeof ReportUtils !== 'undefined') ReportUtils.invalidate('assessmentTypes');
       return real;
     }
 

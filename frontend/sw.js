@@ -1,9 +1,9 @@
 /* ============================================================
-  RMS-MIS — Service Worker v7
+  RMS-MIS — Service Worker v8
    Production-ready: caching, offline, push, background sync
    ============================================================ */
 
-const CACHE_NAME = 'rms-mis-v7';
+const CACHE_NAME = 'rms-mis-v8';
 const APP_SHELL = [
   '/',
   '/index.html',
@@ -95,9 +95,10 @@ self.addEventListener('fetch', (event) => {
     return;
   }
 
-  /* App shell — cache-first */
+  /* Keep HTML and JavaScript current while retaining cached offline fallbacks. */
   if (APP_SHELL.some((p) => url.pathname === p || url.pathname.startsWith(p + '?'))) {
-    event.respondWith(cacheFirst(request));
+    const freshnessCritical = url.pathname === '/' || url.pathname === '/index.html' || url.pathname.endsWith('.js');
+    event.respondWith(freshnessCritical ? networkFirst(request) : cacheFirst(request));
     return;
   }
 
@@ -224,4 +225,4 @@ self.addEventListener('message', (event) => {
   }
 });
 
-console.log('[RMS-MIS SW v6] Service worker loaded');
+console.log('[RMS-MIS SW v8] Service worker loaded');

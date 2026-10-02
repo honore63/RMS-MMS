@@ -174,11 +174,10 @@ async function assessView(id) {
 async function assessForm() {
   // Make sure the canonical types exist before the dropdown is built, so it is
   // never empty. Additive + best-effort; no manual step required.
-  await Utils.ensureAssessmentTypes();
-  const [teachers, classes, subjects, years, terms, types] = await Promise.all([
+  const types = await Utils.ensureAssessmentTypes({ forceRefresh: true });
+  const [teachers, classes, subjects, years, terms] = await Promise.all([
     DB.query('teachers', '*', { status: 'active' }), DB.get('classes'),
-    DB.query('subjects', '*', { status: 'active' }), DB.get('academic_years'), DB.get('terms'),
-    sbClient.from('assessment_types').select('*').then(r => r.data || []).catch(() => [])
+    DB.query('subjects', '*', { status: 'active' }), DB.get('academic_years'), DB.get('terms')
   ]);
   asfTypes = (types || []).filter(t => t.status === 'active');
   const scoped = typeof Scope !== 'undefined' && Scope.isScoped();

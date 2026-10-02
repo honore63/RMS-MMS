@@ -273,7 +273,7 @@
     </script>
   <script src="js/auth.js?v=20260924-9"></script>
   <script src="js/db.js?v=20260928-1"></script>
-  <script src="js/utils.js?v=20261002-1"></script>
+  <script src="js/utils.js?v=20261002-2"></script>
   <script src="js/router.js?v=20260928-1"></script>
   <script src="js/realtime.js?v=20260924-9"></script>
   <script src="js/components/ui.js?v=20250924-8"></script>
@@ -287,14 +287,14 @@
   <script src="js/pages/admin-learners.js?v=20260929-4"></script>
   <script src="js/pages/admin-assignments.js?v=20260928-2"></script>
   <script src="js/pages/admin-assessments.js?v=20261001-9"></script>
-  <script src="js/pages/admin-assessment-types.js?v=20261002-1"></script>
+  <script src="js/pages/admin-assessment-types.js?v=20261002-2"></script>
   <script src="js/pages/admin-marks.js?v=20261001-9"></script>
   <script src="js/pages/admin-report-card.js?v=20260924-10"></script>
   <script src="js/pages/admin-audit-logs.js?v=20250924-8"></script>
   <script src="js/pages/admin-grading.js?v=20250924-8"></script>
   <script src="js/pages/admin-settings.js?v=20260924-4"></script>
   <script src="js/reports/report-header.js?v=20260924-16"></script>
-  <script src="js/reports/report-utils.js?v=20261002-1"></script>
+  <script src="js/reports/report-utils.js?v=20261002-2"></script>
   <script src="js/reports/report-comments.js?v=20250924-8"></script>
   <script src="js/reports/report-student.js?v=20260924-18"></script>
   <script src="js/reports/report-engine.js?v=20260924-5"></script>
@@ -420,7 +420,7 @@
     // ---------- Service Worker ---------- */
     if ('serviceWorker' in navigator && /^https?:$/.test(window.location.protocol)) {
       window.addEventListener('load', () => {
-        navigator.serviceWorker.register(serviceWorkerUrl, { scope: serviceWorkerScope })
+        navigator.serviceWorker.register(serviceWorkerUrl, { scope: serviceWorkerScope, updateViaCache: 'none' })
           .then((reg) => {
             console.log('[RMS-MIS SW] Registered:', reg.scope);
             // Check for updates
