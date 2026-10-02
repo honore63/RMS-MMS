@@ -190,11 +190,12 @@ const ReportUtils = {
   try {
   res = (await DB.query('assessment_types', '*', {}, { column: 'name', asc: true })) || [];
   } catch (e) { res = []; }
-  // Reports only need names for labels; if the table cannot be read, fall back
-  // to the synced cache / canonical list so report rows are never nameless.
+  res = (res || []).filter(t => t && typeof t.name === 'string' && Utils.isCanonicalType(t.name));
+  // Reports only need the official RMS-MIS labels; if the table cannot be read,
+  // fall back to the embedded canonical list so report rows are never nameless.
   if (!res.length) {
   res = (Utils.assessmentTypesCache && Utils.assessmentTypesCache.length)
-  ? Utils.assessmentTypesCache
+  ? Utils.assessmentTypesCache.filter(t => t && typeof t.name === 'string' && Utils.isCanonicalType(t.name))
   : Utils.canonicalAssessmentTypeRows();
   }
   this._cache.set('assessmentTypes', res);

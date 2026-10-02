@@ -59,10 +59,9 @@ async function getAssessmentTypes(force = false, strict = false) {
     if (strict) throw e;
     assessmentTypesCache = [];
   }
+
+  const rows = (assessmentTypesCache || []).filter(t => t && t.id && ASSESSMENT_TYPES.includes(t.name));
   if (!strict) {
-    const rows = assessmentTypesCache.filter(t => t && t.id);
-    // Add canonical types the database does not have yet (id = null), so every
-    // dropdown lists the full canonical set even before the sync can insert.
     ASSESSMENT_TYPES.forEach((name) => {
       if (Utils.findTypeRowByName(rows, name)) return;
       const d = (Utils.ASSESSMENT_TYPE_DEFAULTS || {})[name] || { max: 30, hint: null };

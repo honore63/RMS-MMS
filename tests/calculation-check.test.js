@@ -56,29 +56,16 @@ test('grade selection should prefer the highest matching percentage band', () =>
   assert.equal(Utils.remark(92, scale), 'Excellent');
 });
 
-test('DOS assessment type catalog should include the full school assessment set', () => {
+test('DOS assessment type catalog should include exactly the official RMS-MIS set', () => {
   const Utils = loadUtils();
   const required = [
     'CAT',
     'Monthly Test',
     'Weekly Test',
-    'Beginning Exam',
-    'Mid-Term Exam',
-    'End of Term Exam',
-    'End of Unit',
-    'Assignment',
-    'Quiz',
-    'Project',
-    'Homework',
-    'Classwork',
-    'Practical',
-    'Portfolio',
-    'Oral Test',
-    'Participation',
-    'Diagnostic Test',
-    'Other'
+    'Beginning Exam'
   ];
 
+  assert.deepEqual(Utils.ASSESSMENT_TYPES, required);
   for (const type of required) {
     assert.ok(Utils.ASSESSMENT_TYPES.includes(type), `Missing assessment type: ${type}`);
   }
