@@ -97,10 +97,10 @@ const ReportCenter = {
   buildPdfDocument(html, orientation = 'portrait'){
     const base = new URL('.', window.location.href).href;
     const css = [
-      'css/styles.css?v=20261004-5',
+      'css/styles.css?v=20261004-9',
       'css/report-card.css?v=20261004-2',
-      'css/student-report-card.css?v=20261004-3',
-      'css/report-wizard.css?v=20261004-2'
+      'css/student-report-card.css?v=20261004-6',
+      'css/report-wizard.css?v=20261004-3'
     ].map(path => `<link rel="stylesheet" href="${new URL(path, base).href}">`).join('');
     const fonts = `<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin><link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700;800&display=swap" rel="stylesheet">`;
     const landscape = orientation === 'landscape';
@@ -143,13 +143,15 @@ const ReportCenter = {
         <button type="button" data-report-action="close">Close</button>
       </span>
     </nav>`;
-    const documentHtml=this.buildPdfDocument(html, orientation)
+    const documentHtml=this.buildPdfDocument(`<main class="rms-full-report-preview">${html}</main>`, orientation)
       .replace('<title>RMS-MIS Report</title>', `<title>${Utils.escapeHtml(title || 'RMS-MIS Report Preview')}</title>`)
       .replace('</style>', `
+      .rms-full-report-preview{width:max-content;min-width:100%}
       .report-tab-toolbar{position:sticky;top:0;z-index:1000;display:flex;justify-content:space-between;align-items:center;gap:12px;padding:12px 20px;background:#0f2e63;color:#fff;font:600 14px Arial,sans-serif;box-shadow:0 2px 8px rgba(0,0,0,.18)}
       .report-tab-toolbar span{display:flex;gap:8px;flex-wrap:wrap}
       .report-tab-toolbar button{display:inline-flex!important;border:1px solid rgba(255,255,255,.55);border-radius:6px;padding:8px 12px;background:#fff;color:#0f2e63;font-weight:700;cursor:pointer}
       @media(max-width:640px){.report-tab-toolbar{align-items:flex-start;flex-direction:column;padding:10px}.report-tab-toolbar span{width:100%}.report-tab-toolbar button{flex:1}}
+      @media screen and (max-width:900px){.rms-full-report-preview .rms-a4-container,.rms-full-report-preview .rc-paper{width:210mm!important;max-width:210mm!important;min-height:297mm!important;margin:0 auto!important;padding:12mm!important;overflow:visible!important;box-shadow:none!important}.rms-full-report-preview .src-table{min-width:0!important}}
       @media print{.report-tab-toolbar{display:none!important}html,body{height:auto!important;overflow:visible!important}}
       @page{size:${orientation === 'landscape' ? 'A4 landscape' : 'A4 portrait'};margin:0}
       </style>`)

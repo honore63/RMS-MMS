@@ -629,8 +629,8 @@ body[data-page="parent-marks"] {
 .pmp-report-actions { display: flex; gap: 8px; }
 .pmp-report-actions button { display: inline-flex; align-items: center; gap: 6px; }
 .pmp-report-actions svg { width: 16px; height: 16px; }
-.pmp-report-preview { max-height: 78vh; overflow: auto; overscroll-behavior: contain; padding: 8px; background: #f8fafc; }
-.pmp-report-preview .rms-a4-container { margin: 0 auto; }
+.pmp-report-preview { width: 100%; min-width: 0; max-height: none; overflow-x: auto; overflow-y: visible; padding: 8px; background: #f8fafc; -webkit-overflow-scrolling: touch; }
+.pmp-report-preview .rms-a4-container { width: 210mm !important; max-width: 210mm !important; min-height: 297mm !important; margin: 0 auto; padding: 12mm !important; overflow: visible !important; }
 
 @media (max-width: 760px) {
   .parent-marks-view { max-width: 100%; }
@@ -651,9 +651,11 @@ body[data-page="parent-marks"] {
   .pmp-assessment-card div b { color: var(--gray-700); text-align: right; }
   .pmp-report-actions { width: 100%; }
   .pmp-report-actions button { flex: 1; justify-content: center; }
+  .pmp-report-section, .pmp-report-preview, .pmp-report-preview .rms-a4-container { min-width: 0; }
 }
 
 @media (max-width: 480px) {
+  .parent-marks-page { padding-right: 10px; padding-left: 10px; }
   .pmp-heading { padding-top: 28px; }
   .pmp-heading h2 { font-size: 20px; }
   .pmp-search-card, .pmp-section { padding: 14px; }

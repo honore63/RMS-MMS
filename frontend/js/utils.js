@@ -489,7 +489,14 @@ const Utils = {
   },
 
   toast(msg, type = 'info') {
-    const c = document.getElementById('toast-container');
+    let c = document.getElementById('toast-container');
+    if (!c) {
+      c = document.createElement('div');
+      c.id = 'toast-container';
+      c.className = 'toast-container';
+      c.setAttribute('aria-live', 'polite');
+      document.body.appendChild(c);
+    }
     const icons = { success: 'check-circle-2', error: 'x-circle', info: 'info' };
     const t = document.createElement('div');
     t.className = 'toast toast-' + type;

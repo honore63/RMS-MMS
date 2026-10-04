@@ -228,7 +228,13 @@ const ParentMarksPortal = {
       }
       this.renderDashboard();
     } catch (error) {
-      console.error('[ParentMarksPortal] Student lookup failed:', error);
+      console.error('[ParentMarksPortal] Student lookup failed:', {
+        message: error?.message || String(error),
+        details: error?.details || '',
+        hint: error?.hint || '',
+        code: error?.code || '',
+        status: error?.status || ''
+      });
       if (requestId === this.lookupGeneration && errorEl) {
         errorEl.textContent = 'We could not check the records right now. Please try again later.';
         errorEl.style.display = 'block';
@@ -617,11 +623,38 @@ const ParentMarksPortal = {
     return `<section class="pmp-section pmp-report-section">
       <div class="pmp-section-heading"><div><h3>Official Student Report</h3><p>Single-student report card for ${this.safe(this.result.student.name)}.</p></div>
       <div class="pmp-report-actions">
+        ${typeof ReportCenter !== 'undefined' ? '<button type="button" class="btn btn-outline" onclick="ParentMarksPortal.previewReport()"><i data-lucide="external-link"></i> Full Preview</button>' : ''}
         <button type="button" class="btn btn-outline" onclick="ReportWizard.print()"><i data-lucide="printer"></i> Print</button>
         <button type="button" class="btn btn-primary" onclick="ReportWizard.downloadPDF()"><i data-lucide="file-down"></i> Download PDF</button>
       </div></div>
       <div class="pmp-report-preview">${html}</div>
     </section>`;
+  },
+
+  previewReport() {
+    if (typeof ReportCenter === 'undefined') {
+      Utils.toast('The report preview service is unavailable. Please reload the portal and try again.', 'error');
+      return;
+    }
+    if (!this.result || !ReportWizard.state.previewHtml) {
+      Utils.toast('Generate the student report before opening its full preview.', 'error');
+      return;
+    }
+    const data = this.result;
+    const className = this.classLabel(data.student.class_name, data.student.stream);
+    const title = `RMS-MIS Student Report — ${data.student.name} — ${className}`;
+    const previewWindow = window.open('', '_blank');
+    if (!previewWindow) {
+      Utils.toast('Allow pop-ups to open the complete report preview in a new tab.', 'error');
+      return;
+    }
+    ReportCenter.openPreviewDocument(
+      ReportWizard.state.previewHtml,
+      title,
+      'portrait',
+      ReportWizard.state.previewFilename,
+      previewWindow
+    );
   }
 };
 
