@@ -177,6 +177,29 @@ rms-eua/
    UNION ALL SELECT 'sms_notifications', COUNT(*) FROM sms_notifications;
    ```
 
+4. Enable the public, single-student marks portal by running
+   `backend/sql/parent_student_marks_portal.sql` after the master setup. It
+   grants `anon` and `authenticated` execute access only to two narrowly scoped
+   RPCs; it does not grant direct access to learner, assessment, or marks tables.
+   The lookup requires both the selected class and the learner code and returns
+   data for that match only. The Parent / Student Marks button on the staff
+   sign-in page opens the standalone `frontend/parent-marks.html` page, keeping
+   the student lookup and results separate from staff sign-in. Its Student
+   Report tab uses the same official report-card renderer as the staff reports.
+   Re-run the idempotent SQL file after updating it to expose the extra report
+   metadata needed for the shared report layout.
+
+   **Privacy note:** learner codes are identifiers, not passwords. Keep codes
+   confidential and enable request throttling at the Supabase/API gateway
+   before publishing the public lookup. Do not use the code as the sole
+   authentication factor for confidential records if codes are guessable.
+
+5. Install teacher education-level restrictions and Class Teacher assignment
+   auditing by running `backend/sql/class_teacher_access.sql` after the master
+   setup. Teacher accounts must be assigned Primary, Secondary, or Both; RLS
+   limits academic data to that level and to the teacher's explicit assignments.
+   Reports can include Primary or Secondary classes, but not both in one report.
+
 ### 2. Deploy to Vercel
 
 The app is deployed at `https://rms-p3owfjjev-honore63s-projects.vercel.app/`. Push to `origin/main` triggers automatic deployment.
@@ -225,8 +248,11 @@ A plain static server (Live Server, VS Code) serves the app fine — login,
 classes, learners, marks, assessments, analytics, notifications and **teacher
 deletion** (a Supabase RPC) all work, because they talk to Supabase directly.
 
-The only feature that needs a Vercel server is **PDF report generation**
-(`/api/reports/pdf`, requires Puppeteer). Test that on the deployed URL.
+PDF report downloads use the Puppeteer endpoint `/api/reports/pdf` on the
+deployed Vercel site. On a plain static Live Server, that endpoint is not
+available; Download opens the complete report in the browser print dialog, where
+you can select **Save as PDF**. The report preview itself remains available
+inside the app and scrolls through the complete report.
 
 Serve `frontend/` as the document root, otherwise root-absolute paths such as
 `/public/logo.webp` and `/sw.js` return 404:

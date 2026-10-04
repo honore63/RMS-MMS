@@ -16,10 +16,15 @@ async function renderTeacherDashboard() {
     const filteredClassesIds = new Set(allClasses.map(c => c.id));
     const filteredAssignments = assignments.filter(a => filteredClassesIds.has(a.class_id));
     const assessments = allAssessments.filter(a => filteredClassesIds.has(a.class_id));
+    const myClassTeacherClasses = allClasses.filter(c => String(c.class_teacher_id || '') === String(teacherId));
+    const myClassGroups = [
+      { label: 'Primary', classes: myClassTeacherClasses.filter(c => EducationLevels.getCategory(c) === 'Primary') },
+      { label: 'Secondary', classes: myClassTeacherClasses.filter(c => EducationLevels.getCategory(c) !== 'Primary') }
+    ].filter(group => group.classes.length);
 
     const pending = assessments.filter(a => a.status === 'draft').length;
     const submitted = assessments.filter(a => a.status === 'submitted').length;
-    const approved = assessments.filter(a => ['approved', 'locked'].includes(a.status)).length;
+    const approved = assessments.filter(a => ['submitted', 'approved', 'locked'].includes(a.status)).length;
     const rejected = assessments.filter(a => a.status === 'rejected').length;
 
     const assessRows = assessments.slice(0, 10).map(a => {
@@ -52,6 +57,19 @@ async function renderTeacherDashboard() {
       <div style="display:flex;justify-content:flex-end;align-items:center;gap:8px;margin-bottom:12px">
         <a href="https://rukaramodelschool.com/" target="_blank" rel="noopener" title="Visit Rukara Model School website" aria-label="Visit public website of Rukara Model School" style="display:inline-flex;align-items:center;gap:8px;text-decoration:none;color:var(--blue-800);font-size:12.5px;font-weight:700"><span style="display:inline-flex;align-items:center;justify-content:center;width:32px;height:32px;border-radius:50%;background:var(--blue-600);color:#fff;flex:none"><i data-lucide="globe" style="width:17px;height:17px"></i></span>Visit public website</a>
       </div>
+      ${myClassTeacherClasses.length ? `<div class="card card-in mb-6" style="border-left:4px solid var(--blue-600)">
+        <div class="card-header" style="align-items:center;gap:12px;flex-wrap:wrap">
+          <div>
+            <div class="text-sm text-muted">Class Teacher responsibility</div>
+            ${myClassGroups.map(group => `<div style="margin-top:7px"><strong>${group.label}:</strong> ${group.classes.map(c => Utils.escapeHtml(c.name || c.level || ('Class ' + c.id))).join(', ')}</div>`).join('')}
+            <p class="card-subtitle">Class-level learner and performance information for your explicitly assigned class${myClassTeacherClasses.length > 1 ? 'es' : ''}.</p>
+          </div>
+          <div class="flex gap-2">
+            <button class="btn btn-sm btn-primary" onclick="Router.go('teacher/my-classes')"><i data-lucide="users"></i> Manage My Class</button>
+            <button class="btn btn-sm btn-outline" onclick="Router.go('teacher/reports')"><i data-lucide="chart-no-axes-column"></i> Class Reports</button>
+          </div>
+        </div>
+      </div>` : ''}
       <div class="grid-4 card-in-stagger mb-6">
         <div class="stat-card">
           <div class="stat-icon" style="background:var(--blue-50);color:var(--blue-600)"><i data-lucide="link"></i></div>
@@ -127,13 +145,39 @@ async function renderMyClasses() {
     const cls = classes.find(c => c.id === a.class_id);
     if (!cls) continue;
     if (!uniqueClasses[cls.id]) {
-      uniqueClasses[cls.id] = { id: cls.id, name: cls.name, level: cls.level || '', stream: cls.stream || '', subjects: [], students: [] };
+      uniqueClasses[cls.id] = { id: cls.id, name: cls.name, level: cls.level || '', stream: cls.stream || '', subjects: [], students: [], isClassTeacher: false };
       classIds.push(cls.id);
     }
     const sub = subjects.find(s => s.id === a.subject_id);
     if (sub && !uniqueClasses[cls.id].subjects.some(x => x.id === sub.id)) {
       uniqueClasses[cls.id].subjects.push(sub);
     }
+  }
+
+  /* A teacher who is the class teacher of a class sees that class too, even
+     with no subject assignment for it (read-only). */
+  for (const cls of classes) {
+    if (String(cls.class_teacher_id || '') !== String(teacherId)) continue;
+    if (!uniqueClasses[cls.id]) {
+      uniqueClasses[cls.id] = { id: cls.id, name: cls.name, level: cls.level || '', stream: cls.stream || '', subjects: [], students: [], isClassTeacher: true };
+      classIds.push(cls.id);
+    } else {
+      uniqueClasses[cls.id].isClassTeacher = true;
+    }
+  }
+
+  /* Derive subjects for class-teacher classes from the assessments of that
+     class (no teacher_assignments may exist for them). */
+  const ctClassIds = classIds.filter(id => uniqueClasses[id] && uniqueClasses[id].isClassTeacher && !uniqueClasses[id].subjects.length);
+  if (ctClassIds.length) {
+    try {
+      const classAssessments = await DB.query('assessments', 'id,subject_id,class_id', { class_id: ctClassIds });
+      (classAssessments || []).forEach(a => {
+        const sub = subjects.find(s => s.id === a.subject_id);
+        const c = uniqueClasses[a.class_id];
+        if (sub && c && !c.subjects.some(x => x.id === sub.id)) c.subjects.push(sub);
+      });
+    } catch (e) { /* ignore */ }
   }
 
   /* Fetch EVERY learner in the assigned classes (active + inactive) so the
@@ -180,7 +224,7 @@ async function renderMyClasses() {
         <div class="card-header" style="flex-wrap:wrap;gap:12px">
           <div>
             <div style="font-size:11px;font-weight:700;color:var(--gray-500);text-transform:uppercase;letter-spacing:0.5px;margin-bottom:4px"><i data-lucide="layers" style="width:10px;height:10px"></i> ${c.education_level}</div>
-            <h3 style="margin:0"><i data-lucide="school" style="width:18px;height:18px;vertical-align:middle;margin-right:8px;color:var(--blue-600)"></i>${Utils.escapeHtml(c.name)}</h3>
+            <h3 style="margin:0"><i data-lucide="school" style="width:18px;height:18px;vertical-align:middle;margin-right:8px;color:var(--blue-600)"></i>${Utils.escapeHtml(c.name)}${c.isClassTeacher ? ' <span class="badge badge-info">Class Teacher</span>' : ''}</h3>
             <p class="text-sm text-muted mt-1">${meta}</p>
           </div>
           <div class="flex gap-2" style="align-items:center;flex-wrap:wrap">
@@ -189,6 +233,13 @@ async function renderMyClasses() {
             <button class="btn btn-sm btn-secondary" onclick="teacherDownloadClassList('${c.id}','word')" title="Download the class student list as Word"><i data-lucide="file-text"></i> Word</button>
             <button class="btn btn-sm btn-secondary" onclick="teacherDownloadClassList('${c.id}','pdf')" title="Download the class student list as PDF"><i data-lucide="file-down"></i> PDF</button>
             <button class="btn btn-sm btn-secondary" onclick="teacherDownloadClassList('${c.id}','csv')" title="Download the class student list as CSV"><i data-lucide="file-text"></i> CSV</button>
+            ${c.isClassTeacher ? `
+              <button class="btn btn-sm btn-primary" onclick="teacherOpenClassReport('${c.id}','student-card')"><i data-lucide="file-badge"></i> Report Cards</button>
+              <button class="btn btn-sm btn-outline" onclick="teacherOpenClassReport('${c.id}','class-performance')"><i data-lucide="chart-no-axes-combined"></i> Class Reports</button>
+              <button class="btn btn-sm btn-outline" onclick="teacherOpenClassReport('${c.id}','class-ranking')"><i data-lucide="trophy"></i> Ranking</button>
+              <button class="btn btn-sm btn-outline" onclick="teacherOpenClassReport('${c.id}','subject-performance')"><i data-lucide="book-open"></i> Subject</button>
+              <button class="btn btn-sm btn-outline" onclick="teacherOpenClassReport('${c.id}','exam-class-summary')"><i data-lucide="clipboard-check"></i> Assessment</button>
+            ` : ''}
             <button class="btn btn-sm btn-outline" onclick="toggleClassStudents('${c.id}')">
               <i data-lucide="${open ? 'chevron-up' : 'chevron-down'}"></i> ${open ? 'Hide Students' : 'View ' + c.students.length + ' Students'}
             </button>
@@ -214,6 +265,14 @@ function toggleClassStudents(classId) {
 
 function teacherDownloadClassList(classId, format) {
    Utils.toast('Reports are not available at this time.', 'info');
+}
+
+function teacherOpenClassReport(classId, reportType) {
+  if (typeof ReportWizard === 'undefined' || typeof ReportWizard.openForClass !== 'function') {
+    Utils.toast('The report service is unavailable. Please reload and try again.', 'error');
+    return;
+  }
+  ReportWizard.openForClass(reportType, classId);
 }
 
 async function renderMySubjects() {
@@ -421,13 +480,23 @@ async function handleCombinedExport() {
     return Utils.toast('All selected assessments must belong to the SAME Class and Subject for combined export.', 'error');
   }
 
+  const previewTab = window.open('', '_blank');
+  if (previewTab) {
+    previewTab.document.write('<!doctype html><html><head><meta charset="utf-8"><title>Preparing RMS-MIS Report</title></head><body style="font:16px Arial,sans-serif;padding:24px">Preparing your complete report preview…</body></html>');
+    previewTab.document.close();
+  } else {
+    Utils.toast('Allow pop-ups to open the complete report preview in a new tab.', 'error');
+  }
   Modal.show('Generating Combined Report...', '<div id="teacher-rpt-modal"></div>', '', true);
 
   try {
     const reportData = await buildCombinedReportData(selectedIds);
     lastCombinedReportData = reportData;
-    renderCombinedReportModal(reportData);
+    renderCombinedReportModal(reportData, previewTab);
   } catch (err) {
+    if (previewTab && !previewTab.closed) {
+      previewTab.document.body.innerHTML = `<main style="font:16px Arial,sans-serif;padding:24px"><h1>Report preview failed</h1><p>${Utils.escapeHtml(err.message || 'Unable to generate report.')}</p></main>`;
+    }
     console.error('Combined export error:', err);
     Utils.toast('Error generating report: ' + err.message, 'error');
     Modal.close();
@@ -538,7 +607,7 @@ async function buildCombinedReportData(assessmentIds) {
     };
   });
 
-  const allApproved = assessments.every(a => ['approved', 'locked'].includes(a.status));
+  const allApproved = assessments.every(a => ['submitted', 'approved', 'locked'].includes(a.status));
 
   return {
     className: cls?.name || 'Class',
@@ -565,7 +634,7 @@ async function buildCombinedReportData(assessmentIds) {
   };
 }
 
-function renderCombinedReportModal(data) {
+function renderCombinedReportModal(data, previewTab = null) {
   const headerOpts = {
     settings: data.settings,
     className: data.className,
@@ -673,6 +742,15 @@ function renderCombinedReportModal(data) {
     <button class="btn btn-primary" onclick="exportCombinedPdf()"><i data-lucide="file-down"></i> Export PDF</button>`;
 
   Modal.show('Official Consolidated Assessment Report Preview', modalHtml, footerHtml, true);
+  if (previewTab && typeof ReportCenter !== 'undefined') {
+    ReportCenter.openPreviewDocument(
+      combinedReportFragment(data),
+      `RMS-MIS Combined Assessment Report — ${data.className} — ${data.subjectName}`,
+      'portrait',
+      buildReportFilename('pdf'),
+      previewTab
+    );
+  }
 }
 
 function printCombinedReport() {
@@ -767,29 +845,17 @@ function buildCombinedReportExportHtml(d) {
 </html>`;
 }
 
-function openCombinedReportPrintWindow(html, title) {
-  const printWindow = window.open('', '_blank', 'width=1200,height=900');
-  if (!printWindow) {
-    Utils.toast('Pop-up blocked. Please allow pop-ups to print or export PDF.', 'error');
-    return null;
-  }
-
-  printWindow.document.open();
-  printWindow.document.write(`<!DOCTYPE html><html><head><meta charset="utf-8"><title>${Utils.escapeHtml(title || 'RMS-MIS Report')}</title><style>@page { size: A4 portrait; margin: 12mm; } body { margin: 0; background: #fff; font-family: Arial, Helvetica, sans-serif; -webkit-print-color-adjust: exact; print-color-adjust: exact; } * { box-sizing: border-box; } </style></head><body>${html}</body></html>`);
-  printWindow.document.close();
-  printWindow.focus();
-  return printWindow;
+function combinedReportFragment(data) {
+  const source = new DOMParser().parseFromString(buildCombinedReportExportHtml(data), 'text/html');
+  const styles = Array.from(source.head.querySelectorAll('style')).map(style => style.outerHTML).join('');
+  return `${styles}${source.body.innerHTML}`;
 }
 
 function printCombinedReport() {
   if (!lastCombinedReportData) return Utils.toast('No report data available', 'error');
-  const html = buildCombinedReportExportHtml(lastCombinedReportData);
-  const printWindow = openCombinedReportPrintWindow(html, 'Combined Assessment Report');
-  if (!printWindow) return;
-  setTimeout(() => {
-    printWindow.print();
-    printWindow.onafterprint = () => printWindow.close();
-  }, 500);
+  if (typeof ReportCenter === 'undefined') return Utils.toast('The report print service is unavailable. Please reload and try again.', 'error');
+  const html = combinedReportFragment(lastCombinedReportData);
+  ReportCenter.printDocument(html, 'Combined Assessment Report', buildReportFilename('pdf'), 'portrait');
 }
 
 function buildReportFilename(ext) {
@@ -851,17 +917,11 @@ function exportCombinedWord() {
   Utils.toast('Word export downloaded', 'success');
 }
 
-function exportCombinedPdf() {
+async function exportCombinedPdf() {
   if (!lastCombinedReportData) return Utils.toast('No report data available', 'error');
-  const d = lastCombinedReportData;
-  const html = buildCombinedReportExportHtml(d);
-  const printWindow = openCombinedReportPrintWindow(html, 'Combined Assessment Report');
-  if (!printWindow) return;
-  Utils.toast('Print dialog opened — choose Save as PDF', 'info');
-  setTimeout(() => {
-    printWindow.print();
-    printWindow.onafterprint = () => printWindow.close();
-  }, 500);
+  if (typeof ReportCenter === 'undefined') return Utils.toast('The report download service is unavailable. Please reload and try again.', 'error');
+  const html = combinedReportFragment(lastCombinedReportData);
+  await ReportCenter.downloadPdfDocument(html, buildReportFilename('pdf'), 'portrait');
 }
 
 function exportCombinedExcel() {
@@ -959,5 +1019,3 @@ function downloadCSVFile(filename, csvContent) {
   link.click();
   document.body.removeChild(link);
 }
-
-

@@ -222,7 +222,7 @@ async function assessForm() {
       <div class="form-row"><div class="form-group"><label>Academic Year <span class="required">*</span></label><select id="asf-year" class="select-field"><option value="">Select year</option>${years.map(y => `<option value="${y.id}" ${y.id === selYear ? 'selected' : ''}>${Utils.escapeHtml(y.name)}</option>`).join('')}</select></div>
       <div class="form-group"><label>Term <span class="required">*</span></label><select id="asf-term" class="select-field" onchange="asfUpdatePreview()"><option value="">Select term</option>${yearTerms.map(t => `<option value="${t.id}" ${t.id === selTerm ? 'selected' : ''}>${Utils.escapeHtml(t.name)}</option>`).join('')}</select></div></div>
       <div class="form-row">
-        <div class="form-group"><label>Maximum Mark <span class="required">*</span></label><input id="asf-max" type="number" class="input-field" value="${asfDefaultMaxMark()}" min="1" max="100"></div>
+        <div class="form-group"><label>Maximum Mark <span class="required">*</span></label><input id="asf-max" type="number" inputmode="decimal" step="any" class="input-field" value="${asfDefaultMaxMark()}" min="1"><p class="form-hint">Any value above 0; marks entered are capped at this.</p></div>
         <div class="form-group"><label>Weight <span class="text-muted">(optional, blank = type default)</span></label><input id="asf-weight" type="number" min="0" step="any" class="input-field" placeholder="e.g., 0.3"></div>
       </div>
       <div class="form-group"><label>Date <span class="required">*</span></label><input id="asf-date" type="date" class="input-field" value="${new Date().toISOString().split('T')[0]}"></div>
@@ -421,7 +421,7 @@ async function assessSave(btn) {
     teacher_id: document.getElementById('asf-teacher').value || null,
     academic_year_id: document.getElementById('asf-year').value || null,
     term_id: termId,
-    maximum_mark: parseInt(document.getElementById('asf-max').value) || 30,
+    maximum_mark: parseFloat(document.getElementById('asf-max').value),
     weight: document.getElementById('asf-weight').value.trim() === '' ? null : parseFloat(document.getElementById('asf-weight').value),
     assessment_date: document.getElementById('asf-date').value || null,
     description: document.getElementById('asf-desc').value.trim() || null,

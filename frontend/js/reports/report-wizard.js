@@ -135,8 +135,10 @@ const ReportWizard = {
   state: {
     reportType: 'student-card',
     stepIndex: 0,
+    lockedClassId: '',
     academicYearId: '',
     stream: 'all',
+    educationLevelFilter: '',
     classIds: [],
     studentIds: [],
     subjectIds: [],
@@ -146,8 +148,8 @@ const ReportWizard = {
     teacherIds: [],
     metrics: [],
     options: { showHeader:true, showGrades:true, showPct:true, showComments:true, autoComments:true, showPosition:false, showAttendance:false, showCharts:false, orientation:'auto', teacherComment:'', dosComment:'', decisionOverride:'', cardMode:'individual', annualMode:true },
-    cache: { years:[], terms:[], classes:[], subjects:[], students:[], assessments:[], teachers:[] },
-    loading: false, previewHtml:'', previewOrientation:'portrait', previewFilename:''
+    cache: { years:[], terms:[], classes:[], allClasses:[], authorizedClasses:[], subjects:[], students:[], assessments:[], teachers:[] },
+    loading: false, previewHtml:'', previewOrientation:'portrait', previewFilename:'', previewConfig:''
   },
 
   _scopedClasses(classes){
@@ -159,6 +161,27 @@ const ReportWizard = {
     if (typeof Scope!=='undefined' && Scope.isScoped()) list = Scope.filterSubjects(list);
     if (clsForFilter) list = list.filter(s=> subjectMatchesReportScope(s, clsForFilter));
     return list;
+  },
+  educationGroup(cls){
+    const category = String(EducationLevels.getCategory(cls) || '').toLowerCase();
+    return category === 'primary' ? 'primary' : category.includes('secondary') ? 'secondary' : '';
+  },
+  educationGroupLabel(group){
+    return group === 'primary' ? 'Primary' : group === 'secondary' ? 'Secondary' : 'All';
+  },
+  setEducationLevel(value){
+    this.state.educationLevelFilter = value || '';
+    this.state.cache.classes = (this.state.cache.authorizedClasses || []).filter(cls =>
+      !this.state.educationLevelFilter || this.educationGroup(cls) === this.state.educationLevelFilter
+    );
+    this.state.classIds = [];
+    this.state.studentIds = [];
+    this.state.subjectIds = [];
+    this.state.assessmentIds = [];
+    this.state.cache.students = [];
+    this.state.cache.subjects = [];
+    this.state.cache.assessments = [];
+    this.renderShell();
   },
 
   stepsFor(type){
@@ -175,14 +198,44 @@ const ReportWizard = {
     return s[this.state.stepIndex]||s[0];
   },
 
-  async open(reportType){
+  async open(reportType, options = {}){
     const valid = Object.keys(this.DEFS);
     this.state.reportType = valid.includes(reportType)? reportType : 'student-card';
     this.state.stepIndex = 0;
+    const previousLockedClassId = this.state.lockedClassId;
+    this.state.lockedClassId = options.lockedClassId ? String(options.lockedClassId) : '';
+    if (this.state.lockedClassId) {
+      this.state.classIds = [this.state.lockedClassId];
+      if (this.state.reportType === 'student-card') this.state.options.cardMode = 'whole';
+      this.state.studentIds = [];
+      this.state.subjectIds = [];
+      this.state.assessmentIds = [];
+      this.state.cache.students = [];
+      this.state.cache.subjects = [];
+      this.state.cache.assessments = [];
+      this.state.educationLevelFilter = '';
+      this.state.cache._classesLoaded = false;
+      this.state.cache.authorizedClasses = [];
+    } else if (previousLockedClassId) {
+      this.state.cache._classesLoaded = false;
+      this.state.cache.authorizedClasses = [];
+    }
     this.state.academicYearId = this.state.academicYearId || (typeof getActiveYearId==='function' ? getActiveYearId(null) : '');
     // preserve selections but ensure arrays
     ['classIds','studentIds','subjectIds','assessmentIds','termIds','teacherIds'].forEach(k=>{ if(!Array.isArray(this.state[k])) this.state[k]=this.state[k]?[this.state[k]]:[]; });
     await this.render();
+  },
+  async openForClass(reportType, classId){
+    const teacherId = typeof Auth !== 'undefined' && Auth.getTeacherId ? Auth.getTeacherId() : null;
+    if (!teacherId) {
+      Utils.toast('A linked teacher account is required to open class reports.', 'error');
+      return;
+    }
+    try {
+      await this.open(reportType, { lockedClassId: classId });
+    } catch (error) {
+      Utils.toast(error.message || 'Could not open a report for this class.', 'error');
+    }
   },
 
   async render(){
@@ -190,7 +243,13 @@ const ReportWizard = {
     const def = this.DEFS[type];
     setHeader(def.label, def.desc);
     setContent(`<div class="rw-shell"><div id="rw-root">${Utils.loading()}</div><div id="rw-preview"></div></div>`);
-    await this.ensureBaseData();
+    try {
+      await this.ensureBaseData();
+    } catch (error) {
+      const root = document.getElementById('rw-root');
+      if (root) root.innerHTML = Utils.errorCard('Could not load authorized report data', Utils.escapeHtml(error.message || 'Please try again.'));
+      return;
+    }
     this.renderShell();
     if (typeof lucide!=='undefined') lucide.createIcons();
   },
@@ -226,13 +285,33 @@ const ReportWizard = {
           try{
             const assigns = await DB.query('teacher_assignments','*',{teacher_id: teacherId});
             const allowed = new Set((assigns||[]).map(a=> String(a.class_id)));
-            scoped = scoped.filter(c=> allowed.has(String(c.id)));
-          }catch(e){ scoped=[]; }
+            scoped = scoped.filter(c=> allowed.has(String(c.id)) || String(c.class_teacher_id) === String(teacherId));
+          }catch(e){
+            if (s.lockedClassId) throw new Error('Could not verify your class assignment. Please try again.');
+            scoped=[];
+          }
         }
-        s.cache.classes = scoped;
+        if (s.lockedClassId) scoped = scoped.filter(c => String(c.id) === String(s.lockedClassId));
+        if (s.lockedClassId && !scoped.length) {
+          s.classIds = [];
+          throw new Error('This class is not assigned to your account, or it is outside your authorized education level.');
+        }
+        s.cache.authorizedClasses = scoped;
+        const availableGroups = [...new Set(scoped.map(cls => this.educationGroup(cls)).filter(Boolean))];
+        if (!availableGroups.includes(s.educationLevelFilter)) {
+          s.educationLevelFilter = availableGroups[0] || '';
+        }
+        s.cache.classes = scoped.filter(cls =>
+          !s.educationLevelFilter || this.educationGroup(cls) === s.educationLevelFilter
+        );
         s.cache._classesLoaded=true;
-        if (!s.classIds.length && scoped.length === 1) s.classIds = [scoped[0].id];
-      } catch(e){ s.cache.classes=[]; }
+        if (s.lockedClassId) s.classIds = [s.lockedClassId];
+        else if (!s.classIds.length && scoped.length === 1) s.classIds = [scoped[0].id];
+      } catch(e){
+        s.cache.classes=[];
+        s.cache.authorizedClasses=[];
+        if (s.lockedClassId) throw e;
+      }
     }
   },
 
@@ -241,12 +320,21 @@ const ReportWizard = {
     const def = this.DEFS[s.reportType];
     const scopeLabel = (typeof Scope!=='undefined' ? Scope.label() : 'Global');
     const scopeSub = (typeof Scope!=='undefined' && Scope.subLabel ? Scope.subLabel() : '');
+    const availableGroups = [...new Set((s.cache.authorizedClasses || []).map(cls => this.educationGroup(cls)).filter(Boolean))];
+    const educationFilter = availableGroups.length > 1
+      ? `<label style="display:inline-flex;align-items:center;gap:8px;font-size:12px;font-weight:700">
+          Report level
+          <select class="select-field" style="min-width:150px" value="${Utils.escapeHtml(s.educationLevelFilter)}" onchange="ReportWizard.setEducationLevel(this.value)">
+            ${availableGroups.map(group => `<option value="${group}" ${s.educationLevelFilter === group ? 'selected' : ''}>${this.educationGroupLabel(group)}</option>`).join('')}
+          </select>
+        </label>`
+      : `<span class="rw-scope-badge">${Utils.escapeHtml(this.educationGroupLabel(s.educationLevelFilter))} report</span>`;
     // All reports: single page with all steps (Classes -> Individual/Whole for student-card)
     const shell = `
       <div class="rw-head">
         <div class="rw-head-icon"><i data-lucide="${def.icon}" style="width:28px;height:28px"></i></div>
         <div><div class="rw-head-title">${Utils.escapeHtml(def.label)}</div><div class="rw-head-sub">${Utils.escapeHtml(def.desc)} · Scope: ${Utils.escapeHtml(scopeLabel)} — all steps on one page</div></div>
-        <span class="rw-scope-badge"><i data-lucide="shield-check" style="width:12px;height:12px"></i> ${Utils.escapeHtml(scopeLabel)}${scopeSub? ' · '+Utils.escapeHtml(scopeSub): ''}</span>
+        <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap"><span class="rw-scope-badge"><i data-lucide="shield-check" style="width:12px;height:12px"></i> ${Utils.escapeHtml(scopeLabel)}${scopeSub? ' · '+Utils.escapeHtml(scopeSub): ''}</span>${educationFilter}</div>
       </div>
       <div id="rw-single-page" class="rw-card"><div class="card-body" id="rw-single-body">${Utils.loading()}</div></div>
       <div id="rw-nav"></div>
@@ -296,7 +384,7 @@ const ReportWizard = {
         if (idx >= 0) htmlParts.splice(idx+1, 0, modeHtml);
         else htmlParts.unshift(modeHtml);
       }
-      body.innerHTML = `<div style="display:grid;gap:14px">${htmlParts.join('')}<div id="rw-preview-area" style="margin-top:4px"></div></div>`;
+      body.innerHTML = `<div style="display:grid;gap:14px">${htmlParts.join('')}<div id="rw-preview-area" class="rw-preview-area" style="margin-top:4px"></div></div>`;
       if (nav) {
         nav.innerHTML = `
           <div style="display:flex;justify-content:space-between;align-items:center;gap:12px;margin-top:14px;flex-wrap:wrap">
@@ -308,7 +396,6 @@ const ReportWizard = {
               <button class="btn btn-outline" onclick="ReportWizard.refresh()"><i data-lucide="refresh-cw"></i> Refresh</button>
               <button class="btn btn-outline" onclick="ReportWizard.print()"><i data-lucide="printer"></i> Print</button>
               <button class="btn btn-outline" onclick="ReportWizard.downloadPDF()"><i data-lucide="file-down"></i> PDF</button>
-              <button class="btn btn-outline" onclick="ReportWizard.exportExcel()"><i data-lucide="file-spreadsheet"></i> Excel</button>
             </div>
           </div>`;
       }
@@ -395,8 +482,12 @@ const ReportWizard = {
       if (need && !s.classIds.length) return 'Select at least one class.';
       if (s.classIds.length){
         const all = s.cache.classes||[];
+        if (s.lockedClassId && (s.classIds.length !== 1 || String(s.classIds[0]) !== String(s.lockedClassId))) {
+          throw new Error('This report is locked to your assigned class.');
+        }
         for (const cid of s.classIds){
           const cls = all.find(c=> String(c.id)===String(cid));
+          if (!cls) throw new Error('A selected class is not available to your account.');
           if (typeof Scope!=='undefined' && Scope.isScoped() && cls && !Scope.matchesClass(cls)) return `Class ${cls.name} is outside your ${Scope.label()} scope.`;
         }
       }
@@ -433,7 +524,7 @@ const ReportWizard = {
     const needClass = !['school-performance','teacher-performance'].includes(s.reportType) || (s.reportType==='school-performance' && !s.classIds.length);
     // For school-performance, classes can be empty meaning all scoped
     // For class/assessment/subject reports need class
-    const typeNeedsClass = ['class-performance','subject-performance','teacher-student-performance','teacher-assessment-class','exam-class-summary','missing-marks'].includes(s.reportType);
+    const typeNeedsClass = ['student-card','student-performance','student-marks','class-performance','class-ranking','class-marks-sheet','grade-distribution','subject-performance','subject-marks-sheet','subject-grade-distribution','subject-assessment-comparison','teacher-student-performance','teacher-assessment-class','exam-class-summary','assessment-summary','assessment-completion','missing-marks','term-performance-summary','academic-year-performance'].includes(s.reportType);
     if (typeNeedsClass && !s.classIds.length) throw new Error('Select at least one class.');
     if (s.reportType==='teacher-performance' && !s.teacherIds.length){
       // allow fallback to current teacher if signed as teacher, but for DOS require selection
@@ -441,9 +532,13 @@ const ReportWizard = {
     }
     // scope check classes
     const all = s.cache.classes||[];
+    if (s.lockedClassId && (s.classIds.length !== 1 || String(s.classIds[0]) !== String(s.lockedClassId))) {
+      throw new Error('This report is locked to your assigned class.');
+    }
     for (const cid of s.classIds){
       const cls = all.find(c=> String(c.id)===String(cid));
-      if (cls && typeof Scope!=='undefined' && Scope.isScoped() && !Scope.matchesClass(cls)) throw new Error(`Class ${cls.name} is outside your ${Scope.label()} scope.`);
+      if (!cls) throw new Error('A selected class is not available to your account.');
+      if (typeof Scope!=='undefined' && Scope.isScoped() && !Scope.matchesClass(cls)) throw new Error(`Class ${cls.name} is outside your ${Scope.label()} scope.`);
     }
     // For subject-performance require at least one subject? keep optional but warn
     if (s.reportType==='subject-performance' && !s.subjectIds.length){
@@ -467,7 +562,6 @@ const ReportWizard = {
           <button class="btn btn-secondary" onclick="ReportWizard.preview()"><i data-lucide="eye"></i> Refresh Preview</button>
           <button class="btn btn-outline" onclick="ReportWizard.print()"><i data-lucide="printer"></i> Print</button>
           <button class="btn btn-primary" onclick="ReportWizard.downloadPDF()"><i data-lucide="file-down"></i> Download PDF</button>
-          <button class="btn btn-outline" onclick="ReportWizard.exportExcel()"><i data-lucide="file-spreadsheet"></i> Export Excel</button>
         `: `<button class="btn btn-primary" onclick="ReportWizard.next()">${atLast?'<i data-lucide=\'eye\'></i> Preview':'Next <i data-lucide=\'arrow-right\'></i>'}</button>`}
       </div>`;
     if (typeof lucide!=='undefined') lucide.createIcons();
@@ -481,8 +575,8 @@ const ReportWizard = {
     this.state.cache.terms = id ? all.filter(t=> !t.academic_year_id || String(t.academic_year_id)===String(id)) : all;
     this.state.cache.terms.sort((a,b)=>(a.term_no||0)-(b.term_no||0));
     if (this.state.cache.terms.length===1) this.state.termIds=[this.state.cache.terms[0].id];
-    this.renderStep();
-    this.renderNav();
+    this.state.cache.assessments=[];
+    this.reRender();
   },
 
   toggleArray(key, id){
@@ -495,17 +589,17 @@ const ReportWizard = {
     // dependent invalidations
     if (key==='classIds'){
       this.state.studentIds=[]; // reset students when class changes
+      this.state.subjectIds=[];
       this.state.cache.students=[];
+      this.state.cache.subjects=[];
       // subjects cache invalid
       this.state.cache._subjectsForClasses=null;
-      // keep subjectIds but will re-validate
     }
     if (key==='subjectIds' || key==='classIds'){
       // assessments depend on class+subjects
       this.state.cache.assessments=[];
     }
-    this.renderStep();
-    this.renderNav();
+    this.reRender();
   },
 
   async renderStep(){
@@ -571,8 +665,8 @@ const ReportWizard = {
       return `<div style="margin:8px 0 6px;font-size:11px;font-weight:700;color:var(--gray-500);text-transform:uppercase;letter-spacing:.04em">${title} (${arr.length})</div>
       ${arr.map(c=> {
         const sel = s.classIds.some(x=> String(x)===String(c.id));
-        const input = multi ? `<input type="checkbox" ${sel?'checked':''} onchange="ReportWizard.toggleArray('classIds','${c.id}')">`
-                            : `<input type="radio" name="rw-class" ${sel?'checked':''} onchange="ReportWizard.setSingle('classIds','${c.id}')">`;
+        const input = multi ? `<input type="checkbox" ${sel?'checked':''} ${s.lockedClassId?'disabled':''} onchange="ReportWizard.toggleArray('classIds','${c.id}')">`
+                            : `<input type="radio" name="rw-class" ${sel?'checked':''} ${s.lockedClassId?'disabled':''} onchange="ReportWizard.setSingle('classIds','${c.id}')">`;
         return `<label class="rw-opt">${input}<span><span class="rw-opt-title">${Utils.escapeHtml(c.name)}</span> <span class="rw-opt-sub">${Utils.escapeHtml(c.education_level||EducationLevels.getCategory(c))}${c.stream?' · '+Utils.escapeHtml(c.stream):''}</span></span></label>`;
       }).join('')}`;
     };
@@ -594,12 +688,13 @@ const ReportWizard = {
     return ''
       + '<div class="rw-card-hd"><h3><i data-lucide="school"></i> '+(multi?'Select Classes':'Select Class')+'</h3>'
       + '  <div style="margin-left:auto" class="rw-actions">'
-      + (multi ? '<button class="btn btn-outline btn-sm" onclick="ReportWizard.selectAll(\'classIds\', ReportWizard.state.cache.classes.map(function(c){return c.id}))">Select All</button><button class="btn btn-outline btn-sm" onclick="ReportWizard.clear(\'classIds\')">Clear</button>' : '')
+      + (multi && !s.lockedClassId ? '<button class="btn btn-outline btn-sm" onclick="ReportWizard.selectAll(\'classIds\', ReportWizard.state.cache.classes.map(function(c){return c.id}))">Select All</button><button class="btn btn-outline btn-sm" onclick="ReportWizard.clear(\'classIds\')">Clear</button>' : '')
       + '  </div>'
       + '</div>'
       + '<div class="rw-card-bd">'
-      + ((typeof Auth!=='undefined' && Auth.isTeacher && Auth.isTeacher() && streams.length) ? '<div class="form-group" style="max-width:280px"><label>Stream</label><select class="select-field" onchange="ReportWizard.setStream(this.value)"><option value="all">All Streams</option>'+streams.map(x=>'<option value="'+Utils.escapeHtml(x)+'" '+(String(s.stream)===String(x)?'selected':'')+'>Stream '+Utils.escapeHtml(x)+'</option>').join('')+'</select></div>' : '')
-      + '  <div class="rw-search"><i data-lucide="search"></i><input id="rw-class-q" placeholder="Search classes..." value="'+Utils.escapeHtml(q)+'" oninput="ReportWizard.renderStep()"></div>'
+      + (!s.lockedClassId && typeof Auth!=='undefined' && Auth.isTeacher && Auth.isTeacher() && streams.length ? '<div class="form-group" style="max-width:280px"><label>Stream</label><select class="select-field" onchange="ReportWizard.setStream(this.value)"><option value="all">All Streams</option>'+streams.map(x=>'<option value="'+Utils.escapeHtml(x)+'" '+(String(s.stream)===String(x)?'selected':'')+'>Stream '+Utils.escapeHtml(x)+'</option>').join('')+'</select></div>' : '')
+      + (!s.lockedClassId ? '  <div class="rw-search"><i data-lucide="search"></i><input id="rw-class-q" placeholder="Search classes..." value="'+Utils.escapeHtml(q)+'" oninput="ReportWizard.refreshStep()"></div>' : '')
+      + (multi ? '  '+this.chipsFor('classIds', s.cache.classes, function(c){ return c.name; }) : '')
       + '  <div class="rw-list">'+classesInner+'</div>'
       + '  <div style="margin-top:10px" class="rw-badge">'+s.classIds.length+' selected</div>'
       + '</div>';
@@ -607,9 +702,38 @@ const ReportWizard = {
 
   setSingle(key, id){
     this.state[key]=[id];
-    if (key==='classIds'){ this.state.studentIds=[]; this.state.cache.students=[]; this.state.cache.assessments=[]; }
-    this.renderStep(); this.renderNav();
+    if (key==='classIds'){ this.state.studentIds=[]; this.state.subjectIds=[]; this.state.cache.students=[]; this.state.cache.subjects=[]; this.state.cache.assessments=[]; }
+    this.reRender();
   },
+  removeOne(key, id){
+    this.state[key]=(this.state[key]||[]).filter(x=> String(x)!==String(id));
+    if (key==='classIds'){ this.state.studentIds=[]; this.state.subjectIds=[]; this.state.cache.students=[]; this.state.cache.subjects=[]; this.state.cache.assessments=[]; }
+    this.reRender();
+  },
+  reRender(){
+    const singleBody=document.getElementById('rw-single-body');
+    const stepBody=document.getElementById('rw-step-body');
+    if (singleBody) this.renderSinglePage();
+    else if (stepBody) this.renderStep();
+    this.renderNav();
+  },
+  refreshStep(){
+    const el=document.activeElement;
+    const focusId=el && el.id? el.id : null;
+    const pos=(el && el.selectionStart!=null)? el.selectionStart : 0;
+    const singleBody=document.getElementById('rw-single-body');
+    const stepBody=document.getElementById('rw-step-body');
+    const done=function(){ if(focusId){ const n=document.getElementById(focusId); if(n){ try{ n.focus(); n.setSelectionRange(pos,pos); }catch(e){ n.focus(); } } } };
+    if (singleBody){ const p=this.renderSinglePage(); if (p && p.then) p.then(done); else done(); }
+    else { this.renderStep(); done(); }
+  },
+  chipsFor(key, list, labelFn){
+    if (typeof SelectionChips==='undefined') return '';
+    const items = SelectionChips.fromIds(key, this.state[key]||[], list, labelFn, function(x){ return (x.name||x.full_name||String(x.id)); });
+    return SelectionChips.render(items, { limit: 40 });
+  },
+  selectAll(key, ids){ this.state[key]=[...ids]; this.reRender(); },
+  clear(key){ this.state[key]=[]; if(key==='classIds'){ this.state.studentIds=[]; this.state.subjectIds=[]; this.state.cache.students=[]; this.state.cache.subjects=[]; this.state.cache.assessments=[]; } this.reRender(); },
   setStream(value){
     this.state.stream = value || 'all';
     this.state.classIds = [];
@@ -626,8 +750,6 @@ const ReportWizard = {
     this.state.cache.assessments = [];
     this.renderSinglePage();
   },
-  selectAll(key, ids){ this.state[key]=[...ids]; this.renderStep(); this.renderNav(); },
-  clear(key){ this.state[key]=[]; if(key==='classIds'){ this.state.studentIds=[]; this.state.cache.students=[]; } this.renderStep(); this.renderNav(); },
 
   async renderStudents(){
     const s=this.state;
@@ -651,7 +773,8 @@ const ReportWizard = {
         </div>
       </div>
       <div class="rw-card-bd">
-        <div class="rw-search"><i data-lucide="search"></i><input id="rw-stu-q" placeholder="Search students..." value="${q?Utils.escapeHtml(q):''}" oninput="ReportWizard.renderStep()"></div>
+        <div class="rw-search"><i data-lucide="search"></i><input id="rw-stu-q" placeholder="Search students..." value="${q?Utils.escapeHtml(q):''}" oninput="ReportWizard.refreshStep()"></div>
+        ${this.chipsFor('studentIds', s.cache.students, l=> l.full_name)}
         <div class="rw-list">
           ${list.length? list.map(l=>{
             const sel=s.studentIds.some(x=>String(x)===String(l.id));
@@ -683,16 +806,21 @@ const ReportWizard = {
     // Teacher reports must only expose subjects assigned to the logged-in teacher.
     const teacherId = typeof Auth !== 'undefined' && typeof Auth.getTeacherId === 'function' ? Auth.getTeacherId() : null;
     if (teacherId){
-      try{
-        const assigns = await DB.query('teacher_assignments','*',{teacher_id: teacherId});
-        const classIds = new Set(s.classIds.map(String));
-        const allowed = new Set((assigns || [])
-          .filter(a => !classIds.size || classIds.has(String(a.class_id)))
-          .map(a => String(a.subject_id)));
-        subjects = subjects.filter(subject => allowed.has(String(subject.id)));
-      }catch(e){
-        subjects = [];
+      const assigns = await DB.query('teacher_assignments','*',{teacher_id: teacherId});
+      const selectedClassIds = new Set(s.classIds.map(String));
+      const allowed = new Set((assigns || [])
+        .filter(a => !selectedClassIds.size || selectedClassIds.has(String(a.class_id)))
+        .map(a => String(a.subject_id)));
+      const classTeacherClasses = (s.cache.classes || [])
+        .filter(cls => selectedClassIds.has(String(cls.id)) && String(cls.class_teacher_id) === String(teacherId));
+      for (const cls of classTeacherClasses) {
+        const classSubjects = await ReportUtils.getClassSubjects(cls.id);
+        classSubjects.forEach(subject => {
+          allowed.add(String(subject.id));
+          if (!subjects.some(existing => String(existing.id) === String(subject.id))) subjects.push(subject);
+        });
       }
+      subjects = subjects.filter(subject => allowed.has(String(subject.id)));
     }
     subjects.sort((a,b)=> String(a.name).localeCompare(String(b.name)));
     s.cache.subjects = subjects;
@@ -708,7 +836,8 @@ const ReportWizard = {
       </div>
       <div class="rw-card-bd">
         <p class="rw-help" style="margin-bottom:8px">Only subjects for your education level and selected class appear. Empty = all scoped subjects.</p>
-        <div class="rw-search"><i data-lucide="search"></i><input id="rw-subj-q" placeholder="Search subjects..." oninput="ReportWizard.renderStep()"></div>
+        <div class="rw-search"><i data-lucide="search"></i><input id="rw-subj-q" placeholder="Search subjects..." oninput="ReportWizard.refreshStep()"></div>
+        ${this.chipsFor('subjectIds', s.cache.subjects, x=> x.name)}
         <div class="rw-list">
           ${list.length? list.map(x=>{
             const sel=s.subjectIds.some(id=> String(id)===String(x.id));
@@ -730,13 +859,12 @@ const ReportWizard = {
     if (s.termIds.length===1) filter.term_id = s.termIds[0];
     // status approved/locked/submitted ?? show all?
     filter.status = ['approved','locked','submitted','draft','pending','rejected'];
-    // Teacher: only own assessments (assigned classes already filtered, but also restrict by teacher_id)
-    const teacherId = typeof Auth !== 'undefined' && typeof Auth.getTeacherId === 'function' ? Auth.getTeacherId() : null;
-    if (teacherId){
-      filter.teacher_id = teacherId;
-    }
     let assessments=[];
-    try { assessments = await DB.query('assessments','id,name,unit,subject_id,class_id,term_id,assessment_type_id,status,maximum_mark,assessment_date,description,period_label,period_type', filter, {column:'assessment_date', asc:false}); } catch(e){ assessments=[]; }
+    try {
+      assessments = await DB.query('assessments','id,name,unit,subject_id,class_id,term_id,assessment_type_id,status,maximum_mark,assessment_date,description,period_label,period_type', filter, {column:'assessment_date', asc:false});
+    } catch(e){
+      throw new Error('Could not load assessments authorized for the selected class: ' + (e.message || 'request failed'));
+    }
     // scope filter subjects
     const allSubj = s.cache.subjects||[];
     assessments = assessments.filter(a=>{
@@ -769,7 +897,8 @@ const ReportWizard = {
       <div class="rw-card-bd">
         <p class="rw-help" style="margin-bottom:8px">Filtered by class ${s.classIds.length? s.classIds.join(','):''}${s.subjectIds.length?' + subjects':''}. Select one, multiple, or all.</p>
         <div class="form-group" style="max-width:300px"><label>Assessment Type</label><select class="select-field" onchange="ReportWizard.setAssessmentType(this.value)"><option value="all">All Assessment Types</option>${types.map(t=>`<option value="${t.id || ''}" ${String(s.assessmentTypeId)===String(t.id)?'selected':''}>${Utils.escapeHtml(t.name)}</option>`).join('')}</select></div>
-        <div class="rw-search"><i data-lucide="search"></i><input id="rw-assess-q" placeholder="Search assessments..." oninput="ReportWizard.renderStep()"></div>
+        <div class="rw-search"><i data-lucide="search"></i><input id="rw-assess-q" placeholder="Search assessments..." oninput="ReportWizard.refreshStep()"></div>
+        ${this.chipsFor('assessmentIds', s.cache.assessments, a=> (a.display_name||a.name||a.unit||'Assessment'))}
         <div class="rw-list">
           ${list.length? list.map(a=>{
             const sel=s.assessmentIds.some(id=> String(id)===String(a.id));
@@ -793,6 +922,7 @@ const ReportWizard = {
       </div>
       <div class="rw-card-bd">
         <p class="rw-help" style="margin-bottom:8px">Dynamic · only terms configured for ${Utils.escapeHtml((s.cache.years.find(y=>String(y.id)===String(s.academicYearId))||{}).name||'selected year')}.</p>
+        ${this.chipsFor('termIds', s.cache.terms, t=> t.name)}
         <div class="rw-list">
           ${terms.length? terms.map(t=>{
             const sel=s.termIds.some(id=> String(id)===String(t.id));
@@ -828,7 +958,8 @@ const ReportWizard = {
         </div>
       </div>
       <div class="rw-card-bd">
-        <div class="rw-search"><i data-lucide="search"></i><input id="rw-teach-q" placeholder="Search teachers..." oninput="ReportWizard.renderStep()"></div>
+        <div class="rw-search"><i data-lucide="search"></i><input id="rw-teach-q" placeholder="Search teachers..." oninput="ReportWizard.refreshStep()"></div>
+        ${this.chipsFor('teacherIds', s.cache.teachers, t=> t.full_name)}
         <div class="rw-list">
           ${list.length? list.map(t=>{
             const sel=s.teacherIds.some(id=> String(id)===String(t.id));
@@ -864,14 +995,27 @@ const ReportWizard = {
     const years=s.cache.years; const year=years.find(y=> String(y.id)===String(s.academicYearId));
     const clsNames = s.classIds.map(id=> (s.cache.classes.find(c=>String(c.id)===String(id))||{}).name ).filter(Boolean).join(', ')||'—';
     const terms = s.cache.terms.filter(t=> s.termIds.includes(String(t.id)) || s.termIds.includes(t.id)).map(t=>t.name).join(' + ')||'—';
-    // resolve counts async? synchronous view
+    const groups = [];
+    const selTerms = s.cache.terms.filter(t=> s.termIds.some(id=> String(id)===String(t.id)));
+    if (selTerms.length) groups.push(['Terms', SelectionChips.render(SelectionChips.fromIds('termIds', s.termIds, selTerms, t=> t.name), {limit:20})]);
+    if (s.classIds.length) groups.push(['Classes', SelectionChips.render(SelectionChips.fromIds('classIds', s.classIds, s.cache.classes, c=> c.name), {limit:20})]);
+    if (s.studentIds.length && s.cache.students.length) groups.push(['Students', SelectionChips.render(SelectionChips.fromIds('studentIds', s.studentIds, s.cache.students, l=> l.full_name), {limit:30})]);
+    if (s.subjectIds.length) groups.push(['Subjects', SelectionChips.render(SelectionChips.fromIds('subjectIds', s.subjectIds, s.cache.subjects, x=> x.name), {limit:20})]);
+    if (s.assessmentIds.length) groups.push(['Assessments', SelectionChips.render(SelectionChips.fromIds('assessmentIds', s.assessmentIds, s.cache.assessments, a=> (a.display_name||a.name||a.unit||'Assessment')), {limit:30})]);
+    if (s.teacherIds.length) groups.push(['Teachers', SelectionChips.render(SelectionChips.fromIds('teacherIds', s.teacherIds, s.cache.teachers, t=> t.full_name), {limit:20})]);
+    const selectedHtml = groups.length
+      ? `<div class="rw-summary-selected" style="margin-top:14px">
+           <div style="font-size:12px;font-weight:800;color:var(--gray-700);margin-bottom:6px"><i data-lucide="list-checks" style="width:14px;height:14px;vertical-align:-2px"></i> Everything you selected</div>
+           ${groups.map(g=> `<div class="rw-chips-group"><div class="rw-chips-group-title">${g[0]} (${g[0]==='Students'? s.studentIds.length : g[0]==='Assessments'? s.assessmentIds.length : g[0]==='Subjects'? s.subjectIds.length : g[0]==='Teachers'? s.teacherIds.length : s.termIds.length})</div>${g[1]}</div>`).join('')}
+         </div>`
+      : '';
     return `
       <div class="rw-card-hd"><h3><i data-lucide="eye"></i> Report Summary</h3></div>
       <div class="rw-card-bd">
         <div class="rw-summary">
           <div class="rw-summary-grid">
             <div><strong>Report Type:</strong> ${Utils.escapeHtml(this.DEFS[s.reportType].label)}</div>
-            <div><strong>Education Level:</strong> ${Utils.escapeHtml(typeof Scope!=='undefined'? Scope.label() : 'Global')}</div>
+            <div><strong>Education Level:</strong> ${Utils.escapeHtml(this.educationGroupLabel(s.educationLevelFilter))}</div>
             <div><strong>Academic Year:</strong> ${Utils.escapeHtml(year? year.name : '-')}</div>
             <div><strong>Terms:</strong> ${Utils.escapeHtml(terms)}</div>
             <div><strong>Class${s.classIds.length===1?'':'es'}:</strong> ${Utils.escapeHtml(clsNames)} (${s.classIds.length})</div>
@@ -882,6 +1026,7 @@ const ReportWizard = {
             <div><strong>Orientation:</strong> ${Utils.escapeHtml(s.options.orientation||'auto')}</div>
           </div>
         </div>
+        ${selectedHtml}
         <div style="margin-top:14px" class="rw-actions">
           <button class="btn btn-primary" onclick="ReportWizard.preview()"><i data-lucide="eye"></i> Preview Report →</button>
           <button class="btn btn-outline" onclick="ReportWizard.state.stepIndex=0;ReportWizard.renderShell()"><i data-lucide="edit-3"></i> Edit Choices</button>
@@ -930,14 +1075,30 @@ const ReportWizard = {
     return cfg;
   },
 
-  async preview(){
+  async preview(options = {}){
+    const openInNewTab = options.openInNewTab === true
+      || (options.openInNewTab !== false && typeof Auth !== 'undefined' && Auth.isTeacher && Auth.isTeacher());
+    const previewTab = openInNewTab ? window.open('', '_blank') : null;
+    if (previewTab) {
+      previewTab.document.write('<!doctype html><html><head><meta charset="utf-8"><title>Preparing RMS-MIS Report</title></head><body style="font:16px Arial,sans-serif;padding:24px">Preparing your complete report preview…</body></html>');
+      previewTab.document.close();
+    } else if (openInNewTab) {
+      Utils.toast('Allow pop-ups to open the complete report preview in a new tab. The report will remain available in the page below.', 'error');
+    }
     const area = document.getElementById('rw-preview-area') || document.getElementById('rw-preview');
     const target = document.getElementById('rw-preview-area') || document.getElementById('rw-preview') || document.getElementById('rw-root');
     const previewContainer = document.getElementById('rw-preview');
     const stepPreview = document.getElementById('rw-preview-area');
     const container = stepPreview || previewContainer;
+    this.state.previewHtml='';
+    this.state.previewConfig='';
     if (container) container.innerHTML = Utils.loading();
     try {
+      if (this.state.lockedClassId) {
+        const authorizedClass = (this.state.cache.classes || []).find(cls => String(cls.id) === String(this.state.lockedClassId));
+        if (!authorizedClass) throw new Error('This class is not assigned to your account.');
+        this.state.classIds = [this.state.lockedClassId];
+      }
       this.validateAll();
       const cfg = this.buildEngineConfig();
       // Student-card batch path: use rcState-compatible path for richer layout, but also support generic engine
@@ -979,14 +1140,16 @@ const ReportWizard = {
           }
           if (!cards.length) throw new Error('No active learners found in the selected class(es).');
           cards.sort((a,b)=> (a.position||9999)-(b.position||9999));
-          bodyHtml = cards.map(card => ReportHeader.getA4Container(renderStudentCard(card), 'portrait')).join(ReportHeader.getPageBreak());
+          bodyHtml = cards.map(card =>
+            ReportHeader.getA4Container(renderStudentCard(card), 'portrait', false, 'rms-student-card-page')
+          ).join('');
           orientation = (orientation==='auto' || !orientation) ? 'portrait' : orientation;
         } else if (cfg.reportType === 'student-card') {
           // Specific student selection (1+): per-student via engine + rich card layout
           const parts=[];
           for (const sid of targetIds){
             const one = await ReportEngine.generate({...cfg, studentId:sid, studentIds:[sid]});
-            parts.push(ReportHeader.getA4Container(renderStudentCard(one), 'portrait'));
+            parts.push(ReportHeader.getA4Container(renderStudentCard(one), 'portrait', false, 'rms-student-card-page'));
           }
           bodyHtml = parts.join(ReportHeader.getPageBreak());
           orientation = (orientation==='auto' || !orientation) ? 'portrait' : orientation;
@@ -1021,7 +1184,26 @@ const ReportWizard = {
         : ReportHeader.getA4Container(bodyHtml, orientation, true);
       this.state.previewHtml=a4;
       this.state.previewOrientation=orientation;
-      this.state.previewFilename=(typeof ReportCenter!=='undefined' && ReportCenter.buildFilename ? ReportCenter.buildFilename({title: this.DEFS[cfg.reportType].label, year:{name:''}}, orientation) : `RMS-MIS_${cfg.reportType}_${orientation}.pdf`);
+      this.state.previewConfig=JSON.stringify(cfg);
+      const selected = (items, ids) => (items || []).find(item => String(item.id) === String((ids || [])[0])) || null;
+      const filenameData = {
+        title: this.DEFS[cfg.reportType].label,
+        year: selected(this.state.cache.years, [cfg.academicYear]),
+        term: selected(this.state.cache.terms, cfg.termIds),
+        cls: selected(this.state.cache.classes, cfg.classIds),
+        subject: selected(this.state.cache.subjects, cfg.subjectIds),
+        learner: selected(this.state.cache.students, cfg.studentIds)
+      };
+      this.state.previewFilename=(typeof ReportCenter!=='undefined' && ReportCenter.buildFilename ? ReportCenter.buildFilename(filenameData, orientation) : `RMS-MIS_${cfg.reportType}_${orientation}.pdf`);
+      if (previewTab && typeof ReportCenter !== 'undefined' && ReportCenter.openPreviewDocument) {
+        ReportCenter.openPreviewDocument(
+          a4,
+          `RMS-MIS ${filenameData.title}${filenameData.cls ? ' — ' + filenameData.cls.name : ''}`,
+          orientation,
+          this.state.previewFilename,
+          previewTab
+        );
+      }
       const host = stepPreview || previewContainer || document.getElementById('rw-root');
       // show in preview area + keep shell
       if (stepPreview){
@@ -1029,9 +1211,9 @@ const ReportWizard = {
           <div class="report-preview-toolbar-flex no-print" style="margin-bottom:12px;display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap">
             <div><h3 style="font-size:16px;font-weight:700">A4 Preview — ${orientation==='landscape'?'Landscape':'Portrait'} (${orientation==='landscape'?'297×210':'210×297'} mm)</h3><p class="text-sm text-muted">Live preview · matches print/PDF.</p></div>
             <div class="flex gap-2" style="flex-wrap:wrap">
+              <button class="btn btn-outline btn-sm" onclick="ReportWizard.back()"><i data-lucide="arrow-left"></i> Back</button>
               <button class="btn btn-outline btn-sm" onclick="ReportWizard.closePreview()"><i data-lucide="x"></i> Close Preview</button>
               <button class="btn btn-outline btn-sm" onclick="ReportWizard.openPreviewTab()"><i data-lucide="external-link"></i> Open in New Tab</button>
-              <button class="btn btn-outline btn-sm" onclick="ReportWizard.exportExcel()"><i data-lucide="file-spreadsheet"></i> Excel</button>
               <button class="btn btn-outline btn-sm" onclick="ReportWizard.print()"><i data-lucide="printer"></i> Print</button>
               <button class="btn btn-primary btn-sm" onclick="ReportWizard.downloadPDF()"><i data-lucide="file-down"></i> Download PDF</button>
             </div>
@@ -1044,18 +1226,23 @@ const ReportWizard = {
       (stepPreview||previewContainer).scrollIntoView({behavior:'smooth', block:'start'});
     } catch(e){
       const msg = e.message||'Failed to generate preview';
+      if (previewTab && !previewTab.closed) {
+        previewTab.document.body.innerHTML = `<main style="font:16px Arial,sans-serif;padding:24px"><h1>Report preview failed</h1><p>${Utils.escapeHtml(msg)}</p></main>`;
+      }
       if (container) container.innerHTML = Utils.errorCard('Preview failed', Utils.escapeHtml(msg));
       Utils.toast(msg,'error');
     }
   },
 
-  async generate(){ await this.preview(); this.state.stepIndex = this.currentSteps().indexOf('preview'); this.renderShell(); // jump to preview step
-    // after preview, keep content
-    setTimeout(()=> this.preview(), 80);
+  async generate(){
+    this.state.stepIndex = this.currentSteps().indexOf('preview');
+    this.renderShell();
+    await this.preview();
   },
 
   closePreview(){
     this.state.previewHtml='';
+    this.state.previewConfig='';
     ['rw-preview-area','rw-preview'].forEach(id=>{ const el=document.getElementById(id); if(el) el.innerHTML=''; });
     const c=document.getElementById('rw-report-container'); if(c) c.innerHTML='';
     if (typeof Utils!=='undefined' && Utils.toast) Utils.toast('Preview closed','info');
@@ -1066,49 +1253,29 @@ const ReportWizard = {
     if (!html){ Utils.toast('Generate preview first','error'); return; }
     const orientation=this.state.previewOrientation || 'portrait';
     if (typeof ReportCenter!=='undefined' && ReportCenter.openPreviewDocument){
-      ReportCenter.openPreviewDocument(html, 'RMS-MIS Report Preview', orientation);
+      ReportCenter.openPreviewDocument(html, 'RMS-MIS Report Preview', orientation, this.state.previewFilename || 'RMS-MIS_Report.pdf');
       return;
     }
     Utils.toast('Preview window is unavailable','error');
   },
 
-  print(){
+  async print(){
+    const previewOutdated = this.state.previewConfig && this.state.previewConfig !== JSON.stringify(this.buildEngineConfig());
+    if (!this.state.previewHtml || previewOutdated) await this.preview({ openInNewTab: false });
     const html=this.state.previewHtml || (document.getElementById('rw-report-container')? document.getElementById('rw-report-container').innerHTML : '');
     if (!html){ Utils.toast('Generate preview first','error'); return; }
     const orientation=this.state.previewOrientation||'portrait';
     if (typeof ReportCenter!=='undefined' && ReportCenter.printDocument) ReportCenter.printDocument(html,'RMS-MIS Report', this.state.previewFilename, orientation);
-    else {
-      const w=window.open('','_blank'); if(!w) return;
-      const base = new URL('.', window.location.href).href;
-      const css = `<link rel="preconnect" href="https://fonts.googleapis.com"><link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;600;700;800&display=swap" rel="stylesheet"><link rel="stylesheet" href="${new URL('css/report-wizard.css', base).href}"><link rel="stylesheet" href="${new URL('css/report-card.css', base).href}">`;
-      const pr = orientation==='landscape' ? 'size: A4 landscape; margin:10mm 11mm;' : 'size: A4 portrait; margin:10mm 11mm;';
-      w.document.write(`<!DOCTYPE html><html><head><meta charset="utf-8"><title>RMS-MIS Report</title>${css}<style>@page{${pr}}*{ -webkit-print-color-adjust:exact !important; print-color-adjust:exact !important;}html,body{margin:0 !important;padding:0 !important;background:#fff !important;font-family:'Poppins',Arial,sans-serif !important;color:#0f172a !important;} .rms-a4-container{box-shadow:none !important; border:1.2px solid #1e3a5f !important;}</style></head><body>${html}<script>window.onload=function(){setTimeout(function(){window.focus();window.print();},700);};<\/script></body></html>`);
-      w.document.close();
-    }
+    else Utils.toast('The report print service is unavailable. Please reload the page and try again.','error');
   },
   async downloadPDF(){
-    const html=this.state.previewHtml;
-    if (!html){ await this.preview(); }
-    const orientation=this.state.previewOrientation||'portrait';
-    const filename=this.state.previewFilename||'RMS-MIS_Report.pdf';
-    const localPreview = /^(localhost|127\.0\.0\.1)$/i.test(window.location.hostname);
-    try{
-      if (localPreview) throw new Error('Local PDF endpoint unavailable');
-      const pdfHtml = typeof ReportCenter !== 'undefined' && ReportCenter.buildPdfDocument
-        ? ReportCenter.buildPdfDocument(this.state.previewHtml, orientation)
-        : this.state.previewHtml;
-      const r=await fetch('/api/reports/pdf',{method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({html:pdfHtml, filename})});
-      if (r.ok){ const b=await r.blob(); const u=URL.createObjectURL(b); const a=document.createElement('a'); a.href=u; a.download=filename; document.body.appendChild(a); a.click(); a.remove(); URL.revokeObjectURL(u); Utils.toast('PDF downloaded','success'); return; }
-      if (r.status !== 405) console.warn('[ReportWizard] server PDF unavailable:', r.status);
-    } catch(e){}
-    Utils.toast('In print dialog choose Save as PDF ('+filename+')','info');
-    this.print();
-  },
-  exportExcel(){
-    if (typeof XLSX==='undefined'){ Utils.toast('Excel library not loaded','error'); return; }
-    const c=document.getElementById('rw-report-container'); if(!c){ Utils.toast('Generate preview first','error'); return; }
-    const t=c.querySelector('table'); if(!t){ Utils.toast('No table in preview','error'); return; }
-    const ws=XLSX.utils.table_to_sheet(t); const wb=XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb,ws,'Report');
-    const base=(this.state.previewFilename||'RMS-MIS_Report').replace(/\.pdf$/i,''); XLSX.writeFile(wb, base+'.xlsx'); Utils.toast('Excel exported','success');
+    const previewOutdated = this.state.previewConfig && this.state.previewConfig !== JSON.stringify(this.buildEngineConfig());
+    if (!this.state.previewHtml || previewOutdated) await this.preview({ openInNewTab: false });
+    if (!this.state.previewHtml){ Utils.toast('The complete report could not be generated; PDF download was not started.','error'); return; }
+    if (typeof ReportCenter!=='undefined' && ReportCenter.downloadPDF) {
+      await ReportCenter.downloadPDF();
+      return;
+    }
+    Utils.toast('The report download service is unavailable. Please reload the page and try again.','error');
   }
 };

@@ -33,13 +33,20 @@ function teacherSummaryProfile(t, teacherMeta = {}) {
   const classTags = (teacherMeta.classNames || []).length
     ? teacherMeta.classNames.map(name => `<span class="teacher-chip">${Utils.escapeHtml(name)}</span>`).join('')
     : '<span class="teacher-chip muted">No classes yet</span>';
+  const classTeacherTags = (teacherMeta.classTeacherNames || []).length
+    ? teacherMeta.classTeacherNames.map(name => `<span class="teacher-chip accent">${Utils.escapeHtml(name)}</span>`).join('')
+    : '<span class="teacher-chip muted">None assigned</span>';
 
   const subjectTags = (teacherMeta.subjectNames || []).length
     ? teacherMeta.subjectNames.map(name => `<span class="teacher-chip accent">${Utils.escapeHtml(name)}</span>`).join('')
     : '<span class="teacher-chip muted">No subjects yet</span>';
 
-  const levels = (teacherMeta.levels || []).length
-    ? Array.from(new Set(teacherMeta.levels)).map(level => `<span class="teacher-badge ${level === 'Primary' ? 'success' : 'info'}">${Utils.escapeHtml(level)}</span>`).join('')
+  const accountLevel = teacherEducationLabel(t.education_level);
+  const displayLevels = accountLevel === 'Primary & Secondary' ? ['Primary', 'Secondary']
+    : accountLevel === 'Primary' || accountLevel === 'Secondary' ? [accountLevel]
+      : (teacherMeta.levels || []);
+  const levels = displayLevels.length
+    ? Array.from(new Set(displayLevels)).map(level => `<span class="teacher-badge ${level === 'Primary' ? 'success' : 'info'}">${Utils.escapeHtml(level)}</span>`).join('')
     : '<span class="teacher-badge neutral">Unassigned</span>';
 
   const statusClass = (t.status || 'active') === 'active' ? 'success' : 'secondary';
@@ -63,14 +70,13 @@ function teacherSummaryProfile(t, teacherMeta = {}) {
           </div>
           <div class="teacher-badges">${levels}</div>
 
-          <div class="teacher-section-header">
-            <span>Classes Teaching</span>
-          </div>
+          <div class="teacher-section-header"><span>Classes Assigned</span></div>
           <div class="teacher-tags">${classTags}</div>
 
-          <div class="teacher-section-header">
-            <span>Subjects</span>
-          </div>
+          <div class="teacher-section-header"><span>Class Teacher Of</span></div>
+          <div class="teacher-tags">${classTeacherTags}</div>
+
+          <div class="teacher-section-header"><span>Subjects Assigned</span></div>
           <div class="teacher-tags">${subjectTags}</div>
         </div>
       </div>
@@ -118,14 +124,26 @@ async function renderTeachers() {
       teacherMeta.set(teacherId, { classNames: new Set(), subjectNames: new Set(), levels: new Set() });
     }
     const meta = teacherMeta.get(teacherId);
+    const category = EducationLevels.getCategory(classRecord);
     const name = classRecord.name || classRecord.level || `Class ${classRecord.id}`;
-    meta.classNames.add(name);
-    meta.levels.add(EducationLevels.getCategory(classRecord));
+    meta.classNames.add(`${category} · ${name}`);
+    meta.levels.add(category);
 
     if (a.subject_id) {
       const subjectRecord = subjectMap.get(String(a.subject_id));
-      if (subjectRecord) meta.subjectNames.add(subjectRecord.name || 'Subject');
+      if (subjectRecord) meta.subjectNames.add(`${category} · ${subjectRecord.name || 'Subject'}`);
     }
+  });
+  (classes || []).forEach(classRecord => {
+    if (!classRecord.class_teacher_id || !teacherMatchesScope(classRecord)) return;
+    const teacherId = String(classRecord.class_teacher_id);
+    if (!teacherMeta.has(teacherId)) {
+      teacherMeta.set(teacherId, { classNames: new Set(), subjectNames: new Set(), classTeacherNames: new Set(), levels: new Set() });
+    }
+    const meta = teacherMeta.get(teacherId);
+    if (!meta.classTeacherNames) meta.classTeacherNames = new Set();
+    meta.classTeacherNames.add(`${EducationLevels.getCategory(classRecord)} · ${classRecord.name || classRecord.level || `Class ${classRecord.id}`}`);
+    meta.levels.add(EducationLevels.getCategory(classRecord));
   });
 
   // Keep teachers with an in-scope assignment, plus unassigned teachers who
@@ -139,6 +157,10 @@ async function renderTeachers() {
   });
   const allowedTeachers = (teachers || []).filter(teacher => {
     const ownAssignments = assignmentsByTeacher.get(String(teacher.id)) || [];
+    const hasInScopeClassTeacherClass = (classes || []).some(classRecord =>
+      String(classRecord.class_teacher_id || '') === String(teacher.id) && teacherMatchesScope(classRecord)
+    );
+    if (hasInScopeClassTeacherClass) return true;
     return ownAssignments.length === 0 || ownAssignments.some(assignment => {
       const classRecord = classMap.get(String(assignment.class_id));
       return teacherMatchesScope(classRecord);
@@ -146,12 +168,13 @@ async function renderTeachers() {
   });
 
   const filtered = allowedTeachers.filter(t => {
-    const meta = teacherMeta.get(String(t.id)) || { classNames: new Set(), subjectNames: new Set(), levels: new Set() };
-    const searchText = `${t.full_name || ''} ${t.teacher_code || ''} ${t.email || ''} ${t.phone || ''} ${Array.from(meta.classNames).join(' ')} ${Array.from(meta.subjectNames).join(' ')} ${t.department || ''}`.toLowerCase();
+    const meta = teacherMeta.get(String(t.id)) || { classNames: new Set(), subjectNames: new Set(), classTeacherNames: new Set(), levels: new Set() };
+    const classTeacherNames = meta.classTeacherNames || new Set();
+    const searchText = `${t.full_name || ''} ${t.teacher_code || ''} ${t.email || ''} ${t.phone || ''} ${Array.from(meta.classNames).join(' ')} ${Array.from(classTeacherNames).join(' ')} ${Array.from(meta.subjectNames).join(' ')} ${t.department || ''}`.toLowerCase();
     const matchesSearch = !teachersSearch || searchText.includes(teachersSearch.toLowerCase());
     const matchesStatus = teachersStatusFilter === 'all' || String(t.status || 'active') === teachersStatusFilter;
     const matchesDepartment = teachersDepartmentFilter === 'all' || (t.department || '').toLowerCase() === teachersDepartmentFilter.toLowerCase();
-    const matchesClass = teachersClassFilter === 'all' || Array.from(meta.classNames).some(name => name.toLowerCase().includes(teachersClassFilter.toLowerCase()));
+    const matchesClass = teachersClassFilter === 'all' || [...meta.classNames, ...classTeacherNames].some(name => name.toLowerCase().includes(teachersClassFilter.toLowerCase()));
     const matchesSubject = teachersSubjectFilter === 'all' || Array.from(meta.subjectNames).some(name => name.toLowerCase().includes(teachersSubjectFilter.toLowerCase()));
     return matchesSearch && matchesStatus && matchesDepartment && matchesClass && matchesSubject;
   });
@@ -164,6 +187,7 @@ async function renderTeachers() {
     const meta = teacherMeta.get(String(t.id)) || { classNames: new Set(), subjectNames: new Set(), levels: new Set() };
     return teacherSummaryProfile(t, {
       classNames: Array.from(meta.classNames).slice(0, 8),
+      classTeacherNames: Array.from(meta.classTeacherNames || []).slice(0, 8),
       subjectNames: Array.from(meta.subjectNames).slice(0, 8),
       levels: Array.from(meta.levels)
     });
@@ -311,6 +335,7 @@ async function renderTeachers() {
         const meta = teacherMeta.get(String(id)) || { classNames: new Set(), subjectNames: new Set(), levels: new Set() };
         teacherViewProfile(teacher, {
           classNames: Array.from(meta.classNames),
+          classTeacherNames: Array.from(meta.classTeacherNames || []),
           subjectNames: Array.from(meta.subjectNames),
           levels: Array.from(meta.levels)
         });
@@ -361,8 +386,15 @@ function teacherViewProfile(t, teacherMeta = {}) {
   const subjectTags = (teacherMeta.subjectNames || []).length
     ? teacherMeta.subjectNames.map(n => `<span class="teacher-chip accent">${Utils.escapeHtml(n)}</span>`).join('')
     : '<span class="teacher-chip muted">No subjects yet</span>';
-  const levels = (teacherMeta.levels || []).length
-    ? Array.from(new Set(teacherMeta.levels)).map(level => `<span class="teacher-badge ${level === 'Primary' ? 'success' : 'info'}">${Utils.escapeHtml(level)}</span>`).join('')
+  const classTeacherTags = (teacherMeta.classTeacherNames || []).length
+    ? teacherMeta.classTeacherNames.map(n => `<span class="teacher-chip accent">${Utils.escapeHtml(n)}</span>`).join('')
+    : '<span class="teacher-chip muted">None assigned</span>';
+  const accountLevel = teacherEducationLabel(t.education_level);
+  const displayLevels = accountLevel === 'Primary & Secondary' ? ['Primary', 'Secondary']
+    : accountLevel === 'Primary' || accountLevel === 'Secondary' ? [accountLevel]
+      : (teacherMeta.levels || []);
+  const levels = displayLevels.length
+    ? Array.from(new Set(displayLevels)).map(level => `<span class="teacher-badge ${level === 'Primary' ? 'success' : 'info'}">${Utils.escapeHtml(level)}</span>`).join('')
     : '<span class="teacher-badge neutral">Unassigned</span>';
 
   const photo = t.profile_photo_url || t.photo_url || t.avatar_url
@@ -384,13 +416,16 @@ function teacherViewProfile(t, teacherMeta = {}) {
           <div><span class="teacher-label"><i data-lucide="graduation-cap"></i>Qualification</span><span>${Utils.escapeHtml(t.qualification || 'Not provided')}</span></div>
           <div><span class="teacher-label"><i data-lucide="briefcase"></i>Department</span><span>${Utils.escapeHtml(t.department || 'Not provided')}</span></div>
           <div><span class="teacher-label"><i data-lucide="shield-check"></i>Role</span><span>${Utils.escapeHtml(t.role || 'Teacher')}</span></div>
+          <div><span class="teacher-label"><i data-lucide="badge-check"></i>Teacher Code</span><span>${Utils.escapeHtml(t.teacher_code || '—')}</span></div>
         </div>
         <div class="teacher-academic-box">
           <div class="teacher-section-header">Education Level</div>
           <div class="teacher-badges">${levels}</div>
-          <div class="teacher-section-header">Classes Teaching</div>
+          <div class="teacher-section-header">Classes Assigned</div>
           <div class="teacher-tags">${classTags}</div>
-          <div class="teacher-section-header">Subjects</div>
+          <div class="teacher-section-header">Class Teacher Of</div>
+          <div class="teacher-tags">${classTeacherTags}</div>
+          <div class="teacher-section-header">Subjects Assigned</div>
           <div class="teacher-tags">${subjectTags}</div>
         </div>
       </div>
@@ -405,11 +440,99 @@ function teacherViewProfile(t, teacherMeta = {}) {
 let tfAssignmentQueue = [];
 let tfAssignmentSubjects = [];
 let tfAssignmentClassLookup = {};
+let tfAvailableClasses = [];
+let teAvailableClasses = [];
+let teAssignedClassTeacherIds = new Set();
+
+function teacherEducationLabel(level) {
+  const normalized = String(level || '').toUpperCase();
+  if (normalized === 'PRIMARY') return 'Primary';
+  if (normalized === 'SECONDARY') return 'Secondary';
+  if (['BOTH', 'ALL'].includes(normalized)) return 'Primary & Secondary';
+  return 'Not set';
+}
+
+function teacherEducationOptions(selected) {
+  const options = [
+    { value: 'PRIMARY', label: 'Primary', allowed: !Scope.isSecondary() },
+    { value: 'SECONDARY', label: 'Secondary', allowed: !Scope.isPrimary() },
+    { value: 'BOTH', label: 'Primary & Secondary', allowed: !Scope.isScoped() }
+  ].filter(option => option.allowed);
+  return `<option value="">Select education level...</option>${options.map(option =>
+    `<option value="${option.value}" ${selected === option.value ? 'selected' : ''}>${option.label}</option>`
+  ).join('')}`;
+}
+
+function teacherLevelMatchesClass(level, classRecord) {
+  const assignedLevel = String(level || '').toUpperCase();
+  const category = String(EducationLevels.getCategory(classRecord) || '').toUpperCase();
+  return assignedLevel === 'BOTH' || assignedLevel === 'ALL' ||
+    (assignedLevel === 'PRIMARY' && category === 'PRIMARY') ||
+    (assignedLevel === 'SECONDARY' && category.includes('SECONDARY'));
+}
+
+function teacherSubjectMatchesClass(subject, classRecord) {
+  const subjectLevel = String(subject?.level || subject?.education_level || 'Both').toUpperCase();
+  const classLevel = String(EducationLevels.getCategory(classRecord) || '').toUpperCase();
+  if (['BOTH', 'ALL', ''].includes(subjectLevel)) return true;
+  if (classLevel === 'PRIMARY') return subjectLevel === 'PRIMARY';
+  return ['SECONDARY', 'LOWER SECONDARY', 'UPPER SECONDARY'].includes(subjectLevel);
+}
+
+function tfEducationLevelChanged() {
+  const select = document.getElementById('tf-education-level');
+  if (!select) return;
+  const newLevel = select.value;
+  const available = tfAvailableClasses.filter(cls => teacherLevelMatchesClass(newLevel, cls));
+  const availableIds = new Set(available.map(cls => String(cls.id)));
+  const before = tfAssignmentQueue.length;
+  tfAssignmentQueue = tfAssignmentQueue.filter(item => availableIds.has(String(item.class_id)));
+  if (tfAssignmentQueue.length < before) {
+    Utils.toast('Removed subject assignments outside the selected education level.', 'info');
+  }
+  tfAssignmentClassLookup = {};
+  available.forEach(cls => { tfAssignmentClassLookup[String(cls.id)] = cls.name || cls.level || ('Class ' + cls.id); });
+  const picker = document.getElementById('tf-class-picker');
+  if (picker) {
+    picker.disabled = !newLevel;
+    picker.innerHTML = `<option value="">Select a class...</option>${available.map(cls =>
+      `<option value="${Utils.escapeHtml(String(cls.id))}">${Utils.escapeHtml(cls.name || cls.level || ('Class ' + cls.id))}</option>`
+    ).join('')}`;
+  }
+  const ctList = document.getElementById('tf-class-teacher-list');
+  if (ctList) ctList.innerHTML = available.length ? available.map(cls => `<label style="display:flex;align-items:center;gap:8px;font-weight:500">
+    <input type="checkbox" name="tf-class-teacher" value="${Utils.escapeHtml(String(cls.id))}">
+    <span>${Utils.escapeHtml(cls.name || cls.level || ('Class ' + cls.id))} <small class="text-muted">(${Utils.escapeHtml(EducationLevels.getCategory(cls))})</small></span>
+  </label>`).join('') : '<span class="text-sm text-muted">No classes available for this education level.</span>';
+  tfAssignRenderQueue();
+  tfAssignRenderClassSubjects();
+}
+
+function teacherEditEducationLevelChanged() {
+  const level = document.getElementById('te-education-level')?.value || '';
+  const allowedClasses = teAvailableClasses.filter(cls => teacherLevelMatchesClass(level, cls));
+  const allowedIds = new Set(allowedClasses.map(cls => String(cls.id)));
+  const previousCount = teAssignedClassTeacherIds.size;
+  teAssignedClassTeacherIds = new Set([...teAssignedClassTeacherIds].filter(id => allowedIds.has(String(id))));
+  if (teAssignedClassTeacherIds.size < previousCount) {
+    Utils.toast('Class Teacher assignments outside the selected education level will be removed.', 'info');
+  }
+  const list = document.getElementById('te-class-teacher-list');
+  if (list) list.innerHTML = allowedClasses.length ? allowedClasses.map(cls => `<label style="display:flex;align-items:center;gap:8px;font-weight:500">
+    <input type="checkbox" name="te-class-teacher" value="${Utils.escapeHtml(String(cls.id))}" ${teAssignedClassTeacherIds.has(String(cls.id)) ? 'checked' : ''}>
+    <span>${Utils.escapeHtml(cls.name || cls.level || ('Class ' + cls.id))} <small class="text-muted">(${Utils.escapeHtml(EducationLevels.getCategory(cls))})</small></span>
+  </label>`).join('') : '<span class="text-sm text-muted">No classes available for this education level.</span>';
+  list?.querySelectorAll('input[name="te-class-teacher"]').forEach(input => input.addEventListener('change', () => {
+    if (input.checked) teAssignedClassTeacherIds.add(String(input.value));
+    else teAssignedClassTeacherIds.delete(String(input.value));
+  }));
+}
 
 async function teacherForm() {
   tfAssignmentQueue = [];
   tfAssignmentSubjects = [];
   tfAssignmentClassLookup = {};
+  tfAvailableClasses = [];
   tfActiveYearId = null;
   let formClasses = [];
   try {
@@ -419,8 +542,8 @@ async function teacherForm() {
       DB.get('academic_years').catch(() => [])
     ]);
     formClasses = (cls || []).filter(c => teacherMatchesScope(c)).sort((a, b) => String(a.name || '').localeCompare(String(b.name || '')));
+    tfAvailableClasses = formClasses;
     tfAssignmentSubjects = (subj || []).sort((a, b) => String(a.name || '').localeCompare(String(b.name || '')));
-    formClasses.forEach(c => { tfAssignmentClassLookup[String(c.id)] = c.name || c.level || ('Class ' + c.id); });
     const formActiveYear = (yrs || []).find(y => (y.status || y.state) === 'active' || y.is_active);
     tfActiveYearId = formActiveYear ? formActiveYear.id : null;
   } catch (e) {
@@ -433,18 +556,30 @@ async function teacherForm() {
     <div class="form-group"><label>Email <span class="required">*</span></label><input id="tf-email" class="input-field" placeholder="e.g., john@rukara.edu"></div>
     <div class="form-group"><label>Password <span class="required">*</span></label><input id="tf-pass" class="input-field" type="password" value="teacher123" placeholder="teacher123" autocomplete="new-password"><p class="form-hint">Default password: teacher123. The teacher should change it after signing in.</p></div>
     <div class="form-group"><label>Phone</label><input id="tf-phone" class="input-field" placeholder="e.g., +250788123456"></div>
+    <div class="form-group"><label>Education Level <span class="required">*</span></label>
+      <select id="tf-education-level" class="select-field" required onchange="tfEducationLevelChanged()">
+        ${teacherEducationOptions('')}
+      </select>
+      <p class="form-hint">The teacher can access assigned academic information only within the selected education level.</p>
+    </div>
     <div class="form-group"><label><i data-lucide="link" style="width:14px;height:14px"></i> Assign Classes & Subjects</label>
       <label style="font-size:12px;color:var(--gray-500);font-weight:600">Class</label>
       <div style="display:flex;gap:8px;margin:4px 0 8px">
-        <select id="tf-class-picker" class="select-field" style="flex:1" onchange="tfAssignRenderClassSubjects()">
+        <select id="tf-class-picker" class="select-field" style="flex:1" onchange="tfAssignRenderClassSubjects()" disabled>
           <option value="">Select a class...</option>
-          ${formClasses.map(c => `<option value="${Utils.escapeHtml(String(c.id))}">${Utils.escapeHtml(c.name || c.level || ('Class ' + c.id))}</option>`).join('')}
         </select>
       </div>
       <div id="tf-subject-panel" style="border:1px solid var(--gray-200);border-radius:10px;padding:10px;background:var(--gray-50);margin-bottom:8px"><div class="text-sm text-muted">Select a class first to choose the subjects taught in that class.</div></div>
       <button type="button" class="btn btn-sm btn-outline" id="tf-add-queue-btn" style="width:100%;justify-content:center"><i data-lucide="plus"></i> Add Class With Subjects</button>
       <div id="tf-queue" style="margin-top:10px"></div>
       <p class="form-hint">Same queue as the Assignments page: one class with its subjects at a time. You can refine it later in Assignments.</p>
+    </div>
+    <div class="form-group">
+      <label>Class Teacher Assignment</label>
+      <div id="tf-class-teacher-list" style="display:grid;gap:7px;max-height:190px;overflow-y:auto;padding:10px;border:1px solid var(--gray-200);border-radius:10px">
+        <span class="text-sm text-muted">Select the teacher education level first.</span>
+      </div>
+      <p class="form-hint">Select each class this teacher will manage as Class Teacher. Each class has one primary Class Teacher; assigning an occupied class transfers it to this teacher.</p>
     </div>
     <div class="alert alert-info" style="margin-bottom:0"><i data-lucide="info"></i> After registration, a professional welcome email and SMS will be sent to the teacher listing these classes and subjects.</div>`,
     `<button class="btn btn-secondary" data-modal-close="true">Cancel</button>
@@ -496,9 +631,11 @@ function tfAssignRenderClassSubjects() {
     panel.innerHTML = '<div class="text-sm text-muted">Select a class first to choose the subjects taught in that class.</div>';
     return;
   }
+  const classRecord = tfAvailableClasses.find(cls => String(cls.id) === String(classId));
   const existing = tfAssignmentQueue.find(item => String(item.class_id) === String(classId));
   const checked = new Set((existing ? existing.subject_ids : []).map(String));
-  const list = (tfAssignmentSubjects || []).map(s => `
+  const eligibleSubjects = (tfAssignmentSubjects || []).filter(subject => teacherSubjectMatchesClass(subject, classRecord));
+  const list = eligibleSubjects.map(s => `
     <label style="display:flex;align-items:center;gap:8px;padding:4px 0;font-size:13px;cursor:pointer">
       <input type="checkbox" name="tf-subject" value="${Utils.escapeHtml(String(s.id))}" ${checked.has(String(s.id)) ? 'checked' : ''} onchange="tfAssignRenderSubjectCount()" style="width:16px;height:16px;accent-color:var(--blue-600)">
       ${Utils.escapeHtml(s.name)}
@@ -611,8 +748,10 @@ async function teacherSave() {
   const email = document.getElementById('tf-email')?.value?.trim();
   const pass = document.getElementById('tf-pass')?.value || 'teacher123';
   const phone = document.getElementById('tf-phone')?.value?.trim() || null;
+  const educationLevel = document.getElementById('tf-education-level')?.value || '';
 
   if (!code || !name || !email || !pass) return Utils.toast('Fill all required fields', 'error');
+  if (!['PRIMARY', 'SECONDARY', 'BOTH'].includes(educationLevel)) return Utils.toast('Select the teacher education level', 'error');
   if (!/^\d{11}$/.test(code)) return Utils.toast('Teacher code must be exactly 11 digits', 'error');
   if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return Utils.toast('Enter a valid teacher email address', 'error');
   if (pass.length < 8) return Utils.toast('Password must be at least 8 characters', 'error');
@@ -653,6 +792,7 @@ async function teacherSave() {
     ]);
     if (existingCode) { if (saveBtn) { saveBtn.disabled = false; saveBtn.innerHTML = '<i data-lucide="save"></i> Save & Send Welcome'; } return Utils.toast('That teacher code is already registered', 'error'); }
     if (existingEmail) { if (saveBtn) { saveBtn.disabled = false; saveBtn.innerHTML = '<i data-lucide="save"></i> Save & Send Welcome'; } return Utils.toast('That email address is already registered', 'error'); }
+    const accountEducationLevel = educationLevel === 'BOTH' ? 'all' : educationLevel.toLowerCase();
 
     // Create the auth account. A 422 "already registered" means a previous
     // attempt created the auth user but failed later — recover via sign-in
@@ -686,12 +826,12 @@ async function teacherSave() {
 
     // Upsert profile rows (idempotent, so retrying a partial registration is safe)
     const { error: userUpsertErr } = await sbClient.from('users').upsert(
-      { id: teacherAuthId, email, full_name: name, role: 'teacher', status: 'active', phone },
+      { id: teacherAuthId, email, full_name: name, role: 'teacher', status: 'active', phone, education_level: accountEducationLevel },
       { onConflict: 'id' }
     );
     if (userUpsertErr) throw userUpsertErr;
     const { error: teacherUpsertErr } = await sbClient.from('teachers').upsert(
-      { user_id: teacherAuthId, teacher_code: code, full_name: name, email, phone, status: 'active', created_by: creatorId },
+      { user_id: teacherAuthId, teacher_code: code, full_name: name, email, phone, status: 'active', education_level: educationLevel, created_by: creatorId },
       { onConflict: 'teacher_code' }
     );
     if (teacherUpsertErr) throw teacherUpsertErr;
@@ -701,6 +841,17 @@ async function teacherSave() {
     // Resolve the new teacher row and its display names for assignments + email
     const { data: newTeacher } = await sbClient.from('teachers').select('id').eq('teacher_code', code).single();
     const newTeacherId = newTeacher?.id || null;
+    const classTeacherIds = Array.from(document.querySelectorAll('#tf-class-teacher-list input[name="tf-class-teacher"]:checked'))
+      .map(input => input.value);
+    if (classTeacherIds.length) {
+      if (!newTeacherId) throw new Error('Teacher was created, but the teacher profile could not be loaded for Class Teacher assignment.');
+      const { error: classTeacherError } = await sbClient.rpc('rms_set_class_teacher_assignments', {
+        p_teacher_id: newTeacherId,
+        p_class_ids: classTeacherIds
+      });
+      if (classTeacherError) throw new Error('Teacher was registered, but Class Teacher assignments could not be saved: ' + classTeacherError.message);
+      DB.invalidate('classes');
+    }
     let assignedClassNames = [];
     let assignedSubjectNames = [];
     let activeYearId = null;
@@ -786,9 +937,9 @@ async function teacherSave() {
       email,
       phone,
       teacherCode: code,
-      classes: assignedClassNames,
+      classes: [...new Set([...assignedClassNames, ...classTeacherIds.map(id => tfAssignmentClassLookup[id]).filter(Boolean)])],
       subjects: assignedSubjectNames,
-      educationLevel: 'Primary'
+      educationLevel: teacherEducationLabel(educationLevel)
     };
 
     let welcomeResult = { success: true, emailSent: false, smsSent: false, emailStatus: 'pending', smsStatus: 'pending' };
@@ -812,6 +963,10 @@ async function teacherSave() {
   } finally {
     if (saveBtn) { saveBtn.disabled = false; saveBtn.innerHTML = '<i data-lucide="save"></i> Save & Send Welcome'; }
     if (typeof lucide !== 'undefined') lucide.createIcons();
+    document.querySelectorAll('#te-class-teacher-list input[name="te-class-teacher"]').forEach(input => input.addEventListener('change', () => {
+      if (input.checked) teAssignedClassTeacherIds.add(String(input.value));
+      else teAssignedClassTeacherIds.delete(String(input.value));
+    }));
   }
 }
 
@@ -886,7 +1041,20 @@ function showWelcomeResultModal(name, email, phone, code, result) {
   document.querySelector('[data-modal-close="true"]')?.addEventListener('click', () => Modal.close());
 }
 
-function teacherEdit(t) {
+async function teacherEdit(t) {
+  let classes;
+  try {
+    classes = (await DB.get('classes')).filter(c => teacherMatchesScope(c))
+      .sort((a, b) => String(a.name || '').localeCompare(String(b.name || '')));
+  } catch (error) {
+    Utils.toast('Could not load classes for Class Teacher assignment: ' + (error.message || 'database request failed'), 'error');
+    return;
+  }
+  teAvailableClasses = classes;
+  teAssignedClassTeacherIds = new Set(classes.filter(c => String(c.class_teacher_id || '') === String(t.id)).map(c => String(c.id)));
+  const educationLevel = ['PRIMARY', 'SECONDARY', 'BOTH'].includes(String(t.education_level || '').toUpperCase())
+    ? String(t.education_level).toUpperCase() : '';
+  const visibleClassTeacherClasses = classes.filter(c => teacherLevelMatchesClass(educationLevel, c));
   document.getElementById('modal-root').innerHTML = `
     <div class="modal-overlay">
       <div class="modal"><div class="modal-header">Edit Teacher</div><div class="modal-body">
@@ -895,7 +1063,26 @@ function teacherEdit(t) {
         <div class="form-group"><label>Email</label><input id="te-email" class="input-field" value="${Utils.escapeHtml(t.email || '')}"></div>
         <div class="form-group"><label>Phone</label><input id="te-phone" class="input-field" value="${Utils.escapeHtml(t.phone || '')}"></div>
         <div class="form-group"><label>Status</label><select id="te-status" class="select-field"><option value="active" ${t.status === 'active' ? 'selected' : ''}>Active</option><option value="inactive" ${t.status === 'inactive' ? 'selected' : ''}>Inactive</option></select></div>
-        <div class="alert alert-info" style="margin-bottom:0"><i data-lucide="info"></i> Education level is driven by the classes this teacher is assigned to (see Assignments).</div>
+        <div class="form-group"><label>Education Level <span class="required">*</span></label>
+          <select id="te-education-level" class="select-field" required onchange="teacherEditEducationLevelChanged()">
+            ${teacherEducationOptions(educationLevel)}
+          </select>
+        </div>
+        <div class="form-group"><label>Class Teacher Assignment</label>
+          <div id="te-class-teacher-list" style="display:grid;gap:7px;max-height:190px;overflow-y:auto;padding:10px;border:1px solid var(--gray-200);border-radius:10px">
+            ${visibleClassTeacherClasses.length ? visibleClassTeacherClasses.map(c => `<label style="display:flex;align-items:center;gap:8px;font-weight:500">
+              <input type="checkbox" name="te-class-teacher" value="${Utils.escapeHtml(String(c.id))}" ${teAssignedClassTeacherIds.has(String(c.id)) ? 'checked' : ''}>
+              <span>${Utils.escapeHtml(c.name || c.level || ('Class ' + c.id))} <small class="text-muted">(${Utils.escapeHtml(EducationLevels.getCategory(c))})</small></span>
+            </label>`).join('') : '<span class="text-sm text-muted">No classes available in your education-level scope.</span>'}
+          </div>
+          <p class="form-hint">Selected classes are the teacher’s Class Teacher responsibilities. Each class has one primary Class Teacher; selecting a class assigned to someone else transfers it.</p>
+        </div>
+        <div class="form-group">
+          <label>Subject Teaching Assignments</label>
+          <p class="form-hint">Manage the teacher’s assigned classes and subjects by education level. The assignments page only displays records permitted by your DOS scope.</p>
+          <button type="button" class="btn btn-outline" id="teacher-edit-assignments-btn"><i data-lucide="link"></i> Manage Classes &amp; Subjects</button>
+        </div>
+        <div class="alert alert-info" style="margin-bottom:0"><i data-lucide="info"></i> Access is restricted to the selected education level and the teacher’s explicit subject/class assignments.</div>
       </div><div class="modal-footer">
         <button class="btn btn-danger" id="teacher-edit-delete-btn"><i data-lucide="trash-2"></i> Delete</button>
         <span style="flex:1"></span>
@@ -905,6 +1092,10 @@ function teacherEdit(t) {
 
   document.querySelector('[data-close-modal="true"]')?.addEventListener('click', () => Modal.close());
   document.getElementById('teacher-update-btn')?.addEventListener('click', () => teacherUpdate(t.id));
+  document.getElementById('teacher-edit-assignments-btn')?.addEventListener('click', () => {
+    if (typeof assignFilter !== 'undefined') assignFilter = String(t.id);
+    Router.go('admin/assignments');
+  });
   document.getElementById('teacher-edit-delete-btn')?.addEventListener('click', () => teacherDelete(t));
   const overlay = document.querySelector('#modal-root .modal-overlay');
   if (overlay) {
@@ -917,13 +1108,37 @@ function teacherEdit(t) {
 
 async function teacherUpdate(id) {
   try {
+    const educationLevel = document.getElementById('te-education-level')?.value || '';
+    if (!['PRIMARY', 'SECONDARY', 'BOTH'].includes(educationLevel)) {
+      return Utils.toast('Select the teacher education level', 'error');
+    }
     await DB.update('teachers', id, {
       teacher_code: document.getElementById('te-code').value,
       full_name: document.getElementById('te-name').value,
       email: document.getElementById('te-email').value,
       phone: document.getElementById('te-phone').value,
+      education_level: educationLevel,
       status: document.getElementById('te-status').value
     });
+    const teacher = (await DB.query('teachers', 'user_id', { id }))[0];
+    if (teacher?.user_id) {
+      const { error: userUpdateError } = await sbClient.from('users')
+        .update({ education_level: educationLevel === 'BOTH' ? 'all' : educationLevel.toLowerCase() })
+        .eq('id', teacher.user_id);
+      if (userUpdateError) throw new Error('Teacher profile was updated, but the account education level failed: ' + userUpdateError.message);
+      DB.invalidate('users');
+    }
+    const isActive = document.getElementById('te-status').value === 'active';
+    const selectedClassIds = isActive
+      ? Array.from(document.querySelectorAll('#te-class-teacher-list input[name="te-class-teacher"]:checked')).map(input => input.value)
+      : [];
+    const { error: classTeacherError } = await sbClient.rpc('rms_set_class_teacher_assignments', {
+      p_teacher_id: id,
+      p_class_ids: selectedClassIds
+    });
+    if (classTeacherError) throw new Error('Teacher profile was updated, but Class Teacher assignments failed: ' + classTeacherError.message);
+    DB.invalidate('classes');
+    DB.invalidate('teachers');
     Modal.close();
     Utils.toast('Updated', 'success');
     renderTeachers();
@@ -942,7 +1157,13 @@ async function teacherDeactivate(id) {
 
 async function confirmTeacherDeactivate(id) {
   try {
+    const { error: classTeacherError } = await sbClient.rpc('rms_set_class_teacher_assignments', {
+      p_teacher_id: id,
+      p_class_ids: []
+    });
+    if (classTeacherError) throw classTeacherError;
     await DB.update('teachers', id, { status: 'inactive' });
+    DB.invalidate('classes');
     Modal.close();
     Utils.toast('Teacher deactivated', 'success');
     renderTeachers();

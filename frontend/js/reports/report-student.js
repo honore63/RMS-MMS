@@ -86,7 +86,8 @@ const ReportStudent = {
     else if (termId) filter.term_id = termId;
     if (assessmentTypeId) filter.assessment_type_id = assessmentTypeId;
     if (assessmentIds && assessmentIds.length) filter.id = assessmentIds;
-    if (typeof Auth !== 'undefined' && Auth.isTeacher && Auth.isTeacher()) filter.teacher_id = Auth.getTeacherId();
+    // RLS limits subject teachers to assigned assessments and Class Teachers
+    // to assessments in their assigned classes.
     let list = await DB.query('assessments', '*', filter, { column: 'assessment_date', asc: true });
     /* Bulk-combine conversion helpers never feed report cards. */
     list = (list || []).filter(a => !(Utils.isConversionHelper && Utils.isConversionHelper(a)));
@@ -98,7 +99,7 @@ const ReportStudent = {
       const tSet = new Set(termIds.map(String));
       list = list.filter(a => !a.term_id || tSet.has(String(a.term_id)));
     }
-    const official = list.filter(a => ['approved', 'locked'].includes(a.status));
+    const official = list.filter(a => ['submitted', 'approved', 'locked'].includes(a.status));
     const pending = list.filter(a => a.status === 'submitted');
     const drafts = list.filter(a => !['approved', 'locked', 'submitted'].includes(a.status));
     let approval = 'DRAFT';
@@ -378,7 +379,7 @@ const ReportStudent = {
     if (!learners.length) throw new Error('No active learners found in the selected class.');
     const effTermIds = termIds && termIds.length ? termIds : (termId ? [termId] : null);
     const { official, approval } = await this.loadAssessments({ classId, yearId, termId, termIds: effTermIds, assessmentTypeId, subjectIds, assessmentIds });
-    if (!official.length) throw new Error('No approved or locked assessments found for this class, year and term. This report cannot be finalized because marks are incomplete.');
+    if (!official.length) throw new Error('No submitted, approved or locked assessments found for this class, year and term. This report cannot be finalized because marks are incomplete.');
     const allMarks = await this.fetchMarksByAssessments(official.map(a => a.id), learners.map(l => l.id));
     const cards = [];
     for (const learner of learners) {
@@ -470,6 +471,7 @@ const ReportStudent = {
     const s = settings || {};
     const ministryLogo = s.ministry_logo_url || 'public/logo.webp';
     const schoolLogo = s.school_logo_url || s.logo_url || 'public/logo.webp';
+    const { email, phone } = ReportHeader.getSchoolContact(s);
     const motto = 'Education, Work and Success';
     const stream = cls?.stream || learner?.stream || 'General';
     const dob = learner?.date_of_birth || learner?.dob || '';
@@ -482,7 +484,6 @@ const ReportStudent = {
         : `<td>${c.obtained}</td>`).join('');
       return `<tr><td class="src-subject">${Utils.escapeHtml(r.subject.name)}</td>${compTds}<td><strong>${r.hasMarks ? r.obtained : '—'}</strong></td><td><strong>${r.pct == null ? 'N/A' : r.pct.toFixed(1)}</strong></td><td><strong>${r.grade}</strong></td></tr>`;
     }).join('');
-
     const compHeaders = cols.map(c => `<th>${Utils.escapeHtml(c.code)}<br><span style="font-size:8px;font-weight:400">${Utils.escapeHtml(c.sub || '')}</span></th>`).join('');
     const totalTds = cols.map((c, ci) => {
       const t = totals[ci];
@@ -506,7 +507,7 @@ const ReportStudent = {
           <div class="src-school-line small">${Utils.escapeHtml(s.sector || 'GAHINI SECTOR')}</div>
           <div class="src-school-line big">${Utils.escapeHtml(s.school_name || 'RUKARA MODEL SCHOOL')}</div>
           <div class="src-school-meta">School Code: ${Utils.escapeHtml(s.school_code || '541023')}</div>
-          <div class="src-school-meta">E-mail: ${Utils.escapeHtml(s.school_email || s.email || '')} &nbsp;|&nbsp; Phone: ${Utils.escapeHtml(s.school_phone || s.phone || '')}</div>
+          <div class="src-school-meta">E-mail: ${Utils.escapeHtml(email)} &nbsp;|&nbsp; Phone: ${Utils.escapeHtml(phone)}</div>
         </div>
         <div class="src-head-right">
           <img src="${Utils.escapeHtml(schoolLogo)}" class="src-logo" alt="School logo" onerror="this.style.display='none'">

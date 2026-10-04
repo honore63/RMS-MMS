@@ -114,7 +114,8 @@ const Utils = {
     if (typeof GradingEngine !== 'undefined') {
       return GradingEngine.calculateGradeSync(pct, scale);
     }
-    return { grade: this.grade(pct, scale), descriptor: this.remark(pct, scale), isPass: this.passFail(pct, 50) };
+    const numericPct = Number(pct) || 0;
+    return { grade: this.grade(numericPct, scale), descriptor: this.remark(numericPct, scale), isPass: numericPct >= 50 };
   },
 
   classStats(marks, maxMark) {

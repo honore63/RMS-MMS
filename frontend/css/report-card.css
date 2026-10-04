@@ -338,10 +338,8 @@
 
 /* ── FOOTER ────────────────────────────────────────────────── */
 .rc-absolute-bottom {
-  position: absolute;
-  bottom: 8mm;
-  left: 12mm;
-  right: 12mm;
+  position: static;
+  margin-top: auto;
   font-size: 7pt;
   color: var(--rc-dark-blue);
 }

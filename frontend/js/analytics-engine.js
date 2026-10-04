@@ -161,7 +161,7 @@ const AnalyticsEngine = {
 
     const statusMode = filters.status || 'official';
     if (statusMode === 'official') {
-      assessments = assessments.filter(a => a.status === 'approved' || a.status === 'locked');
+      assessments = assessments.filter(a => a.status === 'submitted' || a.status === 'approved' || a.status === 'locked');
     } else if (statusMode !== 'all') {
       assessments = assessments.filter(a => a.status === statusMode);
     }

@@ -91,6 +91,14 @@ function switchAccountTab(tab) {
   if (teacher) _renderAccountShell(teacher);
 }
 
+function teacherAccountEducationLabel(level) {
+  const normalized = String(level || '').toUpperCase();
+  if (normalized === 'PRIMARY') return 'Primary';
+  if (normalized === 'SECONDARY') return 'Secondary';
+  if (normalized === 'BOTH' || normalized === 'ALL') return 'Primary & Secondary';
+  return 'Not set';
+}
+
 /* ---- PROFILE TAB ---- */
 function _profileTabHtml(t) {
   return `
@@ -135,11 +143,16 @@ function _profileTabHtml(t) {
           <i data-lucide="info"></i>
           <div>
             <strong>Read-Only Fields (DOS Managed)</strong><br>
-            <span class="text-sm">Teacher Code, Email, Role, Assigned Classes, and Account Status can only be changed by the Director of Studies.</span>
+            <span class="text-sm">Teacher Code, Email, Education Level, Role, Assigned Classes, and Account Status can only be changed by the Director of Studies.</span>
           </div>
         </div>
 
         <div class="form-row" style="background:var(--gray-50);padding:16px;border-radius:var(--radius);border:1px solid var(--gray-200);margin-bottom:4px">
+          <div class="form-group">
+            <label style="color:var(--gray-500)">Education Level (Read-Only)</label>
+            <input class="input-field" value="${Utils.escapeHtml(teacherAccountEducationLabel(t.education_level))}" readonly style="background:var(--gray-100);color:var(--gray-500);cursor:not-allowed">
+            <p class="form-hint">Your assigned academic data is restricted to this level.</p>
+          </div>
           <div class="form-group">
             <label style="color:var(--gray-500)">Teacher Code (Read-Only)</label>
             <div style="display:flex;align-items:center;gap:10px">

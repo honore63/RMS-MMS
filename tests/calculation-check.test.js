@@ -147,3 +147,17 @@ test('forced assessment type synchronization seeds missing canonical rows for DO
   assert.equal(rows.length, Utils.ASSESSMENT_TYPES.length);
   assert.ok(rows.some(row => row.name === 'Other' && row.id.startsWith('seeded-')));
 });
+
+test('grade info fallback should expose a boolean pass status', () => {
+  const Utils = loadUtils();
+  assert.deepEqual(Utils.gradeInfo(82, null), {
+    grade: 'A',
+    descriptor: 'Excellent',
+    isPass: true
+  });
+  assert.deepEqual(Utils.gradeInfo(49, null), {
+    grade: 'F',
+    descriptor: 'Fail',
+    isPass: false
+  });
+});

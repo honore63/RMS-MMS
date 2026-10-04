@@ -953,14 +953,21 @@ CREATE OR REPLACE FUNCTION public.rms_report_teacher_has_class(p_class_id UUID)
 RETURNS boolean LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public AS $fn$
   SELECT EXISTS (SELECT 1 FROM public.users u JOIN public.teachers t ON t.user_id = u.id
     JOIN public.teacher_assignments ta ON ta.teacher_id = t.id
-    WHERE u.id = auth.uid() AND u.role = 'teacher' AND u.status = 'active' AND ta.class_id = p_class_id);
+    WHERE u.id = auth.uid() AND u.role = 'teacher' AND u.status = 'active' AND ta.class_id = p_class_id)
+    OR EXISTS (SELECT 1 FROM public.users u JOIN public.teachers t ON t.user_id = u.id
+      JOIN public.classes c ON c.class_teacher_id = t.id
+      WHERE u.id = auth.uid() AND u.role = 'teacher' AND u.status = 'active' AND c.id = p_class_id);
 $fn$;
 
 CREATE OR REPLACE FUNCTION public.rms_report_teacher_has_subject(p_subject_id UUID)
 RETURNS boolean LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public AS $fn$
   SELECT EXISTS (SELECT 1 FROM public.users u JOIN public.teachers t ON t.user_id = u.id
     JOIN public.teacher_assignments ta ON ta.teacher_id = t.id
-    WHERE u.id = auth.uid() AND u.role = 'teacher' AND u.status = 'active' AND ta.subject_id = p_subject_id);
+    WHERE u.id = auth.uid() AND u.role = 'teacher' AND u.status = 'active' AND ta.subject_id = p_subject_id)
+    OR EXISTS (SELECT 1 FROM public.users u JOIN public.teachers t ON t.user_id = u.id
+      JOIN public.classes c ON c.class_teacher_id = t.id
+      JOIN public.assessments a ON a.class_id = c.id
+      WHERE u.id = auth.uid() AND u.role = 'teacher' AND u.status = 'active' AND a.subject_id = p_subject_id);
 $fn$;
 
 CREATE OR REPLACE FUNCTION public.rms_report_teacher_has_learner(p_class_id UUID)
@@ -1008,7 +1015,9 @@ RETURNS BOOLEAN LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public, p
   SELECT CASE public.rms_account_role()
     WHEN 'dos' THEN EXISTS (SELECT 1 FROM public.classes c WHERE c.id = p_class_id AND public.rms_dos_can_level(c.education_level))
     WHEN 'teacher' THEN EXISTS (SELECT 1 FROM public.teacher_assignments ta WHERE ta.class_id = p_class_id AND ta.teacher_id = public.rms_account_teacher_id())
+      OR EXISTS (SELECT 1 FROM public.classes c WHERE c.id = p_class_id AND c.class_teacher_id = public.rms_account_teacher_id())
     WHEN 'headteacher' THEN EXISTS (SELECT 1 FROM public.teacher_assignments ta WHERE ta.class_id = p_class_id AND ta.teacher_id = public.rms_account_teacher_id())
+      OR EXISTS (SELECT 1 FROM public.classes c WHERE c.id = p_class_id AND c.class_teacher_id = public.rms_account_teacher_id())
     ELSE false END;
 $fn$;
 
@@ -1017,7 +1026,11 @@ RETURNS BOOLEAN LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public, p
   SELECT CASE public.rms_account_role()
     WHEN 'dos' THEN EXISTS (SELECT 1 FROM public.subjects s WHERE s.id = p_subject_id AND public.rms_dos_can_subject(s.level))
     WHEN 'teacher' THEN EXISTS (SELECT 1 FROM public.teacher_assignments ta WHERE ta.subject_id = p_subject_id AND ta.teacher_id = public.rms_account_teacher_id())
+      OR EXISTS (SELECT 1 FROM public.classes c WHERE c.class_teacher_id = public.rms_account_teacher_id()
+        AND EXISTS (SELECT 1 FROM public.assessments a WHERE a.class_id = c.id AND a.subject_id = p_subject_id))
     WHEN 'headteacher' THEN EXISTS (SELECT 1 FROM public.teacher_assignments ta WHERE ta.subject_id = p_subject_id AND ta.teacher_id = public.rms_account_teacher_id())
+      OR EXISTS (SELECT 1 FROM public.classes c WHERE c.class_teacher_id = public.rms_account_teacher_id()
+        AND EXISTS (SELECT 1 FROM public.assessments a WHERE a.class_id = c.id AND a.subject_id = p_subject_id))
     ELSE false END;
 $fn$;
 
@@ -1028,9 +1041,24 @@ RETURNS BOOLEAN LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public, p
       WHERE l.id = p_learner_id AND public.rms_dos_can_level(c.education_level))
     WHEN 'teacher' THEN EXISTS (SELECT 1 FROM public.learners l JOIN public.teacher_assignments ta ON ta.class_id = l.class_id
       WHERE l.id = p_learner_id AND ta.teacher_id = public.rms_account_teacher_id())
+      OR EXISTS (SELECT 1 FROM public.learners l JOIN public.classes c ON c.id = l.class_id
+        WHERE l.id = p_learner_id AND c.class_teacher_id = public.rms_account_teacher_id())
     WHEN 'headteacher' THEN EXISTS (SELECT 1 FROM public.learners l JOIN public.teacher_assignments ta ON ta.class_id = l.class_id
       WHERE l.id = p_learner_id AND ta.teacher_id = public.rms_account_teacher_id())
+      OR EXISTS (SELECT 1 FROM public.learners l JOIN public.classes c ON c.id = l.class_id
+        WHERE l.id = p_learner_id AND c.class_teacher_id = public.rms_account_teacher_id())
     ELSE false END;
+$fn$;
+
+-- Class teacher (classes.class_teacher_id) gets a READ-ONLY view of the
+-- assessments/marks of their class. Never used on write policies.
+CREATE OR REPLACE FUNCTION public.rms_class_teacher_can_assessment(p_assessment_id UUID)
+RETURNS BOOLEAN LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public, pg_temp AS $fn$
+  SELECT EXISTS (
+    SELECT 1 FROM public.teachers t JOIN public.classes c ON c.class_teacher_id = t.id
+    WHERE t.user_id = auth.uid()
+      AND EXISTS (SELECT 1 FROM public.assessments a WHERE a.id = p_assessment_id AND a.class_id = c.id)
+  );
 $fn$;
 
 CREATE OR REPLACE FUNCTION public.rms_account_can_assessment(p_assessment_id UUID)
@@ -1040,7 +1068,9 @@ RETURNS BOOLEAN LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public, p
       JOIN public.subjects s ON s.id = a.subject_id WHERE a.id = p_assessment_id
       AND public.rms_dos_can_level(c.education_level) AND public.rms_dos_can_subject(s.level))
     WHEN 'teacher' THEN public.rms_teacher_can_assessment(p_assessment_id)
+      OR public.rms_class_teacher_can_assessment(p_assessment_id)
     WHEN 'headteacher' THEN public.rms_teacher_can_assessment(p_assessment_id)
+      OR public.rms_class_teacher_can_assessment(p_assessment_id)
     ELSE false END;
 $fn$;
 
@@ -1535,7 +1565,8 @@ CREATE POLICY rms_account_users_select ON public.users FOR SELECT TO authenticat
   USING (public.rms_account_can_access_user(id));
 DROP POLICY IF EXISTS rms_account_users_insert ON public.users;
 CREATE POLICY rms_account_users_insert ON public.users FOR INSERT TO authenticated
-  WITH CHECK ((id = auth.uid() AND role = 'teacher') OR (public.rms_account_role() = 'dos' AND role = 'teacher'));
+  WITH CHECK ((id = auth.uid() AND role = 'teacher')
+    OR (public.rms_account_role() = 'dos' AND role IN ('teacher', 'parent')));
 DROP POLICY IF EXISTS rms_account_users_update ON public.users;
 CREATE POLICY rms_account_users_update ON public.users FOR UPDATE TO authenticated
   USING (public.rms_account_can_access_user(id)) WITH CHECK (public.rms_account_can_access_user(id));
@@ -1612,6 +1643,9 @@ CREATE POLICY rms_dos_level_guard ON public.classes AS RESTRICTIVE FOR ALL TO au
 DROP POLICY IF EXISTS rms_report_teacher_classes_select ON public.classes;
 CREATE POLICY rms_report_teacher_classes_select ON public.classes FOR SELECT
   USING (public.rms_report_teacher_has_class(classes.id));
+
+CREATE INDEX IF NOT EXISTS idx_classes_class_teacher_id ON public.classes(class_teacher_id)
+  WHERE class_teacher_id IS NOT NULL;
 
 -- --- subjects ---
 DROP POLICY IF EXISTS rms_subjects_select ON public.subjects;
@@ -1722,7 +1756,8 @@ CREATE POLICY rms_dos_level_guard ON public.teacher_assignments AS RESTRICTIVE F
 DROP POLICY IF EXISTS rms_assessments_select ON public.assessments;
 CREATE POLICY rms_assessments_select ON public.assessments FOR SELECT
   USING (public.rms_dos_can_level((SELECT c.education_level FROM public.classes c WHERE c.id = assessments.class_id))
-    OR public.rms_teacher_can_view_assessment_row(assessments.teacher_id, assessments.class_id, assessments.subject_id, assessments.academic_year_id));
+    OR public.rms_teacher_can_view_assessment_row(assessments.teacher_id, assessments.class_id, assessments.subject_id, assessments.academic_year_id)
+    OR public.rms_class_teacher_can_assessment(assessments.id));
 DROP POLICY IF EXISTS rms_assessments_insert ON public.assessments;
 CREATE POLICY rms_assessments_insert ON public.assessments FOR INSERT
   WITH CHECK ((public.rms_is_dos() AND public.rms_dos_can_level(
@@ -1765,7 +1800,9 @@ CREATE POLICY rms_dos_level_guard ON public.assessments AS RESTRICTIVE FOR ALL T
 -- --- marks ---
 DROP POLICY IF EXISTS rms_marks_select ON public.marks;
 CREATE POLICY rms_marks_select ON public.marks FOR SELECT
-  USING (public.rms_dos_can_marks(marks.assessment_id) OR public.rms_teacher_can_assessment(marks.assessment_id));
+  USING (public.rms_dos_can_marks(marks.assessment_id)
+    OR public.rms_teacher_can_assessment(marks.assessment_id)
+    OR public.rms_class_teacher_can_assessment(marks.assessment_id));
 DROP POLICY IF EXISTS rms_marks_insert ON public.marks;
 CREATE POLICY rms_marks_insert ON public.marks FOR INSERT
   WITH CHECK (public.rms_dos_can_marks(assessment_id) OR public.rms_teacher_can_assessment(assessment_id));
@@ -2350,6 +2387,7 @@ REVOKE ALL ON FUNCTION public.rms_account_can_class(UUID) FROM PUBLIC, anon;
 REVOKE ALL ON FUNCTION public.rms_account_can_subject(UUID) FROM PUBLIC, anon;
 REVOKE ALL ON FUNCTION public.rms_account_can_learner(UUID) FROM PUBLIC, anon;
 REVOKE ALL ON FUNCTION public.rms_account_can_assessment(UUID) FROM PUBLIC, anon;
+REVOKE ALL ON FUNCTION public.rms_class_teacher_can_assessment(UUID) FROM PUBLIC, anon;
 REVOKE ALL ON FUNCTION public.rms_account_can_assessment_fields(UUID, UUID, UUID, UUID) FROM PUBLIC, anon;
 REVOKE ALL ON FUNCTION public.rms_account_can_assignment(UUID, UUID, UUID) FROM PUBLIC, anon;
 REVOKE ALL ON FUNCTION public.rms_account_can_document(UUID) FROM PUBLIC, anon;
@@ -2363,6 +2401,7 @@ GRANT EXECUTE ON FUNCTION public.rms_account_can_class(UUID) TO authenticated;
 GRANT EXECUTE ON FUNCTION public.rms_account_can_subject(UUID) TO authenticated;
 GRANT EXECUTE ON FUNCTION public.rms_account_can_learner(UUID) TO authenticated;
 GRANT EXECUTE ON FUNCTION public.rms_account_can_assessment(UUID) TO authenticated;
+GRANT EXECUTE ON FUNCTION public.rms_class_teacher_can_assessment(UUID) TO authenticated;
 GRANT EXECUTE ON FUNCTION public.rms_account_can_assessment_fields(UUID, UUID, UUID, UUID) TO authenticated;
 GRANT EXECUTE ON FUNCTION public.rms_account_can_assignment(UUID, UUID, UUID) TO authenticated;
 GRANT EXECUTE ON FUNCTION public.rms_account_can_document(UUID) TO authenticated;

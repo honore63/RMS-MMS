@@ -25,11 +25,23 @@
 .rw-search input { width:100%; padding:8px 10px 8px 32px; border:1px solid var(--gray-200); border-radius:8px; font-size:13px; }
 .rw-search i { position:absolute; left:10px; top:50%; transform:translateY(-50%); width:14px; height:14px; color:var(--gray-400); }
 .rw-list { max-height:320px; overflow:auto; border:1px solid var(--gray-200); border-radius:10px; padding:8px; background:#fff; }
-.rw-opt { display:flex; align-items:center; gap:10px; padding:8px 10px; border-radius:8px; cursor:pointer; font-size:13px; color:var(--gray-700); }
+.rw-opt { display:flex; align-items:center; gap:10px; padding:8px 10px; border-radius:8px; cursor:pointer; font-size:13px; color:var(--gray-700); border:1px solid transparent; }
 .rw-opt:hover { background:var(--gray-50); }
 .rw-opt input { accent-color:var(--blue-600); }
+.rw-opt:has(input:checked) { background:var(--blue-50); border-color:var(--blue-200); box-shadow:inset 3px 0 0 var(--blue-600); }
+.rw-opt:has(input:checked) .rw-opt-title { color:var(--blue-700); }
 .rw-opt-title { font-weight:600; }
 .rw-opt-sub { font-size:11px; color:var(--gray-500); }
+.rw-chips { display:flex; flex-wrap:wrap; gap:6px; margin:2px 0 10px; }
+.rw-chips.rw-chips-empty { margin-bottom:4px; }
+.rw-chips-more { font-size:11px; color:var(--gray-500); font-weight:600; margin:-2px 0 8px; }
+.rw-chip { display:inline-flex; align-items:center; gap:6px; max-width:100%; background:var(--blue-50); border:1px solid var(--blue-200); color:var(--blue-700); font-size:12px; font-weight:600; border-radius:999px; padding:3px 6px 3px 10px; }
+.rw-chip-none { background:var(--gray-50); border-color:var(--gray-200); color:var(--gray-500); font-weight:500; }
+.rw-chip .rw-chip-label { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; max-width:220px; }
+.rw-chip-x { border:none; background:transparent; color:var(--blue-600); cursor:pointer; font-size:15px; line-height:1; padding:0; border-radius:50%; display:inline-flex; align-items:center; justify-content:center; width:17px; height:17px; }
+.rw-chip-x:hover { background:var(--blue-200); color:var(--blue-700); }
+.rw-chips-group { margin-top:10px; }
+.rw-chips-group-title { font-size:11px; font-weight:700; color:var(--gray-500); text-transform:uppercase; letter-spacing:.04em; margin:0 0 4px; }
 .rw-badge { display:inline-flex; align-items:center; gap:6px; padding:4px 9px; border-radius:999px; font-size:11px; font-weight:700; border:1px solid var(--gray-200); background:var(--gray-50); color:var(--gray-700); }
 .rw-badge.ok { border-color:rgba(34,197,94,.3); background:rgba(34,197,94,.1); color:#15803d; }
 .rw-actions { display:flex; gap:8px; flex-wrap:wrap; align-items:center; }
@@ -44,6 +56,10 @@
 .rw-option-row label { font-size:13px; font-weight:600; color:var(--gray-700); display:flex; align-items:center; gap:8px; }
 .rw-help { font-size:11px; color:var(--gray-500); }
 .rw-toast-err { display:flex; gap:10px; align-items:flex-start; background:#fef2f2; border:1px solid #fecaca; color:#991b1b; padding:10px 12px; border-radius:8px; font-size:13px; margin-bottom:12px; }
+.rw-preview-area { max-height:none; overflow:visible; padding:12px; background:#f1f5f9; border:1px solid #cbd5e1; border-radius:10px; }
+.rw-preview-area #rw-report-container { overflow:visible; }
+.rw-preview-area .rms-a4-container { overflow:visible !important; }
+.rw-preview-area .rms-page-break { height:24px !important; margin:16px 0 !important; border-bottom:2px dashed #94a3b8; }
 
 /* Compact generic reports while leaving the detailed student card untouched. */
 .rms-a4-container:not(:has(.src-sheet)) .rms-report-header { margin-bottom:6px; }

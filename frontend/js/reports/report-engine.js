@@ -29,15 +29,6 @@ function filterReportAssessments(assessments, subjects, cls = null) {
   return (assessments || []).filter(assessment => allowedSubjectIds.has(String(assessment.subject_id)) && !(Utils.isConversionHelper && Utils.isConversionHelper(assessment)));
 }
 
-function applyTeacherAssessmentScope(filter) {
-  if (typeof Auth !== 'undefined' && Auth.isTeacher && Auth.isTeacher()) {
-    const teacherId = Auth.getTeacherId();
-    if (!teacherId) throw new Error('Teacher profile is not available.');
-    filter.teacher_id = teacherId;
-  }
-  return filter;
-}
-
 async function validateTeacherReportScope(config) {
   if (typeof Auth === 'undefined' || !Auth.isTeacher || !Auth.isTeacher()) return;
   const teacherId = Auth.getTeacherId();
@@ -46,16 +37,28 @@ async function validateTeacherReportScope(config) {
   const pairs = new Set((assignments || []).map(a => `${a.class_id}|${a.subject_id}`));
   const classIds = config.classIds || [];
   const subjectIds = config.subjectIds || [];
-  if (classIds.some(classId => !(assignments || []).some(a => String(a.class_id) === String(classId)))) {
-    throw new Error('One or more selected classes are not assigned to you.');
+  const classRows = classIds.length
+    ? await DB.query('classes', 'id,class_teacher_id', { id: classIds })
+    : [];
+  const classTeacherIds = new Set((classRows || [])
+    .filter(cls => String(cls.class_teacher_id) === String(teacherId))
+    .map(cls => String(cls.id)));
+  for (const classId of classIds) {
+    const assigned = (assignments || []).some(a => String(a.class_id) === String(classId));
+    if (!assigned && !classTeacherIds.has(String(classId))) {
+      throw new Error('One or more selected classes are not assigned to you.');
+    }
   }
-  if (subjectIds.length && classIds.length && subjectIds.some(subjectId => !classIds.some(classId => pairs.has(`${classId}|${subjectId}`)))) {
+  if (subjectIds.length && classIds.length && subjectIds.some(subjectId =>
+    !classIds.some(classId =>
+      classTeacherIds.has(String(classId)) || pairs.has(`${classId}|${subjectId}`)))) {
     throw new Error('One or more selected subjects are not assigned to you for the selected class.');
   }
   if (config.assessmentIds && config.assessmentIds.length) {
     const assessments = await DB.query('assessments', 'id,class_id,subject_id,teacher_id', { id: config.assessmentIds });
-    if (assessments.some(a => String(a.teacher_id) !== String(teacherId) || !pairs.has(`${a.class_id}|${a.subject_id}`))) {
-      throw new Error('One or more selected assessments are not authorized for you.');
+    for (const a of assessments) {
+      const ok = String(a.teacher_id) === String(teacherId) || classTeacherIds.has(String(a.class_id));
+      if (!ok) throw new Error('One or more selected assessments are not authorized for you.');
     }
   }
 }
@@ -196,10 +199,12 @@ const ReportEngine = {
     const levelSubjects = filterReportSubjects(subjects, cls).filter(s => !s.level || s.level === 'Both' || s.level === eduCat);
 
     const yearScope = year && year.id ? year.id : undefined;
-    const assessFilter = applyTeacherAssessmentScope({ class_id: classId, status: ['approved', 'locked'] });
-    if (yearScope) assessFilter.academic_year_id = yearScope;
-    if (term && term.id) assessFilter.term_id = term.id;
-    const assessments = await DB.query('assessments', '*', assessFilter, { column: 'assessment_date', asc: false });
+    const assessments = await this._queryTermScopedAssessments({
+      classIds: [classId],
+      termIds: term && term.id ? [term.id] : null,
+      year: { id: yearScope },
+      status: ['submitted', 'approved', 'locked']
+    });
     const validAssessments = assessments.filter(a => levelSubjects.some(s => s.id === a.subject_id) && !(Utils.isConversionHelper && Utils.isConversionHelper(a)));
     const assessIds = validAssessments.map(a => a.id);
 
@@ -254,7 +259,7 @@ const ReportEngine = {
     } else if (assessmentId) {
       assessments = await DB.get('assessments', { id: assessmentId }).then(r => r[0] ? [r[0]] : []);
     } else {
-      const f={ class_id: classId, academic_year_id: year.id || undefined, status: ['approved', 'locked'] };
+      const f={ class_id: classId, academic_year_id: year.id || undefined, status: ['submitted', 'approved', 'locked'] };
       if (termIds && termIds.length) f.term_id = termIds;
       else if (term && term.id) f.term_id = term.id;
       assessments = await DB.query('assessments', '*', f, { column: 'assessment_date', asc: false });
@@ -329,24 +334,21 @@ const ReportEngine = {
       : { name: selectedSubjects.map(item => item.name).join(', ') || 'Selected Subjects' };
     const learners = await ReportUtils.getLearners(classId);
 
-    const filter = applyTeacherAssessmentScope({ class_id: classId, academic_year_id: year.id || undefined, subject_id: selectedSubjectIds, status: ['approved', 'locked'] });
-    if (teacherId) filter.teacher_id = teacherId;
-    if (assessmentIds && assessmentIds.length) filter.id = assessmentIds;
-    if (termIds && termIds.length) filter.term_id = termIds;
-    else if (term && term.id && !assessmentIds) filter.term_id = term.id;
-    let rawAssess = await DB.query('assessments', '*', filter, { column: 'assessment_date', asc: false });
-    if (termIds && termIds.length){
-      const tSet=new Set(termIds.map(String));
-      rawAssess = rawAssess.filter(a=> !a.term_id || tSet.has(String(a.term_id)));
-    }
+    const rawAssess = await this._queryTermScopedAssessments({
+      classIds: [classId],
+      subjectIds: selectedSubjectIds,
+      assessmentIds,
+      termIds,
+      year,
+      term: !termIds?.length ? term : null,
+      assessmentTypeId: ctx.assessmentTypeId,
+      status: ['submitted', 'approved', 'locked']
+    });
+    let scopedAssessments = rawAssess;
     if (ctx.assessmentTypeId) {
-      rawAssess = rawAssess.filter(a => String(a.assessment_type_id) === String(ctx.assessmentTypeId));
+      scopedAssessments = scopedAssessments.filter(a => String(a.assessment_type_id) === String(ctx.assessmentTypeId));
     }
-    if (assessmentIds && assessmentIds.length) {
-      const aSet=new Set(assessmentIds.map(String));
-      rawAssess = rawAssess.filter(a=> aSet.has(String(a.id)));
-    }
-    const assessments = filterReportAssessments(rawAssess, scopedSubjects, cls);
+    const assessments = filterReportAssessments(scopedAssessments, scopedSubjects, cls);
     const assessIds = assessments.map(a => a.id);
 
     const allMarks = await DB.query('marks', '*', { assessment_id: assessIds }, { column: 'learner_id' });
@@ -388,10 +390,30 @@ const ReportEngine = {
     const posMap = {};
     positions.forEach(p => posMap[p.id] = p.position);
 
+    /* Per-assessment breakdown: max mark, marks entered, total marks, average
+       mark and average percentage for every included assessment. */
+    const assessmentBreakdown = assessments.map(a => {
+      const marksFor = allMarks.filter(m => String(m.assessment_id) === String(a.id) && m.mark != null && m.mark !== '');
+      const count = marksFor.length;
+      const total = marksFor.reduce((s, m) => s + Number(m.mark), 0);
+      const max = Number(a.maximum_mark) || 0;
+      return {
+        id: a.id,
+        name: a.display_name || a.name || a.unit || 'Assessment',
+        periodLabel: a.period_label || null,
+        date: a.assessment_date,
+        maximum_mark: max,
+        count,
+        total: count ? total : 0,
+        average: count ? total / count : 0,
+        percentage: count && max ? Utils.pct(total, max) : 0
+      };
+    }).sort((a, b) => String(a.date || '').localeCompare(String(b.date || '')));
+
     return {
       type: 'subject-performance', title: 'SUBJECT PERFORMANCE SUMMARY',
       settings, cls, subject, year, term, teacherId, totalLearners: learners.length,
-      assessedCount: pcts.length, missingMarks: learners.length - pcts.length, stats, rangeDistribution, gradeDistribution, learnerRows, positions: posMap, scale, passMark, assessments
+      assessedCount: pcts.length, missingMarks: learners.length - pcts.length, stats, rangeDistribution, gradeDistribution, learnerRows, positions: posMap, scale, passMark, assessments, assessmentBreakdown
     };
   },
 
@@ -407,14 +429,15 @@ const ReportEngine = {
       const sSet=new Set(subjectIds.map(String));
       filteredSubjects = subjects.filter(s=> sSet.has(String(s.id)));
     }
-    const qFilter=applyTeacherAssessmentScope({ class_id: classId, academic_year_id: year.id || undefined, status: ['approved', 'locked'] });
-    if (termIds && termIds.length) qFilter.term_id = termIds;
-    else if (term && term.id) qFilter.term_id = term.id;
-    if (assessmentIds && assessmentIds.length) qFilter.id = assessmentIds;
-    if (subjectIds && subjectIds.length) qFilter.subject_id = subjectIds;
-    let raw = await DB.query('assessments', '*', qFilter, { column: 'assessment_date', asc: false });
-    if (termIds && termIds.length){ const tSet=new Set(termIds.map(String)); raw=raw.filter(a=> !a.term_id || tSet.has(String(a.term_id))); }
-    if (assessmentIds && assessmentIds.length){ const aSet=new Set(assessmentIds.map(String)); raw=raw.filter(a=> aSet.has(String(a.id))); }
+    const raw = await this._queryTermScopedAssessments({
+      classIds: [classId],
+      subjectIds,
+      assessmentIds,
+      termIds,
+      year,
+      term: !termIds?.length ? term : null,
+      status: ['submitted', 'approved', 'locked']
+    });
     const assessments = filterReportAssessments(raw, filteredSubjects, cls);
     const assessIds = assessments.map(a => a.id);
     const allMarks = assessIds.length ? await DB.query('marks', '*', { assessment_id: assessIds }, { column: 'learner_id' }) : [];
@@ -532,13 +555,13 @@ const ReportEngine = {
     if (subjectIds && subjectIds.length){ const sSet=new Set(subjectIds.map(String)); subjects=subjects.filter(s=> sSet.has(String(s.id))); }
     const classIds = classes.map(cls => cls.id);
     const learners = classIds.length ? await DB.query('learners', '*', { class_id: classIds, status: 'active' }) : [];
-    const qf={ class_id: classIds.length? classIds: undefined, academic_year_id: year.id || undefined, status: ['approved', 'locked'] };
+    const qf={ class_id: classIds.length? classIds: undefined, academic_year_id: year.id || undefined, status: ['submitted', 'approved', 'locked'] };
     if (termIds && termIds.length) qf.term_id = termIds;
     else if (term && term.id) qf.term_id = term.id;
     if (assessmentIds && assessmentIds.length) qf.id = assessmentIds;
     if (subjectIds && subjectIds.length) qf.subject_id = subjectIds;
     if (!qf.class_id) delete qf.class_id;
-    let raw = qf.class_id || qf.term_id || qf.subject_id || qf.id ? await DB.query('assessments', '*', qf, { column: 'assessment_date', asc: false }) : await DB.query('assessments', '*', { academic_year_id: year.id||undefined, status:['approved','locked'] }, {column:'assessment_date', asc:false});
+    let raw = qf.class_id || qf.term_id || qf.subject_id || qf.id ? await DB.query('assessments', '*', qf, { column: 'assessment_date', asc: false }) : await DB.query('assessments', '*', { academic_year_id: year.id||undefined, status:['submitted','approved','locked'] }, {column:'assessment_date', asc:false});
     if (termIds && termIds.length){ const tSet=new Set(termIds.map(String)); raw=raw.filter(a=> !a.term_id || tSet.has(String(a.term_id))); }
     if (assessmentIds && assessmentIds.length){ const aSet=new Set(assessmentIds.map(String)); raw=raw.filter(a=> aSet.has(String(a.id))); }
     if (cfgClassIds && cfgClassIds.length){ const cSet=new Set(cfgClassIds.map(String)); raw=raw.filter(a=> cSet.has(String(a.class_id))); }
@@ -605,7 +628,7 @@ const ReportEngine = {
     if (termIds && termIds.length){ const tSet=new Set(termIds.map(String)); rawAssess=rawAssess.filter(a=> !a.term_id || tSet.has(String(a.term_id))); }
     if (assessmentIds && assessmentIds.length){ const aSet=new Set(assessmentIds.map(String)); rawAssess=rawAssess.filter(a=> aSet.has(String(a.id))); }
     const assessments = filterReportAssessments(rawAssess, subjects).filter(assessment => scopedAssignments.some(assignment => String(assignment.class_id) === String(assessment.class_id) && String(assignment.subject_id) === String(assessment.subject_id)));
-    const approvedAssessments = assessments.filter(a => ['approved', 'locked'].includes(a.status));
+    const approvedAssessments = assessments.filter(a => ['submitted', 'approved', 'locked'].includes(a.status));
     const submittedAssessments = assessments.filter(a => a.status === 'submitted');
     const assessIds = approvedAssessments.map(a => a.id);
     const learners = await DB.query('learners', '*', { class_id: classIds, status: 'active' });
@@ -647,13 +670,13 @@ const ReportEngine = {
     if (subjectIds && subjectIds.length){ const sSet=new Set(subjectIds.map(String)); subjects=subjects.filter(s=> sSet.has(String(s.id))); }
     const classIds = classes.map(cls => cls.id);
     const learners = classIds.length ? await DB.query('learners', '*', { class_id: classIds, status: 'active' }) : [];
-    const qf={ class_id: classIds.length? classIds: undefined, academic_year_id: year.id || undefined, status: ['approved', 'locked'] };
+    const qf={ class_id: classIds.length? classIds: undefined, academic_year_id: year.id || undefined, status: ['submitted', 'approved', 'locked'] };
     if (termIds && termIds.length) qf.term_id = termIds;
     else if (term && term.id) qf.term_id = term.id;
     if (assessmentIds && assessmentIds.length) qf.id = assessmentIds;
     if (subjectIds && subjectIds.length) qf.subject_id = subjectIds;
     if (!qf.class_id) delete qf.class_id;
-    let raw = qf.class_id || qf.term_id || qf.subject_id || qf.id ? await DB.query('assessments', '*', qf, { column: 'assessment_date', asc: false }) : await DB.query('assessments', '*', { academic_year_id: year.id||undefined, status:['approved','locked'] }, {column:'assessment_date', asc:false});
+    let raw = qf.class_id || qf.term_id || qf.subject_id || qf.id ? await DB.query('assessments', '*', qf, { column: 'assessment_date', asc: false }) : await DB.query('assessments', '*', { academic_year_id: year.id||undefined, status:['submitted','approved','locked'] }, {column:'assessment_date', asc:false});
     if (termIds && termIds.length){ const tSet=new Set(termIds.map(String)); raw=raw.filter(a=> !a.term_id || tSet.has(String(a.term_id))); }
     if (assessmentIds && assessmentIds.length){ const aSet=new Set(assessmentIds.map(String)); raw=raw.filter(a=> aSet.has(String(a.id))); }
     if (cfgClassIds && cfgClassIds.length){ const cSet=new Set(cfgClassIds.map(String)); raw=raw.filter(a=> cSet.has(String(a.class_id))); }
@@ -710,7 +733,7 @@ const ReportEngine = {
   },
 
   async _queryTermScopedAssessments({ classIds, subjectIds, assessmentIds, termIds, year, term, status, assessmentTypeId }) {
-    const qf = applyTeacherAssessmentScope({ academic_year_id: (year && year.id) ? year.id : undefined });
+    const qf = { academic_year_id: (year && year.id) ? year.id : undefined };
     if (status && status.length) qf.status = status;
     if (classIds && classIds.length) qf.class_id = classIds;
     if (subjectIds && subjectIds.length) qf.subject_id = subjectIds;
@@ -718,7 +741,32 @@ const ReportEngine = {
     if (assessmentTypeId) qf.assessment_type_id = assessmentTypeId;
     if (termIds && termIds.length) qf.term_id = termIds;
     else if (term && term.id) qf.term_id = term.id;
-    let raw = await DB.query('assessments', '*', qf, { column: 'assessment_date', asc: false });
+    let raw;
+    if (typeof Auth !== 'undefined' && Auth.isTeacher && Auth.isTeacher()) {
+      const teacherId = Auth.getTeacherId();
+      if (!teacherId) throw new Error('Teacher profile is not available.');
+      const selectedClassIds = classIds && classIds.length ? classIds : null;
+      const classFilter = selectedClassIds
+        ? { id: selectedClassIds }
+        : { class_teacher_id: teacherId };
+      const classes = await DB.query('classes', 'id,class_teacher_id', classFilter);
+      const classTeacherIds = (classes || [])
+        .filter(cls => String(cls.class_teacher_id) === String(teacherId))
+        .map(cls => cls.id);
+      const teacherFilter = { ...qf, teacher_id: teacherId };
+      const ownAssessments = await DB.query('assessments', '*', teacherFilter, { column: 'assessment_date', asc: false });
+      const classAssessments = classTeacherIds.length
+        ? await DB.query('assessments', '*', { ...qf, class_id: classTeacherIds }, { column: 'assessment_date', asc: false })
+        : [];
+      const unique = new Map();
+      [...(ownAssessments || []), ...(classAssessments || [])].forEach(assessment => {
+        unique.set(String(assessment.id), assessment);
+      });
+      raw = [...unique.values()];
+    } else {
+      raw = await DB.query('assessments', '*', qf, { column: 'assessment_date', asc: false });
+    }
+    raw = (raw || []).sort((a, b) => String(b.assessment_date || '').localeCompare(String(a.assessment_date || '')));
     if (termIds && termIds.length) { const tSet = new Set(termIds.map(String)); raw = raw.filter(a => !a.term_id || tSet.has(String(a.term_id))); }
     if (assessmentIds && assessmentIds.length) { const aSet = new Set(assessmentIds.map(String)); raw = raw.filter(a => aSet.has(String(a.id))); }
     if (assessmentTypeId) raw = raw.filter(a => String(a.assessment_type_id) === String(assessmentTypeId));
@@ -752,7 +800,7 @@ const ReportEngine = {
         if (!classSubjects.length) continue;
       }
       const classIds = [cls.id];
-      let ass = await this._queryTermScopedAssessments({ classIds, subjectIds: (scope === 'subject' ? subjectIds : null), assessmentIds, termIds, year, term, status: ['approved', 'locked'] });
+      let ass = await this._queryTermScopedAssessments({ classIds, subjectIds: (scope === 'subject' ? subjectIds : null), assessmentIds, termIds, year, term, status: ['submitted', 'approved', 'locked'] });
       if (scope === 'class') {
         const allowed = new Set(filterReportSubjects(allSubjects, cls).map(s => String(s.id)));
         ass = ass.filter(a => allowed.has(String(a.subject_id)));
@@ -828,7 +876,7 @@ const ReportEngine = {
     const subjects = await ReportUtils.getSubjects({ status: 'active' });
     const levelSubjects = filterReportSubjects(subjects, cls);
     const educat = EducationLevels.getCategory(cls);
-    let ass = await this._queryTermScopedAssessments({ classIds: [cls.id], subjectIds, assessmentIds, termIds, year, term, status: ['approved', 'locked'] });
+    let ass = await this._queryTermScopedAssessments({ classIds: [cls.id], subjectIds, assessmentIds, termIds, year, term, status: ['submitted', 'approved', 'locked'] });
     ass = ass.filter(a => levelSubjects.some(s => String(s.id) === String(a.subject_id)));
     if (!ass.length) throw new Error('No approved assessment marks are available for this student in the selected period.');
 
@@ -880,7 +928,7 @@ const ReportEngine = {
     const subject = wanted[0] || null;
     if (!subject) throw new Error('Select a valid subject for the selected class.');
 
-    let ass = await this._queryTermScopedAssessments({ classIds: [cls.id], subjectIds: [subject.id], assessmentIds, termIds, year, term, status: ['approved', 'locked'] });
+    let ass = await this._queryTermScopedAssessments({ classIds: [cls.id], subjectIds: [subject.id], assessmentIds, termIds, year, term, status: ['submitted', 'approved', 'locked'] });
     if (!ass.length) throw new Error('No approved assessments found for this subject in the selected period.');
     const learners = await ReportUtils.getLearners(classId);
     const marks = await DB.query('marks', '*', { assessment_id: ass.map(a => a.id) });
@@ -908,7 +956,7 @@ const ReportEngine = {
     const allSubjects = await DB.get('subjects');
     const subjectsById = new Map(allSubjects.map(s => [String(s.id), s]));
     const classMap = new Map(classes.map(c => [String(c.id), c]));
-    let raw = await this._queryTermScopedAssessments({ classIds: classes.map(c => c.id), subjectIds, assessmentIds, termIds, year, term, status: ['approved', 'locked'], assessmentTypeId });
+    let raw = await this._queryTermScopedAssessments({ classIds: classes.map(c => c.id), subjectIds, assessmentIds, termIds, year, term, status: ['submitted', 'approved', 'locked'], assessmentTypeId });
     let ass = (raw || []).filter(a => classMap.has(String(a.class_id)) && subjectMatchesReportScope(subjectsById.get(String(a.subject_id)), classMap.get(String(a.class_id))));
     if (!ass.length) throw new Error('No approved assessments are available for the selected period.');
 

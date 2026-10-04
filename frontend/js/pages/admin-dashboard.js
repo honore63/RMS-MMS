@@ -43,10 +43,10 @@ async function renderAdminDashboard() {
       ? await DB.count('learners')
       : classIds.length ? await DB.count('learners', { class_id: classIds }) : 0;
 
-    const completed = assessments.filter(a => ['approved','locked'].includes(a.status)).length;
+    const completed = assessments.filter(a => ['submitted','approved','locked'].includes(a.status)).length;
     const pending = assessments.filter(a => a.status === 'draft').length;
     const submitted = assessments.filter(a => a.status === 'submitted').length;
-    const approved = assessments.filter(a => a.status === 'approved' || a.status === 'locked').length;
+    const approved = assessments.filter(a => a.status === 'submitted' || a.status === 'approved' || a.status === 'locked').length;
 
     const recent = [...assessments].sort((x, y) => String(y.created_at||'').localeCompare(String(x.created_at||''))).slice(0, 8);
     const recentSubjectIds = [...new Set(recent.map(a => a.subject_id).filter(Boolean))];

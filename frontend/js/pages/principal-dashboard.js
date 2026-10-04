@@ -31,7 +31,7 @@ async function renderPrincipalDashboard() {
 
     const pendingMarks = marks.filter(m => m.status === 'draft').length;
     const submittedMarks = marks.filter(m => m.status === 'submitted').length;
-    const approvedMarks = marks.filter(m => m.status === 'locked').length;
+    const approvedMarks = marks.filter(m => m.status === 'submitted' || m.status === 'approved' || m.status === 'locked').length;
 
     const recentAssessments = assessments
       .sort((a, b) => new Date(b.created_at) - new Date(a.created_at))

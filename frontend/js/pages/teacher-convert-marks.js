@@ -935,31 +935,6 @@ function bulkRenderPreview() {
 
 /* ---------------- Reports: print / pdf / excel / word ---------------- */
 
-function bulkCssLinks() {
-  const base = new URL('.', window.location.href).href;
-  return `<link rel="preconnect" href="https://fonts.googleapis.com"><link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;600;700;800&display=swap" rel="stylesheet"><link rel="stylesheet" href="${new URL('css/styles.css', base).href}"><link rel="stylesheet" href="${new URL('css/report-card.css', base).href}"><link rel="stylesheet" href="${new URL('css/student-report-card.css?v=20260924-9', base).href}"><link rel="stylesheet" href="${new URL('css/report-wizard.css', base).href}">`;
-}
-
-function bulkPrintCss(orientation) {
-  const pageRule = orientation === 'landscape' ? 'size: A4 landscape; margin: 0;' : 'size: A4 portrait; margin: 0;';
-  return `<style>
-    @page{${pageRule}}
-    *{ -webkit-print-color-adjust:exact !important; print-color-adjust:exact !important; }
-    html,body{margin:0 !important; padding:0 !important; background:#fff !important; font-family:'Poppins', Arial, Helvetica, sans-serif !important; font-size:10pt !important; color:#0f172a !important; line-height:1.45 !important;}
-    .rms-a4-container{box-sizing:border-box !important; width:297mm !important; min-height:210mm !important; height:auto !important; max-width:none !important; box-shadow:none !important; border:1.2px solid #1e3a5f !important; margin:0 !important; background:#fff !important; padding:8mm !important; overflow:visible !important;}
-    .rms-a4-container.rms-a4-landscape{width:297mm !important; height:auto !important;}
-    .rms-report-header{border-bottom:2px solid #1e3a5f !important; padding-bottom:7px !important; margin-bottom:8px !important;}
-    table{width:100% !important; border-collapse:collapse !important; font-size:8pt !important; border:1.5px solid #1e3a5f !important;}
-    th{background:#dbe7f2 !important; color:#1e3a5f !important; font-weight:800 !important; border:1px solid #1e3a5f !important; padding:4px 4px !important; text-transform:uppercase; font-size:7.5pt !important;}
-    td{border:1px solid #1e3a5f !important; padding:3px 4px !important; color:#111827 !important;}
-    tr{page-break-inside:avoid !important; break-inside:avoid !important;}
-    thead{display:table-header-group !important;}
-    .rms-page-break{page-break-after:always !important; break-after:page !important;}
-    .no-print{display:none !important;}
-    img{max-height:58px !important; object-fit:contain !important;}
-  </style>`;
-}
-
 function bulkFilename(ext) {
   const c = bulkConvert.conversion;
   const safe = v => String(v || '').replace(/[^a-zA-Z0-9]+/g, '_').replace(/^_+|_+$/g, '').slice(0, 40);
@@ -967,47 +942,25 @@ function bulkFilename(ext) {
   return parts.join('_') + '.' + ext;
 }
 
-function bulkOpenWindow(html, title, autoPrint, orientation) {
-  const w = window.open('', '_blank');
-  if (!w) { Utils.toast('Allow pop-ups to preview and print', 'error'); return null; }
-  const script = autoPrint ? `<script>window.onload=function(){setTimeout(function(){window.focus();window.print();},750);};<\/script>` : '';
-  w.document.write(`<!DOCTYPE html><html><head><meta charset="utf-8"><title>${Utils.escapeHtml(title || 'RMS-MIS Report')}</title>${bulkCssLinks()}${bulkPrintCss(orientation)}</head><body style="background:#fff">${html}${script}</body></html>`);
-  w.document.close();
-  return w;
-}
-
 function bulkPreviewTab() {
   if (!bulkConvert?.conversion) return Utils.toast('Select assessments first', 'error');
   const { html } = bulkBuildReportHtml();
-  bulkOpenWindow(html, 'Marks Conversion Report — Preview', false, 'landscape');
+  if (typeof ReportCenter === 'undefined') return Utils.toast('The report preview service is unavailable. Please reload and try again.', 'error');
+  ReportCenter.openPreviewDocument(html, 'Marks Conversion Report — Preview', 'landscape');
 }
 
 function bulkPrintReport() {
   if (!bulkConvert?.conversion) return Utils.toast('Select assessments first', 'error');
   const { html } = bulkBuildReportHtml();
-  bulkOpenWindow(html, 'Marks Conversion Report', true, 'landscape');
+  if (typeof ReportCenter === 'undefined') return Utils.toast('The report print service is unavailable. Please reload and try again.', 'error');
+  ReportCenter.printDocument(html, 'Marks Conversion Report', bulkFilename('pdf'), 'landscape');
 }
 
 async function bulkDownloadPdf() {
   if (!bulkConvert?.conversion) return Utils.toast('Select assessments first', 'error');
   const { html } = bulkBuildReportHtml();
-  const filename = bulkFilename('pdf');
-  const pdfHtml = `<!DOCTYPE html><html><head><meta charset="utf-8"><title>${Utils.escapeHtml(filename)}</title>${bulkCssLinks()}${bulkPrintCss('landscape')}</head><body style="background:#fff">${html}</body></html>`;
-  const host = window.location.hostname;
-  if (host && host !== 'localhost' && host !== '127.0.0.1') {
-    try {
-      const r = await fetch('/api/reports/pdf', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ html: pdfHtml, filename }) });
-      if (r.ok) {
-        const b = await r.blob();
-        const u = URL.createObjectURL(b);
-        const a = document.createElement('a'); a.href = u; a.download = filename;
-        document.body.appendChild(a); a.click(); a.remove(); URL.revokeObjectURL(u);
-        Utils.toast('PDF downloaded', 'success'); return;
-      }
-    } catch (e) { /* fall through */ }
-  }
-  bulkOpenWindow(pdfHtml, filename, true, 'landscape');
-  Utils.toast('Use the print dialog → Save as PDF', 'info');
+  if (typeof ReportCenter === 'undefined') return Utils.toast('The report download service is unavailable. Please reload and try again.', 'error');
+  await ReportCenter.downloadPdfDocument(html, bulkFilename('pdf'), 'landscape');
 }
 
 function bulkDownloadExcel() {

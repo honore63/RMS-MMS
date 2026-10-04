@@ -3,6 +3,13 @@ const ReportHeader = {
     return typeof getSchoolSettings === 'function' ? getSchoolSettings() : {};
   },
 
+  getSchoolContact(settings = {}) {
+    return {
+      email: settings.school_email || settings.email || 'rukaramodelschool@gmail.com',
+      phone: settings.school_phone || settings.phone || '0792045452'
+    };
+  },
+
   getOfficialHeader(opts = {}) {
     const s = opts.settings || {};
     const title = opts.title || 'REPORT';
@@ -14,8 +21,7 @@ const ReportHeader = {
     const schoolLogo = s.school_logo_url || s.logo_url || 'public/logo.webp';
     const schoolName = s.school_name || 'RUKARA MODEL SCHOOL';
     const schoolCode = s.school_code || '541023';
-    const email = s.school_email || '';
-    const phone = s.school_phone || '';
+    const { email, phone } = this.getSchoolContact(s);
     const country = s.country || 'Republic of Rwanda';
     const ministry = s.ministry || 'Ministry of Education';
     const province = s.province || 'Eastern Province';
@@ -117,9 +123,11 @@ const ReportHeader = {
     return '<div class="rms-page-break" style="page-break-after:always; height:0; margin:0; padding:0;"></div>';
   },
 
-  getA4Container(html, orientation = 'portrait', multiPage = false) {
+  getA4Container(html, orientation = 'portrait', multiPage = false, extraClass = '') {
     const isLandscape = orientation === 'landscape';
-    const cls = (isLandscape ? 'rms-a4-container rms-a4-landscape' : 'rms-a4-container') + (multiPage ? ' rms-report-document' : '');
+    const cls = (isLandscape ? 'rms-a4-container rms-a4-landscape' : 'rms-a4-container')
+      + (multiPage ? ' rms-report-document' : '')
+      + (extraClass ? ` ${extraClass}` : '');
     return `
       <div class="${cls}" data-report-orientation="${orientation}">
         ${html}

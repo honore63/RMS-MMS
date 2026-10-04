@@ -236,7 +236,7 @@ async function openCreateAssessment() {
     <div class="cas-section">
       <div class="cas-section-title"><i data-lucide="calendar" style="width:14px;height:14px"></i> 3 — When & how much?</div>
       <div class="form-row"><div class="form-group"><label>Academic Year</label><input class="input-field" value="${Utils.escapeHtml(years.find(y => String(y.id) === String(activeYear.id))?.name || activeYear.name || '')}" disabled></div><div class="form-group"><label>Term <span class="required">*</span></label><select id="cas-term" class="select-field">${casTerms.map(t => `<option value="${t.id}" ${selectedTerm && String(t.id) === String(selectedTerm.id) ? 'selected' : ''}>${Utils.escapeHtml(t.name)}</option>`).join('')}</select></div></div>
-      <div class="form-row"><div class="form-group"><label>Assessment Date <span class="required">*</span></label><input id="cas-date" type="date" class="input-field" value="${dateStr}"></div><div class="form-group"><label>Maximum Marks <span class="required">*</span></label><select id="cas-max" class="select-field">${[10, 20, 30, 40, 50, 100].map(m => `<option value="${m}" ${m === (casTypes[0]?.default_maximum_mark ?? 30) ? 'selected' : ''}>${m}</option>`).join('')}</select></div></div>
+      <div class="form-row"><div class="form-group"><label>Assessment Date <span class="required">*</span></label><input id="cas-date" type="date" class="input-field" value="${dateStr}"></div><div class="form-group"><label>Maximum Marks <span class="required">*</span></label><input id="cas-max" type="number" inputmode="decimal" step="any" min="1" class="input-field" value="${casTypes[0]?.default_maximum_mark ?? 30}"><p class="form-hint">Any value above 0; marks entered are capped at this. Percentages use it, never 100.</p></div></div>
       <div class="form-group"><label>Weight <span class="text-muted">(optional, blank = type default)</span></label><input id="cas-weight" type="number" min="0" step="any" class="input-field" placeholder="e.g., 0.3"></div>
     </div>
     <div class="cas-section" style="margin-bottom:0">
@@ -382,7 +382,7 @@ async function casSave(mode, btn) {
   let label = '';
   const termId = document.getElementById('cas-term').value;
   const date = document.getElementById('cas-date').value;
-  const maximumMark = parseInt(document.getElementById('cas-max').value) || 30;
+  const maximumMark = parseFloat(document.getElementById('cas-max').value);
   const weightRaw = document.getElementById('cas-weight').value.trim();
   const desc = document.getElementById('cas-desc').value.trim();
 
@@ -427,6 +427,7 @@ async function casSave(mode, btn) {
   if (!classId) return fail('Select a class');
   if (!termId) return fail('Select a term');
   if (!date) return fail('Select the assessment date');
+  if (!maximumMark || maximumMark <= 0) return fail('Enter a valid maximum mark (greater than 0)');
 
   const allowed = teacherAssignments.some(a => a.subject_id === subjectId && a.class_id === classId);
   if (!allowed) return fail('You are not authorized for this class/subject combination');

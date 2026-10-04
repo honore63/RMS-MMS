@@ -25,6 +25,11 @@ async function initApp() {
 }
 
 function showLogin(message) {
+  if (window.location.hash.startsWith('#parent-marks')) {
+    window.location.replace('parent-marks.html');
+    return;
+  }
+
   document.getElementById('login-page').style.display = 'flex';
   document.getElementById('app-layout').style.display = 'none';
 
@@ -37,6 +42,10 @@ function showLogin(message) {
 
   const eye = document.getElementById('toggle-password');
   eye.onclick = togglePasswordVisibility;
+  const portalToggle = document.getElementById('login-portal-toggle');
+  if (portalToggle) portalToggle.onclick = () => {
+    window.location.href = 'parent-marks.html';
+  };
 
   const pwd = document.getElementById('login-password');
   pwd.value = '';
@@ -302,7 +311,6 @@ async function handleLogin(e) {
       await Auth.signOut();
       throw new Error('ACCOUNT_INACTIVE');
     }
-
     showApp();
   } catch (err) {
     const msg = err.message;

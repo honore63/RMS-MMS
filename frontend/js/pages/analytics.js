@@ -287,7 +287,7 @@ function analyticsAggregateSections(data, ctx) {
   // Marks completion breakdown (real statuses)
   const entered = totalMarks;
   const submittedCnt = (data.assessments||[]).filter(a=>a.status==='submitted').length;
-  const approvedCnt = (data.assessments||[]).filter(a=>a.status==='approved'||a.status==='locked').length;
+  const approvedCnt = (data.assessments||[]).filter(a=>a.status==='submitted'||a.status==='approved'||a.status==='locked').length;
   // For DOS overview: teacher activity
   const createdCnt = totalAssessments;
   const pendingCnt = (data.assessments||[]).filter(a=>a.status==='draft').length;

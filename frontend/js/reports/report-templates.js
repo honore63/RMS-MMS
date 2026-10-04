@@ -164,6 +164,8 @@ const ReportTemplates = {
 
     const footer = ReportHeader.getFooter({ settings, academicYear: year.name || '', term: term.name || '' });
 
+    const assessRows = (data.assessmentBreakdown || []).map(a => `<tr><td>${Utils.escapeHtml(a.name)}${a.periodLabel ? `<div class="text-xs text-muted">${Utils.escapeHtml(a.periodLabel)}</div>` : ''}</td><td class="text-center">${a.maximum_mark}</td><td class="text-center">${a.count}</td><td class="text-center">${a.total}</td><td class="text-center">${a.count ? Number.isFinite(a.average) ? a.average.toFixed(1) : '-' : '-'}</td><td class="text-center">${ReportUtils.formatPct(a.percentage)}</td></tr>`).join('') || `<tr><td colspan="6">No assessments available for this subject.</td></tr>`;
+
     return `
       ${header}
       <div class="rms-report-title">${data.title}</div>
@@ -182,6 +184,7 @@ const ReportTemplates = {
         <div class="rms-stat"><span class="rms-stat-val">${ReportUtils.formatPct(Math.max(0, 100 - stats.passRate))}</span><span class="rms-stat-lbl">Fail Rate</span></div>
       </div>
       ${scored.length ? `<div class="rms-chart-row">${rangeBars}${gradeDistBars}${ReportUtils.charts.svgDonut({ labels: ['Passed', 'Failed'], values: [stats.passed, stats.failed], colors: ['#16a34a', '#dc2626'], centerLabel: 'Pass rate', centerValue: `${Math.round(stats.passRate || 0)}%` })}</div>` : ReportHeader.emptyState('No marks are currently available for the selected subject.', { icon: 'file-x' })}
+      <h3 class="rms-section-title">Assessment Breakdown</h3><table class="rms-table"><thead><tr><th>Assessment</th><th class="text-center">Max Mark</th><th class="text-center">Marks Entered</th><th class="text-center">Total Marks</th><th class="text-center">Average Mark</th><th class="text-center">Average %</th></tr></thead><tbody>${assessRows}</tbody></table>
       <h3 class="rms-section-title">Marks Range Distribution</h3><table class="rms-table"><thead><tr><th>Mark Range</th><th>Students</th><th>Percentage</th></tr></thead><tbody>${rangeRows || `<tr><td colspan="3">No marks available</td></tr>`}</tbody></table>
       <h3 class="rms-section-title">Grade Distribution</h3><table class="rms-table"><thead><tr><th>Grade</th><th>Students</th><th>Percentage</th></tr></thead><tbody>${gradeRows || `<tr><td colspan="3">No grades available</td></tr>`}</tbody></table>
       <table class="rms-table"><thead><tr><th>Pos</th><th>Name</th><th>Code</th><th>%</th><th>Grade</th><th>Status</th></tr></thead><tbody>${tbody}</tbody></table>

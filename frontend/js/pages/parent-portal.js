@@ -12,8 +12,8 @@ async function renderParentDashboard() {
     const [learner, classes, assessments, marks, subjects, terms] = await Promise.all([
       sbClient.from('learners').select('*').eq('id', learnerId).maybeSingle().then(r => r.data),
       DB.get('classes').catch(() => []),
-      sbClient.from('assessments').select('*').eq('status', 'locked').then(r => r.data || []).catch(() => []),
-      sbClient.from('marks').select('*').eq('learner_id', learnerId).eq('status', 'locked').then(r => r.data || []).catch(() => []),
+      sbClient.from('assessments').select('*').in('status', ['submitted', 'approved', 'locked']).then(r => r.data || []).catch(() => []),
+      sbClient.from('marks').select('*').eq('learner_id', learnerId).in('status', ['submitted', 'approved', 'locked']).then(r => r.data || []).catch(() => []),
       DB.get('subjects').catch(() => []),
       DB.get('terms').catch(() => [])
     ]);
@@ -127,8 +127,8 @@ async function renderParentPerformance() {
       DB.get('classes').catch(() => []),
       DB.get('subjects').catch(() => []),
       DB.get('terms').catch(() => []),
-      sbClient.from('assessments').select('*').eq('status', 'locked').then(r => r.data || []).catch(() => []),
-      sbClient.from('marks').select('*').eq('learner_id', learnerId).eq('status', 'locked').then(r => r.data || []).catch(() => [])
+      sbClient.from('assessments').select('*').in('status', ['submitted', 'approved', 'locked']).then(r => r.data || []).catch(() => []),
+      sbClient.from('marks').select('*').eq('learner_id', learnerId).in('status', ['submitted', 'approved', 'locked']).then(r => r.data || []).catch(() => [])
     ]);
 
     if (!learner) {
@@ -250,8 +250,8 @@ async function renderParentReports() {
     const [learner, classes, assessments, marks, subjects] = await Promise.all([
       sbClient.from('learners').select('*').eq('id', learnerId).maybeSingle().then(r => r.data),
       DB.get('classes').catch(() => []),
-      sbClient.from('assessments').select('*').eq('status', 'locked').then(r => r.data || []).catch(() => []),
-      sbClient.from('marks').select('*').eq('learner_id', learnerId).eq('status', 'locked').then(r => r.data || []).catch(() => []),
+      sbClient.from('assessments').select('*').in('status', ['submitted', 'approved', 'locked']).then(r => r.data || []).catch(() => []),
+      sbClient.from('marks').select('*').eq('learner_id', learnerId).in('status', ['submitted', 'approved', 'locked']).then(r => r.data || []).catch(() => []),
       DB.get('subjects').catch(() => [])
     ]);
 

@@ -148,7 +148,6 @@
   font-weight: 800;
 }
 .src-table tfoot td.src-subject { text-align: left; }
-
 /* ---------- Summary + performance ---------- */
 .src-panels {
   display: flex;

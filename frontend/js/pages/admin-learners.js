@@ -227,18 +227,48 @@ async function learnerSave() {
     if (error) throw error;
     DB.invalidate('learners');
 
-    // Provision parent/student performance account
+    // Provision parent/student performance account. The public.users row must be
+    // created HERE (not lazily on first login), otherwise Auth.fetchOrCreateProfile
+    // derives a default 'teacher' role from the numeric-login email and auto-creates
+    // a bogus teachers row. Mirrors the teacher registration flow in admin-teachers.js.
     try {
       const { data: learnerRow } = await sbClient.from('learners').select('id').eq('learner_code', code).maybeSingle();
       if (learnerRow) {
         const parentEmail = `${code}@rukara.edu`;
-        const { error: signUpErr } = await sbClient.auth.signUp({
+        let { data: currentSessionData } = await sbClient.auth.getSession();
+        let adminSession = currentSessionData?.session || null;
+        const restoreAdminSession = async () => {
+          if (!adminSession) return;
+          const { data: activeSessionData } = await sbClient.auth.getSession();
+          if (activeSessionData?.session?.user?.id !== adminSession.user?.id) {
+            await sbClient.auth.setSession({ access_token: adminSession.access_token, refresh_token: adminSession.refresh_token });
+          }
+        };
+        const { data: signUpData, error: signUpErr } = await sbClient.auth.signUp({
           email: parentEmail,
           password: code,
           options: { data: { full_name: name.toUpperCase(), role: 'parent' } }
         });
-        if (!signUpErr) {
-          await sbClient.from('users').update({ role: 'parent', learner_id: learnerRow.id }).eq('email', parentEmail);
+        let parentAuthId = signUpData?.user?.id || null;
+        if (signUpErr) {
+          const msg = String(signUpErr.message || '');
+          if (/already registered|already exists|user.*exists/i.test(msg)) {
+            const { data: signInData, error: signInErr } = await sbClient.auth.signInWithPassword({ email: parentEmail, password: code });
+            if (signInErr || !signInData?.user?.id) throw signUpErr;
+            parentAuthId = signInData.user.id;
+            await restoreAdminSession();
+          } else {
+            throw signUpErr;
+          }
+        }
+        if (parentAuthId) {
+          const { error: profileErr } = await sbClient.from('users').upsert({
+            id: parentAuthId, email: parentEmail, full_name: name.toUpperCase(),
+            role: 'parent', learner_id: learnerRow.id, status: 'active'
+          }, { onConflict: 'id' });
+          if (profileErr) throw profileErr;
+          await restoreAdminSession();
+          DB.invalidate('users');
         }
       }
     } catch (parentErr) {

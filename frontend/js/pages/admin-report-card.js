@@ -99,7 +99,7 @@ function getOfficialReportCardHtml(years, classes, subjects, terms, filteredTerm
       </div>
       <div class="flex gap-3" style="flex-wrap:wrap">
         <button class="btn btn-primary" onclick="rcGenerate()"><i data-lucide="file-badge" style="width:15px;height:15px"></i> Generate Report</button>
-        <button class="btn btn-secondary" onclick="window.print()"><i data-lucide="printer"></i> Print</button>
+        <button class="btn btn-secondary" onclick="rcPrintReport()"><i data-lucide="printer"></i> Print</button>
         <button class="btn btn-secondary" onclick="rcExportPdf()"><i data-lucide="file-down"></i> Export PDF</button>
       </div>
     </div>
@@ -143,6 +143,13 @@ async function rcGenerate() {
   if (termIds.length === 0) return Utils.toast('Select at least one term', 'error');
   if (rtype === 'individual' && !learnerId) return Utils.toast('Select a student', 'error');
 
+  const previewTab = window.open('', '_blank');
+  if (previewTab) {
+    previewTab.document.write('<!doctype html><html><head><meta charset="utf-8"><title>Preparing RMS-MIS Report</title></head><body style="font:16px Arial,sans-serif;padding:24px">Preparing your complete report preview…</body></html>');
+    previewTab.document.close();
+  } else {
+    Utils.toast('Allow pop-ups to open the complete report preview in a new tab.', 'error');
+  }
   const preview = document.getElementById('rc-preview');
   preview.innerHTML = Utils.loading();
   preview.scrollIntoView({ behavior:'smooth', block:'start' });
@@ -153,8 +160,22 @@ async function rcGenerate() {
     } else {
       await rcBuildIndividualReport({ learnerId, classId, yearId, termIds, allSubjects, selSubjects, annualMode, preview });
     }
+    const paper = document.getElementById('rc-paper');
+    if (previewTab && paper && typeof ReportCenter !== 'undefined') {
+      const className = document.querySelector('#rc-class option:checked')?.textContent || 'Class';
+      ReportCenter.openPreviewDocument(
+        paper.innerHTML,
+        `RMS-MIS ${rtype === 'class' ? 'Class Report Cards' : 'Student Report Card'} — ${className}`,
+        'portrait',
+        rcBuildOutputFilename(),
+        previewTab
+      );
+    }
     if (typeof lucide !== 'undefined') lucide.createIcons();
   } catch (e) {
+    if (previewTab && !previewTab.closed) {
+      previewTab.document.body.innerHTML = `<main style="font:16px Arial,sans-serif;padding:24px"><h1>Report preview failed</h1><p>${Utils.escapeHtml(e.message || 'Unable to generate report.')}</p></main>`;
+    }
     preview.innerHTML = `<div class="card" style="padding:24px;text-align:center;color:#dc2626"><p>${Utils.escapeHtml(e.message)}</p></div>`;
   }
 }
@@ -303,8 +324,7 @@ function rcRenderCard(learner, d) {
   const mMarks = d.allMarks.filter(m => m.learner_id === learner.id);
   const passMark = d.settings.pass_mark || 50;
   const schoolName = d.settings.school_name || 'RUKARA MODEL SCHOOL';
-  const schoolEmail = d.settings.school_email || 'info@rukaramodelschool.rw';
-  const schoolPhone = d.settings.school_phone || '+250 788 123 456';
+  const { email: schoolEmail, phone: schoolPhone } = ReportHeader.getSchoolContact(d.settings);
 
   const subjMaxVals = {};
   d.activeSubjects.forEach(s => {
@@ -530,13 +550,22 @@ function rcRenderCard(learner, d) {
 async function rcExportPdf() {
   const paper = document.getElementById('rc-paper');
   if (!paper) return Utils.toast('Generate a report card first', 'error');
-  const w = window.open('', '_blank');
-  if (!w) return Utils.toast('Allow pop-ups to export PDF', 'error');
-  w.document.write(`<!DOCTYPE html><html><head><meta charset="utf-8"><title>Report Card</title>
-  <link rel="stylesheet" href="${new URL('css/styles.css', window.location.href).href}">
-  <link rel="stylesheet" href="${new URL('css/report-card.css', window.location.href).href}">
-  </head><body class="printable-report rc-print-body">${paper.innerHTML}
-  <script>window.onload=function(){setTimeout(function(){window.print();},500);};<\/script>
-  </body></html>`);
-  w.document.close();
+  if (typeof ReportCenter === 'undefined') return Utils.toast('The report download service is unavailable. Please reload and try again.', 'error');
+  const filename = rcBuildOutputFilename();
+  await ReportCenter.downloadPdfDocument(paper.innerHTML, filename, 'portrait');
+}
+
+function rcBuildOutputFilename() {
+  const safe = value => String(value || '').trim().replace(/[^a-z0-9]+/gi, '_').replace(/^_+|_+$/g, '');
+  const className = document.querySelector('#rc-class option:checked')?.textContent;
+  const yearName = document.querySelector('#rc-year option:checked')?.textContent;
+  return ['RMS-MIS', 'Student_Report_Card', safe(className), safe(yearName)].filter(Boolean).join('_') + '.pdf';
+}
+
+function rcPrintReport() {
+  const paper = document.getElementById('rc-paper');
+  if (!paper) return Utils.toast('Generate a report card first', 'error');
+  if (typeof ReportCenter === 'undefined') return Utils.toast('The report print service is unavailable. Please reload and try again.', 'error');
+  const filename = rcBuildOutputFilename();
+  ReportCenter.printDocument(paper.innerHTML, filename.replace(/\.pdf$/i, ''), filename, 'portrait');
 }

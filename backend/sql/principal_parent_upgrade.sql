@@ -94,19 +94,8 @@ RETURNS boolean LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public, p
   );
 $fn$;
 
--- Check if a parent can access a specific performance comment
-CREATE OR REPLACE FUNCTION public.rms_parent_can_comment(p_comment_id UUID)
-RETURNS boolean LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public, pg_temp AS $fn$
-  SELECT EXISTS (
-    SELECT 1
-    FROM public.users u
-    JOIN public.performance_comments pc ON pc.learner_id = u.learner_id
-    WHERE u.id = auth.uid()
-      AND u.role = 'parent'
-      AND u.status = 'active'
-      AND pc.id = p_comment_id
-  );
-$fn$;
+-- performance_comments is a lookup table (percentage ranges → comment text),
+-- not per-learner data. Parents get read access via rms_is_parent() below.
 
 -- ============================================================================
 -- 4. PRINCIPAL RLS POLICIES (school-wide, no level restriction)
@@ -415,8 +404,8 @@ CREATE POLICY rms_principal_performance_comments_delete ON public.performance_co
 -- 5. PARENT RLS POLICIES (linked learner only, view-only published results)
 -- ============================================================================
 -- Parents can ONLY read data for their linked learner.
--- They can ONLY see assessments that are 'approved' or 'locked' (published).
--- They can ONLY see marks that are 'locked' (published).
+-- They can ONLY see assessments that are 'submitted', 'approved' or 'locked' (published).
+-- They can ONLY see marks that are 'submitted', 'approved' or 'locked' (published).
 -- They CANNOT insert, update, or delete anything.
 
 -- learners table (read-only, linked learner only)
@@ -425,29 +414,29 @@ CREATE POLICY rms_parent_learners_select ON public.learners
   FOR SELECT TO authenticated
   USING (public.rms_parent_can_learner(id));
 
--- assessments table (read-only, linked learner's class, approved/locked only)
+-- assessments table (read-only, linked learner's class, submitted/approved/locked only)
 DROP POLICY IF EXISTS rms_parent_assessments_select ON public.assessments;
 CREATE POLICY rms_parent_assessments_select ON public.assessments
   FOR SELECT TO authenticated
   USING (
     public.rms_parent_can_assessment(id)
-    AND status IN ('approved', 'locked')
+    AND status IN ('submitted', 'approved', 'locked')
   );
 
--- marks table (read-only, linked learner, locked only)
+-- marks table (read-only, linked learner, submitted/approved/locked only)
 DROP POLICY IF EXISTS rms_parent_marks_select ON public.marks;
 CREATE POLICY rms_parent_marks_select ON public.marks
   FOR SELECT TO authenticated
   USING (
     public.rms_parent_can_mark(id)
-    AND status = 'locked'
+    AND status IN ('submitted', 'approved', 'locked')
   );
 
--- performance_comments table (read-only, linked learner)
+-- performance_comments table (read-only, lookup table)
 DROP POLICY IF EXISTS rms_parent_performance_comments_select ON public.performance_comments;
 CREATE POLICY rms_parent_performance_comments_select ON public.performance_comments
   FOR SELECT TO authenticated
-  USING (public.rms_parent_can_comment(id));
+  USING (public.rms_is_parent());
 
 -- assessment_types table (read-only, all types)
 DROP POLICY IF EXISTS rms_parent_assessment_types_select ON public.assessment_types;

@@ -75,7 +75,8 @@ const Auth = {
       try {
         const email = authUser.email.toLowerCase();
         let role = 'teacher';
-        if (email.includes('dos') || email.includes('admin')) role = 'dos';
+        if (/^[0-9]{6,}@/.test(email)) role = 'parent';
+        else if (email.includes('dos') || email.includes('admin')) role = 'dos';
         else if (email.includes('principal') || email.includes('headteacher') || email.includes('head-teacher')) role = 'principal';
         else if (email.includes('parent') || email.includes('student') || email.includes('learner')) role = 'parent';
         const name = authUser.email.split('@')[0].replace(/[._]/g, ' ').replace(/\b\w/g, c => c.toUpperCase());

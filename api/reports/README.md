@@ -3,6 +3,8 @@ Server-side PDF endpoints
 This folder provides the serverless endpoint used by the frontend to generate production-grade PDFs:
 
 - `POST /api/reports/pdf` - accepts JSON { html, filename } and returns a PDF blob.
+- The HTML must contain the complete report, not a preview viewport or screenshot. The endpoint waits for fonts and images before rendering and honors the report's A4 page orientation and CSS page breaks.
+- The response is an attachment using the requested filename. When the endpoint is unavailable (for example, while the frontend is served by a plain static Live Server), the frontend opens the complete report in the browser print dialog so the user can choose **Save as PDF**.
 
 Dependencies
 
