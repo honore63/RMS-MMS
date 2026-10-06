@@ -554,6 +554,58 @@ const ParentMarksPortal = {
         hasMarks
       };
     });
+    const reportSubjects = subjects.map(subject => ({
+      ...subject,
+      id: subject.code || subject.name
+    }));
+    const reportAssessments = assessments.map(item => ({
+      ...item,
+      id: item.assessment_id,
+      subject_id: item.subject_id || item.subject_code,
+      assessment_type_id: item.type_id,
+      weight: item.effective_weight,
+      period_type: item.period_hint
+    }));
+    const reportTypes = [...new Map(reportAssessments.map(item => [
+      String(item.assessment_type_id || item.type),
+      {
+        id: item.assessment_type_id,
+        name: item.type,
+        code: item.type_code,
+        weight: item.effective_weight,
+        period_hint: item.period_hint
+      }
+    ])).values()];
+    const reportTerms = [...new Map(reportAssessments.map(item => [
+      String(item.term_id || item.term),
+      { id: item.term_id || item.term, name: item.term, term_no: item.term_no }
+    ])).values()];
+    const periodReports = ReportStudent.buildPeriodReports({
+      subjects: reportSubjects,
+      assessments: reportAssessments,
+      marks: reportAssessments.map(item => ({
+        assessment_id: item.id,
+        mark: item.mark
+      })),
+      types: reportTypes,
+      terms: reportTerms,
+      scale: data.grading_scale || []
+    });
+    const maximumWeightByKind = { EU: 0, ET: 0 };
+    const validWeights = reportAssessments.length > 0 && reportAssessments.every(item =>
+      item.weight != null && Number(item.weight) > 0);
+    const totalMaximumWeight = validWeights
+      ? reportAssessments.reduce((sum, item) => sum + Number(item.weight), 0)
+      : 0;
+    if (validWeights) reportAssessments.forEach(item => {
+      maximumWeightByKind[ReportStudent.componentKind(item, reportTypes)] += Number(item.weight);
+    });
+    const maximumWeights = totalMaximumWeight > 0
+      ? {
+        EU: Math.round(maximumWeightByKind.EU / totalMaximumWeight * 100),
+        ET: Math.round(maximumWeightByKind.ET / totalMaximumWeight * 100)
+      }
+      : null;
     const columnTotals = columns.map((column, index) => {
       const values = subjRows.map(row => row.components[index]).filter(Boolean);
       return {
@@ -581,6 +633,8 @@ const ParentMarksPortal = {
       columns: columnMeta,
       columnMeta,
       columnTotals,
+      periodReports,
+      maximumWeights,
       totalSubjects: Number(summary.total_subjects || 0),
       withMarks: Number(summary.subjects_with_marks || 0),
       passed: Number(summary.passed_subjects || 0),

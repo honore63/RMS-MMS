@@ -209,6 +209,7 @@ BEGIN
   SELECT coalesce(
     jsonb_agg(
       jsonb_build_object(
+        'id', s.id,
         'name', s.name,
         'code', s.code,
         'assessment_count', m.assessment_count,
@@ -352,16 +353,20 @@ BEGIN
     jsonb_agg(
       jsonb_build_object(
         'subject', s.name,
+        'subject_id', s.id,
         'subject_code', s.code,
         'assessment', coalesce(a.display_name, a.name, a.unit, 'Assessment'),
         'assessment_id', a.id,
         'type', coalesce(atype.name, 'Assessment'),
         'type_id', a.assessment_type_id,
         'type_code', coalesce(atype.code, left(upper(atype.name), 6), 'ASSESS'),
+        'period_hint', atype.period_hint,
         'term', t.name,
         'term_id', a.term_id,
+        'term_no', t.term_no,
         'assessment_date', a.assessment_date,
         'maximum_mark', a.maximum_mark,
+        'effective_weight', coalesce(a.weight, atype.weight),
         'mark', mark.mark,
         'percentage', CASE
           WHEN mark.mark IS NOT NULL AND a.maximum_mark > 0

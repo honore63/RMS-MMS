@@ -162,7 +162,107 @@ const ReportStudent = {
       || col.key === String(a.assessment_type_id || a.name);
   },
 
-  async buildCard({ learner, cls, year, term, subjects, official, types, allMarks, settings, scale, passMark, subjectIds, teacherComment, dosComment, decisionOverride }) {
+  componentKind(assessment, types) {
+    const type = (types || []).find(item =>
+      String(item.id) === String(assessment.assessment_type_id));
+    const hint = String(type?.period_hint || assessment.period_type || '').toLowerCase();
+    const label = `${type?.name || assessment.type || assessment.name || ''} ${type?.code || assessment.type_code || ''}`.toLowerCase();
+    return hint === 'term' || /\b(term|exam|et)\b/.test(label) ? 'ET' : 'EU';
+  },
+
+  buildPeriodReports({ subjects, assessments, marks, types, terms, scale }) {
+    const termMap = new Map((terms || []).map(item => [String(item.id), item]));
+    const groups = new Map();
+    (assessments || []).forEach(assessment => {
+      const termKey = String(assessment.term_id || assessment.term || 'period');
+      if (!groups.has(termKey)) groups.set(termKey, []);
+      groups.get(termKey).push(assessment);
+    });
+    return [...groups.entries()]
+      .sort(([a], [b]) => {
+        const aTerm = termMap.get(a);
+        const bTerm = termMap.get(b);
+        return Number(aTerm?.term_no || 0) - Number(bTerm?.term_no || 0)
+          || String(aTerm?.name || a).localeCompare(String(bTerm?.name || b));
+      })
+      .map(([termKey, periodAssessments]) => {
+        const term = termMap.get(termKey);
+        const kinds = ['EU', 'ET'];
+        const weights = periodAssessments.map(assessment => this.effWeight(assessment, types));
+        const weighted = weights.length > 0 && weights.every(weight => weight != null && weight > 0);
+        const totalWeight = weighted ? weights.reduce((sum, weight) => sum + weight, 0) : 0;
+        const columns = kinds.map(kind => {
+          const related = periodAssessments.filter(assessment =>
+            this.componentKind(assessment, types) === kind);
+          const maximum = related.reduce((sum, assessment) => sum + Number(assessment.maximum_mark || 0), 0);
+          const weight = weighted
+            ? related.reduce((sum, assessment) => sum + this.effWeight(assessment, types), 0)
+            : 0;
+          return {
+            key: kind,
+            label: kind,
+            sub: weighted && totalWeight > 0
+              ? `${Math.round(weight / totalWeight * 100)}%`
+              : ''
+          };
+        });
+        const rows = (subjects || []).map(subject => {
+          const related = periodAssessments.filter(assessment =>
+            String(assessment.subject_id) === String(subject.id));
+          const valid = related
+            .map(assessment => marks.find(mark =>
+              String(mark.assessment_id) === String(assessment.id)))
+            .filter(mark => mark && mark.mark != null && mark.mark !== '');
+          const components = columns.map(column => {
+            const componentAssessments = related.filter(assessment =>
+              this.componentKind(assessment, types) === column.key);
+            const componentMarks = componentAssessments
+              .map(assessment => marks.find(mark =>
+                String(mark.assessment_id) === String(assessment.id)))
+              .filter(mark => mark && mark.mark != null && mark.mark !== '');
+            if (!componentMarks.length) return null;
+            const maximum = componentMarks.reduce((sum, mark) => {
+              const assessment = componentAssessments.find(item =>
+                String(item.id) === String(mark.assessment_id));
+              return sum + Number(assessment?.maximum_mark || 0);
+            }, 0);
+            return {
+              obtained: componentMarks.reduce((sum, mark) => sum + Number(mark.mark), 0),
+              maximum
+            };
+          });
+          const percentage = valid.length
+            ? this.subjectPct(valid, related, types)
+            : null;
+          const obtained = valid.reduce((sum, mark) => sum + Number(mark.mark), 0);
+          const maximum = valid.reduce((sum, mark) => {
+            const assessment = related.find(item =>
+              String(item.id) === String(mark.assessment_id));
+            return sum + Number(assessment?.maximum_mark || 0);
+          }, 0);
+          return {
+            subject,
+            components,
+            maximumComponents: columns.map(column => periodAssessments
+              .filter(assessment => String(assessment.subject_id) === String(subject.id)
+                && this.componentKind(assessment, types) === column.key)
+              .reduce((sum, assessment) => sum + Number(assessment.maximum_mark || 0), 0)),
+            obtained: valid.length ? obtained : null,
+            maximum,
+            percentage,
+            grade: percentage == null ? '—' : ReportUtils.calcGrade(percentage, scale).grade
+          };
+        });
+        return {
+          id: termKey,
+          name: term?.name || periodAssessments[0]?.term || 'Reporting Period',
+          columns,
+          rows
+        };
+      });
+  },
+
+  async buildCard({ learner, cls, year, term, terms = [], subjects, official, types, allMarks, settings, scale, passMark, subjectIds, teacherComment, dosComment, decisionOverride }) {
     const level = this.levelOfClass(cls);
     const eduCat = EducationLevels.getCategory(cls);
     let levelSubjects = (subjects || [])
@@ -193,6 +293,14 @@ const ReportStudent = {
 
     const myMarks = (allMarks || []).filter(m => String(m.learner_id) === String(learner.id));
     const columns = this.typeColumns(official, types);
+    const periodReports = this.buildPeriodReports({
+      subjects: levelSubjects,
+      assessments: official,
+      marks: myMarks,
+      types,
+      terms,
+      scale
+    });
 
     // Per-component column metadata: max sums + weight shares (reference Total row)
     const allWeighted = official.length > 0 && official.every(a => {
@@ -212,6 +320,24 @@ const ReportStudent = {
         sub: allWeighted && totalWeight > 0 ? `(${Math.round((wsum / totalWeight) * 100)}%)` : (max ? `(${max})` : '')
       };
     });
+    const weightByComponent = { EU: 0, ET: 0 };
+    let maximumWeight = 0;
+    let hasAllWeights = official.length > 0;
+    official.forEach(assessment => {
+      const weight = this.effWeight(assessment, types);
+      if (weight == null || weight <= 0) {
+        hasAllWeights = false;
+        return;
+      }
+      weightByComponent[this.componentKind(assessment, types)] += weight;
+      maximumWeight += weight;
+    });
+    const maximumWeights = hasAllWeights && maximumWeight > 0
+      ? {
+        EU: Math.round(weightByComponent.EU / maximumWeight * 100),
+        ET: Math.round(weightByComponent.ET / maximumWeight * 100)
+      }
+      : null;
 
     const subjRows = [];
     let totObt = 0, totMax = 0, withMarks = 0, passed = 0, failed = 0;
@@ -290,6 +416,7 @@ const ReportStudent = {
       type: 'student-card', title: 'STUDENT REPORT CARD',
       settings, learner, cls, year, term, level, eduCat,
       subjRows, columns, columnMeta, columnTotals,
+      periodReports, maximumWeights,
       totalSubjects: levelSubjects.length, withMarks,
       passed, failed, totalObtained: Number(totObt || 0), totalMax: Number(totMax || 0),
       overallPct, overallGrade, overallPf, avg: overallPct,
@@ -327,7 +454,7 @@ const ReportStudent = {
 
   async fetchCardData({ learnerId, classId, yearId, termId, termIds, subjectIds, assessmentIds, assessmentTypeId, teacherComment, dosComment, decisionOverride }) {
     const ctx = await this.loadContext({ classId, yearId, termId, assessmentTypeId });
-    const { year, term, cls, subjects, types, settings, scale, passMark } = ctx;
+    const { year, term, terms, cls, subjects, types, settings, scale, passMark } = ctx;
     if (!cls) throw new Error('Select a valid class.');
     const learner = await DB.get('learners', { id: learnerId }).then(r => r[0]);
     if (!learner) throw new Error('Select a valid student.');
@@ -335,7 +462,7 @@ const ReportStudent = {
     const effTermIds = termIds && termIds.length ? termIds : (termId ? [termId] : null);
     const { official, approval } = await this.loadAssessments({ classId, yearId, termId, termIds: effTermIds, assessmentTypeId, subjectIds, assessmentIds });
     const allMarks = await this.fetchMarksByAssessments(official.map(a => a.id), [learnerId]);
-    const card = await this.buildCard({ learner, cls, year, term, subjects, official, types, allMarks, settings, scale, passMark, subjectIds, teacherComment, dosComment, decisionOverride });
+    const card = await this.buildCard({ learner, cls, year, term, terms, subjects, official, types, allMarks, settings, scale, passMark, subjectIds, teacherComment, dosComment, decisionOverride });
     this.normalizeCardTotals(card);
     card.approval = approval;
     card.pendingCount = 0;
@@ -372,7 +499,7 @@ const ReportStudent = {
 
   async fetchClassCards({ classId, yearId, termId, termIds, subjectIds, assessmentIds, assessmentTypeId, teacherComment, dosComment, decisionOverride }) {
     const ctx = await this.loadContext({ classId, yearId, termId, assessmentTypeId });
-    const { year, term, cls, subjects, types, settings, scale, passMark } = ctx;
+    const { year, term, terms, cls, subjects, types, settings, scale, passMark } = ctx;
     if (!cls) throw new Error('Select a valid class.');
     this.validateSelection({ year, term, cls, learner: null });
     const learners = await ReportUtils.getLearners(classId);
@@ -383,7 +510,7 @@ const ReportStudent = {
     const allMarks = await this.fetchMarksByAssessments(official.map(a => a.id), learners.map(l => l.id));
     const cards = [];
     for (const learner of learners) {
-      const card = await this.buildCard({ learner, cls, year, term, subjects, official, types, allMarks, settings, scale, passMark, subjectIds, teacherComment, dosComment, decisionOverride });
+      const card = await this.buildCard({ learner, cls, year, term, terms, subjects, official, types, allMarks, settings, scale, passMark, subjectIds, teacherComment, dosComment, decisionOverride });
       this.normalizeCardTotals(card);
       card.approval = approval;
       cards.push(card);
@@ -467,7 +594,6 @@ const ReportStudent = {
       : cols.length > 3 || subjRows.length > 16
         ? 'src-sheet-compact'
         : '';
-    const totals = card.columnTotals || [];
     const s = settings || {};
     const ministryLogo = s.ministry_logo_url || 'public/logo.webp';
     const schoolLogo = s.school_logo_url || s.logo_url || 'public/logo.webp';
@@ -478,18 +604,60 @@ const ReportStudent = {
     const now = new Date();
     const genDate = Utils.dateStr(now) + ' ' + now.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' });
 
-    const headRows = subjRows.map((r, i) => {
-      const compTds = (r.components || []).map(c => c == null
-        ? '<td>—</td>'
-        : `<td>${c.obtained}</td>`).join('');
-      return `<tr><td class="src-subject">${Utils.escapeHtml(r.subject.name)}</td>${compTds}<td><strong>${r.hasMarks ? r.obtained : '—'}</strong></td><td><strong>${r.pct == null ? 'N/A' : r.pct.toFixed(1)}</strong></td><td><strong>${r.grade}</strong></td></tr>`;
+    const fmtMark = value => Number(value).toLocaleString('en-US', { maximumFractionDigits: 1 });
+    const periods = card.periodReports || [];
+    const periodRow = (term, subjectId) => term.rows.find(row =>
+      String(row.subject.id) === String(subjectId));
+    const maximumForSubject = (subject, componentIndex) => periods.reduce((sum, period) => {
+      const row = periodRow(period, subject.id);
+      return sum + Number(row?.maximumComponents?.[componentIndex] || 0);
+    }, 0);
+    const totalMaximumForSubject = subject => maximumForSubject(subject, 0) + maximumForSubject(subject, 1);
+    const maximumTotal = subjRows.reduce((sum, row) => sum + totalMaximumForSubject(row.subject), 0);
+    const termHeader = periods.map(period =>
+      `<th colspan="5">${Utils.escapeHtml(period.name)}${year?.name ? ` / ${Utils.escapeHtml(year.name)}` : ''}</th>`
+    ).join('');
+    const termSubHeaders = periods.map(() => '<th>EU</th><th>ET</th><th>TOT</th><th>%</th><th>GR</th>').join('');
+    const termWeightHeaders = periods.map(period =>
+      `<th>${Utils.escapeHtml(period.columns[0]?.sub || '')}</th><th>${Utils.escapeHtml(period.columns[1]?.sub || '')}</th><th>100%</th><th></th><th></th>`
+    ).join('');
+    const rowMarkup = subjRows.map(subjectRow => {
+      const cells = periods.map(period => {
+        const row = periodRow(period, subjectRow.subject.id);
+        const eu = row?.components[0]?.obtained;
+        const et = row?.components[1]?.obtained;
+        return `<td>${eu == null ? '' : fmtMark(eu)}</td><td>${et == null ? '' : fmtMark(et)}</td><td>${row?.obtained == null ? '' : fmtMark(row.obtained)}</td><td>${row?.percentage == null ? '' : `${row.percentage.toFixed(1)}%`}</td><td>${Utils.escapeHtml(row?.grade || '—')}</td>`;
+      }).join('');
+      const total = subjectRow.hasMarks
+        ? `<td>${fmtMark(subjectRow.obtained)}</td><td>${fmtMark(totalMaximumForSubject(subjectRow.subject))}</td><td>${subjectRow.pct.toFixed(1)}%</td><td>${Utils.escapeHtml(subjectRow.grade)}</td>`
+        : `<td></td><td>${fmtMark(totalMaximumForSubject(subjectRow.subject))}</td><td></td><td></td>`;
+      return `<tr><td class="src-subject">${Utils.escapeHtml(subjectRow.subject.name)}</td><td class="src-maximum-cell">${maximumForSubject(subjectRow.subject, 0) || ''}</td><td class="src-maximum-cell">${maximumForSubject(subjectRow.subject, 1) || ''}</td><td class="src-maximum-cell">${totalMaximumForSubject(subjectRow.subject) || ''}</td>${cells}${total}</tr>`;
     }).join('');
-    const compHeaders = cols.map(c => `<th>${Utils.escapeHtml(c.code)}<br><span style="font-size:8px;font-weight:400">${Utils.escapeHtml(c.sub || '')}</span></th>`).join('');
-    const totalTds = cols.map((c, ci) => {
-      const t = totals[ci];
-      return `<td>${t && t.has ? t.obtained : '—'}</td>`;
+    const totalsCells = periods.map(period => {
+      const valid = period.rows.filter(row => row.percentage != null);
+      const eu = valid.reduce((sum, row) => sum + Number(row.components[0]?.obtained || 0), 0);
+      const et = valid.reduce((sum, row) => sum + Number(row.components[1]?.obtained || 0), 0);
+      const obtained = valid.reduce((sum, row) => sum + Number(row.obtained || 0), 0);
+      const maximum = valid.reduce((sum, row) => sum + Number(row.maximum || 0), 0);
+      const pct = maximum > 0 ? obtained / maximum * 100 : null;
+      const grade = pct == null ? '' : ReportUtils.calcGrade(pct, card.scale).grade;
+      return `<td>${valid.length ? fmtMark(eu) : ''}</td><td>${valid.length ? fmtMark(et) : ''}</td><td>${valid.length ? fmtMark(obtained) : ''}</td><td>${pct == null ? '' : `${pct.toFixed(1)}%`}</td><td>${Utils.escapeHtml(grade)}</td>`;
     }).join('');
-    const overallShort = this.shortRemark(card.overallPct, card.scale);
+    const overallGrade = card.overallGrade?.grade || '—';
+    const totalMaximumEU = subjRows.reduce((sum, row) => sum + maximumForSubject(row.subject, 0), 0);
+    const totalMaximumET = subjRows.reduce((sum, row) => sum + maximumForSubject(row.subject, 1), 0);
+    const table = `<div class="src-multi-term-wrap"><table class="src-table src-multi-term-table">
+      <thead>
+        <tr><th rowspan="2" class="src-subject-heading">SUBJECT</th><th colspan="3">MAXIMUM</th>${termHeader}<th colspan="4">Total</th></tr>
+        <tr class="src-multi-term-subhead"><th>EU</th><th>ET</th><th>TOT</th>${termSubHeaders}<th>TOT</th><th>MAX</th><th>%</th><th>GR</th></tr>
+        <tr class="src-multi-term-weight"><th>WEIGHT</th><th>${card.maximumWeights?.EU == null ? '' : `${card.maximumWeights.EU}%`}</th><th>${card.maximumWeights?.ET == null ? '' : `${card.maximumWeights.ET}%`}</th><th>100%</th>${termWeightHeaders}<th></th><th></th><th></th><th></th></tr>
+      </thead>
+      <tbody>
+        <tr class="src-all-subjects-row"><td colspan="${1 + 3 + periods.length * 5 + 4}">All Subjects</td></tr>
+        ${rowMarkup}
+      </tbody>
+      <tfoot><tr><td class="src-subject">Total</td><td>${fmtMark(totalMaximumEU)}</td><td>${fmtMark(totalMaximumET)}</td><td>${fmtMark(maximumTotal)}</td>${totalsCells}<td>${fmtMark(card.totalObtained)}</td><td>${fmtMark(maximumTotal)}</td><td>${card.overallPct == null ? '' : `${card.overallPct.toFixed(1)}%`}</td><td>${Utils.escapeHtml(overallGrade)}</td></tr></tfoot>
+    </table></div>`;
     const posText = card.position ? `${card.position} out of ${card.positionOutOf}` : 'Not available';
 
     return `
@@ -532,21 +700,7 @@ const ReportStudent = {
           <div class="src-info-row"><span class="src-info-lbl">Gender</span><span class="src-info-sep">:</span><span class="src-info-val">${Utils.escapeHtml(learner?.gender === 'M' ? 'Male' : learner?.gender === 'F' ? 'Female' : (learner?.gender || '-'))}</span></div>
         </div>
       </div>
-      <table class="src-table">
-        <colgroup>
-          <col class="src-col-subject">
-          ${cols.map(() => '<col class="src-col-comp">').join('')}
-          <col class="src-col-total">
-          <col class="src-col-pct">
-          <col class="src-col-grade">
-        </colgroup>
-        <thead>
-          <tr><th rowspan="2" style="text-align:left">Subject</th><th colspan="${cols.length || 1}">Assessment Components</th><th rowspan="2">Total</th><th rowspan="2">Percentage<br><span style="font-size:8px;font-weight:400">(%)</span></th><th rowspan="2">Grade</th></tr>
-          <tr>${compHeaders}</tr>
-        </thead>
-        <tbody>${headRows}</tbody>
-        <tfoot><tr><td class="src-subject">Total</td>${totalTds}<td>${card.totalObtained}</td><td>${card.overallPct == null ? 'N/A' : card.overallPct.toFixed(1)}</td><td>${card.overallGrade?.grade || '—'}</td></tr></tfoot>
-      </table>
+      ${table}
       <div class="src-panels">
         <div class="src-panel src-summary">
           <div class="src-panel-title">Summary</div>

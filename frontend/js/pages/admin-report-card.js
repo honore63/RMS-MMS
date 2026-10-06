@@ -181,29 +181,45 @@ async function rcGenerate() {
 }
 
 async function rcFetchLearnerData({ learnerId, classId, yearId, termIds, allSubjects, selSubjects }) {
-  const [learner, cls, allYears, terms, subjects, settings, scale, learnersList] = await Promise.all([
+  const [learner, cls, allYears, terms, subjects, classSubjectRows, assessmentTypes, settings, scale, learnersList] = await Promise.all([
     learnerId ? DB.get('learners', { id: learnerId }).then(r => r[0]) : Promise.resolve(null),
     DB.get('classes', { id: classId }).then(r => r[0]),
     DB.get('academic_years'),
     DB.get('terms'),
     DB.get('subjects'),
+    DB.query('class_subjects', '*', { class_id: classId }),
+    DB.get('assessment_types'),
     typeof getSchoolSettings === 'function' ? getSchoolSettings() : {},
     typeof getGrading === 'function' ? getGrading() : [],
     DB.query('learners', '*', { class_id: classId, status: 'active' }, { column: 'full_name', asc: true })
   ]);
   const year = allYears.find(y => y.id === yearId);
-  const selectedTerms = terms.filter(t => termIds.includes(t.id)).sort((a,b)=> (a.term_no||0)-(b.term_no||0));
-  
-  const clsLevelStr = cls?.level?.toUpperCase().startsWith('S') ? 'Secondary' : 'Primary';
-  const activeSubjects = (allSubjects ? subjects.filter(s => s.status === 'active') : subjects.filter(s => selSubjects.includes(s.id)))
-    .filter(s => !s.level || s.level === 'Both' || s.level === clsLevelStr)
+  const selectedTermIds = new Set((termIds || []).map(String));
+  const selectedTerms = terms.filter(t => selectedTermIds.has(String(t.id))).sort((a,b)=> (a.term_no||0)-(b.term_no||0));
+  const classCategory = typeof EducationLevels !== 'undefined'
+    ? EducationLevels.getCategory(cls)
+    : (/^P[1-6]/i.test(String(cls?.level || cls?.name || '')) ? 'Primary' : 'Secondary');
+  const assignedSubjectIds = new Set((classSubjectRows || []).map(row => String(row.subject_id)));
+  const hasClassSubjectAssignments = assignedSubjectIds.size > 0;
+  const selectedSubjectIds = new Set((selSubjects || []).map(String));
+  const activeSubjects = (subjects || [])
+    .filter(subject => subject.status === 'active' || !subject.status)
+    .filter(subject => allSubjects || selectedSubjectIds.has(String(subject.id)))
+    .filter(subject => {
+      if (hasClassSubjectAssignments && !assignedSubjectIds.has(String(subject.id))) return false;
+      return rcSubjectMatchesLevel(subject, classCategory);
+    })
     .sort((a,b) => a.name.localeCompare(b.name));
+  const activeSubjectIds = new Set(activeSubjects.map(subject => String(subject.id)));
 
   const [approvedA, lockedA] = await Promise.all([
     DB.query('assessments','*',{ class_id: classId, academic_year_id: yearId || undefined, status:'approved' }),
     DB.query('assessments','*',{ class_id: classId, academic_year_id: yearId || undefined, status:'locked' })
   ]);
-  const allAssessments = [...lockedA, ...approvedA].filter(a => !(Utils.isConversionHelper && Utils.isConversionHelper(a)));
+  const allAssessments = [...lockedA, ...approvedA]
+    .filter(a => !(Utils.isConversionHelper && Utils.isConversionHelper(a)))
+    .filter(a => selectedTermIds.has(String(a.term_id)))
+    .filter(a => activeSubjectIds.has(String(a.subject_id)));
   
   let allMarks = [];
   const assessIds = allAssessments.map(a=>a.id);
@@ -216,54 +232,110 @@ async function rcFetchLearnerData({ learnerId, classId, yearId, termIds, allSubj
   // Pre-calculate positions
   const posData = {};
   for (const termId of termIds) {
-    posData[termId] = rcClassPositions(learnersList, allAssessments, allMarks, termId);
+    posData[termId] = rcClassPositions(learnersList, allAssessments, allMarks, termId, activeSubjects, assessmentTypes);
   }
-
-  return { learner, cls, year, selectedTerms, activeSubjects, allAssessments, allMarks, settings, scale, learnersList, posData };
-}
-
-// Check if an assessment is End of Term (ET) vs End of Unit (EU)
-function rcIsET(name) {
-  const n = String(name).toLowerCase();
-  return n.includes('term') || n.includes('exam') || n.includes('et');
-}
-
-function rcCalcSubject(sub, termAssessments, marksForLearner, scale, passMark) {
-  const subAssess = termAssessments.filter(a => a.subject_id === sub.id);
-  if (!subAssess.length) return null;
-
-  let euMax = 0, euObt = 0, hasEu = false;
-  let etMax = 0, etObt = 0, hasEt = false;
-
-  subAssess.forEach(a => {
-    const m = marksForLearner.find(x => x.assessment_id === a.id);
-    const mVal = (m && m.mark != null) ? Number(m.mark) : null;
-    const maxVal = Number(a.maximum_mark) || 0;
-    
-    if (rcIsET(a.name) || rcIsET(a.unit)) {
-      etMax += maxVal;
-      if (mVal != null) { etObt += mVal; hasEt = true; }
-    } else {
-      euMax += maxVal;
-      if (mVal != null) { euObt += mVal; hasEu = true; }
-    }
-  });
-
-  const totMax = euMax + etMax;
-  const totObt = (hasEu ? euObt : 0) + (hasEt ? etObt : 0);
-  const hasMarks = hasEu || hasEt;
-
-  const pct = (hasMarks && totMax > 0) ? Math.round((totObt/totMax)*1000)/10 : null;
-  const gr = pct != null ? rcGrade(pct, scale) : 'N/R';
+  const annualPosData = rcClassPositions(learnersList, allAssessments, allMarks, null, activeSubjects, assessmentTypes);
 
   return {
-    subjectId: sub.id,
-    euMax, etMax, totMax,
-    euObt: hasEu ? euObt : null, 
-    etObt: hasEt ? etObt : null, 
-    totObt: hasMarks ? totObt : null,
-    pct, gr, hasMarks
+    learner, cls, year, selectedTerms, activeSubjects, allAssessments, allMarks,
+    assessmentTypes: assessmentTypes || [], settings, scale, learnersList, posData, annualPosData
   };
+}
+
+function rcSubjectMatchesLevel(subject, category) {
+  const values = [subject.level, subject.education_level]
+    .filter(Boolean)
+    .map(value => String(value).trim().toLowerCase());
+  if (!values.length || values.every(value => value === 'both' || value === 'all')) return true;
+  const mentionsPrimary = values.some(value => value.includes('primary') || value === 'p');
+  const mentionsSecondary = values.some(value => value.includes('secondary') || value === 's');
+  if (category === 'Primary') return mentionsPrimary || !mentionsSecondary;
+  return mentionsSecondary || !mentionsPrimary;
+}
+
+function rcAssessmentType(assessment, types) {
+  return (types || []).find(type => String(type.id) === String(assessment.assessment_type_id)) || null;
+}
+
+function rcAssessmentComponentKey(assessment, types) {
+  const type = rcAssessmentType(assessment, types);
+  const hint = String(type?.period_hint || assessment.period_type || '').toLowerCase();
+  const name = `${type?.name || assessment.name || assessment.unit || ''} ${type?.code || ''}`.toLowerCase();
+  return hint === 'term' || /\b(term|exam|et)\b/.test(name) ? 'ET' : 'EU';
+}
+
+function rcAssessmentComponentLabel(assessment, types) {
+  return rcAssessmentComponentKey(assessment, types);
+}
+
+function rcAssessmentWeight(assessment, types) {
+  if (typeof AnalyticsEngine !== 'undefined' && typeof AnalyticsEngine.effWeight === 'function') {
+    return AnalyticsEngine.effWeight(assessment, types);
+  }
+  if (assessment.weight != null) return Number(assessment.weight);
+  const type = rcAssessmentType(assessment, types);
+  return type?.weight == null ? null : Number(type.weight);
+}
+
+function rcComponentColumns(assessments, types) {
+  return ['EU', 'ET'].map(key => ({
+    key,
+    label: key,
+    assessments: (assessments || []).filter(assessment =>
+      rcAssessmentComponentKey(assessment, types) === key)
+  }));
+}
+
+function rcCalcSubject(sub, termAssessments, marksForLearner, scale, types = []) {
+  const subAssessments = (termAssessments || []).filter(a => String(a.subject_id) === String(sub.id));
+  const byAssessment = new Map((marksForLearner || []).map(mark => [String(mark.assessment_id), mark]));
+  const marks = subAssessments.map(a => byAssessment.get(String(a.id))).filter(mark => mark && mark.mark != null && mark.mark !== '');
+  const pct = marks.length
+    ? (typeof AnalyticsEngine !== 'undefined' && AnalyticsEngine.learnerPct
+      ? AnalyticsEngine.learnerPct(marks, subAssessments, types)
+      : rcRawPercentage(marks, subAssessments))
+    : null;
+  const components = new Map();
+  rcComponentColumns(subAssessments, types).forEach(column => {
+    const componentAssessments = column.assessments;
+    const componentMarks = componentAssessments.map(a => byAssessment.get(String(a.id)))
+      .filter(mark => mark && mark.mark != null && mark.mark !== '');
+    const obtained = componentMarks.reduce((sum, mark) => sum + Number(mark.mark), 0);
+    const maximum = componentAssessments.reduce((sum, a) => sum + Number(a.maximum_mark || 0), 0);
+    components.set(column.key, {
+      obtained: componentMarks.length ? obtained : null,
+      scoredMaximum: componentMarks.reduce((sum, mark) => {
+        const assessment = componentAssessments.find(a => String(a.id) === String(mark.assessment_id));
+        return sum + Number(assessment?.maximum_mark || 0);
+      }, 0),
+      maximum,
+      count: componentAssessments.length
+    });
+  });
+  const obtained = marks.reduce((sum, mark) => sum + Number(mark.mark), 0);
+  const maximum = marks.reduce((sum, mark) => {
+    const assessment = subAssessments.find(a => String(a.id) === String(mark.assessment_id));
+    return sum + Number(assessment?.maximum_mark || 0);
+  }, 0);
+  const grade = pct == null ? '' : rcGrade(pct, scale);
+  return {
+    subjectId: sub.id,
+    components,
+    obtained: marks.length ? obtained : null,
+    maximum,
+    pct,
+    grade,
+    hasMarks: marks.length > 0
+  };
+}
+
+function rcRawPercentage(marks, assessments) {
+  const obtained = marks.reduce((sum, mark) => sum + Number(mark.mark), 0);
+  const maximum = marks.reduce((sum, mark) => {
+    const assessment = assessments.find(a => String(a.id) === String(mark.assessment_id));
+    return sum + Number(assessment?.maximum_mark || 0);
+  }, 0);
+  return maximum > 0 ? Math.round(obtained / maximum * 10000) / 100 : null;
 }
 
 function rcGrade(pct, scale) {
@@ -278,31 +350,53 @@ function rcGrade(pct, scale) {
   return 'F';
 }
 
-function rcClassPositions(learnersList, allAssessments, allMarks, termId) {
-  const termAssess = allAssessments.filter(a => a.term_id === termId);
+function rcClassPositions(learnersList, allAssessments, allMarks, termId, subjects = [], types = []) {
+  const termAssess = termId == null
+    ? allAssessments
+    : allAssessments.filter(a => String(a.term_id) === String(termId));
   const scores = learnersList.map(l => {
-    const totalMax = termAssess.reduce((s,a) => s+(Number(a.maximum_mark)||0), 0);
-    const obtained = termAssess.reduce((s,a) => {
-      const m = allMarks.find(mk => mk.assessment_id===a.id && mk.learner_id===l.id);
-      return s + (m && m.mark!=null ? Number(m.mark) : 0);
-    }, 0);
-    return { id: l.id, pct: totalMax>0 ? (obtained/totalMax)*100 : null };
+    const learnerMarks = allMarks.filter(mark => String(mark.learner_id) === String(l.id));
+    const percentages = subjects
+      .map(subject => rcCalcSubject(subject, termAssess, learnerMarks, [], types).pct)
+      .filter(pct => pct != null);
+    const pct = percentages.length
+      ? percentages.reduce((sum, value) => sum + value, 0) / percentages.length
+      : null;
+    return { id: l.id, pct };
   }).filter(x => x.pct != null);
   
   scores.sort((a,b) => b.pct - a.pct);
   const pos = {};
-  let rank = 1, prev = null, prevRank = 1;
+  let prev = null, prevRank = 1;
   scores.forEach((s,i) => {
-    if (i===0) { pos[s.id]=1; prev=s.pct; prevRank=1; }
-    else if (s.pct===prev) pos[s.id]=prevRank;
-    else { rank=i+1; pos[s.id]=rank; prev=s.pct; prevRank=rank; }
+    const rounded = Math.round(s.pct * 100) / 100;
+    if (i===0) { pos[s.id]=1; prev=rounded; prevRank=1; }
+    else if (rounded===prev) pos[s.id]=prevRank;
+    else { pos[s.id]=i+1; prev=rounded; prevRank=i+1; }
   });
   return { positions: pos, total: scores.length };
+}
+
+function rcWeightPercent(componentAssessments, allAssessments, types) {
+  if (!allAssessments.length) return null;
+  const weightedAssessments = allAssessments.map(assessment => ({
+    assessment,
+    weight: rcAssessmentWeight(assessment, types)
+  }));
+  if (weightedAssessments.some(item => item.weight == null || !Number.isFinite(item.weight) || item.weight <= 0)) return null;
+  const totalWeight = weightedAssessments.reduce((sum, item) => sum + item.weight, 0);
+  if (!totalWeight) return null;
+  const componentIds = new Set(componentAssessments.map(assessment => String(assessment.id)));
+  const weight = weightedAssessments
+    .filter(item => componentIds.has(String(item.assessment.id)))
+    .reduce((sum, item) => sum + item.weight, 0);
+  return Math.round(weight / totalWeight * 1000) / 10;
 }
 
 async function rcBuildIndividualReport({ learnerId, classId, yearId, termIds, allSubjects, selSubjects, annualMode, preview }) {
   const d = await rcFetchLearnerData({ learnerId, classId, yearId, termIds, allSubjects, selSubjects });
   if (!d.learner) throw new Error('Learner not found');
+  d.annualMode = annualMode;
   const html = rcRenderCard(d.learner, d);
   preview.innerHTML = `
     <div class="report-preview-toolbar-flex no-print" style="margin-bottom:16px">
@@ -321,153 +415,188 @@ async function rcBuildClassReport({ classId, yearId, termIds, allSubjects, selSu
 function rcRenderCard(learner, d) {
   const logoUrl = d.settings.logo_url || 'public/logo.webp';
   const levelLbl = rcLevelLabel(d.cls?.level);
-  const mMarks = d.allMarks.filter(m => m.learner_id === learner.id);
-  const passMark = d.settings.pass_mark || 50;
+  const mMarks = d.allMarks.filter(m => String(m.learner_id) === String(learner.id));
   const schoolName = d.settings.school_name || 'RUKARA MODEL SCHOOL';
   const { email: schoolEmail, phone: schoolPhone } = ReportHeader.getSchoolContact(d.settings);
-
-  const subjMaxVals = {};
-  d.activeSubjects.forEach(s => {
-    let smeu = 0;
-    let smet = 0;
-    d.allAssessments.filter(a => String(a.subject_id) === String(s.id)).forEach(a => {
-      if (rcIsET(a.name) || rcIsET(a.unit)) smet += Number(a.maximum_mark) || 0;
-      else smeu += Number(a.maximum_mark) || 0;
-    });
-    subjMaxVals[s.id] = { eu: smeu, et: smet, tot: smeu + smet };
-  });
-
   const termCols = (d.selectedTerms || []).map(t => ({ id: t.id, name: t.name }));
   const showAnn = Boolean(d.annualMode);
-  const termHeading = termCols.map(t => `<th colspan="5" class="rc-th-top">${Utils.escapeHtml(t.name)}</th>`).join('');
-  const termBody = termCols.map(() => '<th>EU</th><th>ET</th><th>TOT</th><th>%</th><th>GR</th>').join('');
-  const termWeight = termCols.map(() => '<th>50%</th><th>50%</th><th>100%</th><th></th><th></th>').join('');
-
-  const tData = {};
+  const types = d.assessmentTypes || [];
+  const components = rcComponentColumns(d.allAssessments, types);
+  const assessmentsByTerm = new Map();
+  const componentsByTerm = new Map();
+  const termScores = new Map();
   termCols.forEach(t => {
-    const ta = d.allAssessments.filter(a => a.term_id === t.id);
-    tData[t.id] = d.activeSubjects.map(s => rcCalcSubject(s, ta, mMarks, d.scale, passMark)).filter(Boolean);
+    const termAssessments = d.allAssessments.filter(a => String(a.term_id) === String(t.id));
+    assessmentsByTerm.set(String(t.id), termAssessments);
+    componentsByTerm.set(String(t.id), rcComponentColumns(termAssessments, types));
+    termScores.set(String(t.id), new Map(d.activeSubjects.map(subject => [
+      String(subject.id),
+      rcCalcSubject(subject, termAssessments, mMarks, d.scale, types)
+    ])));
   });
 
-  let tbody = '';
-  let maxTotEU = 0;
-  let maxTotET = 0;
-  let maxTotTOT = 0;
-  const termTotals = {};
-  termCols.forEach(t => {
-    termTotals[t.id] = { eu: 0, et: 0, tot: 0, hasData: false };
-  });
+  const annualScores = new Map(d.activeSubjects.map(subject => [
+    String(subject.id),
+    rcCalcSubject(subject, d.allAssessments, mMarks, d.scale, types)
+  ]));
+  const maximumRaw = d.allAssessments.reduce((sum, a) => sum + Number(a.maximum_mark || 0), 0);
+  const componentWeight = component => rcWeightPercent(
+    d.allAssessments.filter(a => rcAssessmentComponentKey(a, types) === component.key),
+    d.allAssessments,
+    types
+  );
+  const termHeading = termCols.map(t =>
+    `<th colspan="5" class="rc-th-top">${Utils.escapeHtml(t.name)}${d.year?.name ? ` / ${Utils.escapeHtml(d.year.name)}` : ''}</th>`
+  ).join('');
+  const termBody = termCols.map(() =>
+    '<th>EU</th><th>ET</th><th>TOT</th><th>%</th><th>GR</th>'
+  ).join('');
+  const termWeight = termCols.map(t => {
+    const termAssessments = assessmentsByTerm.get(String(t.id)) || [];
+    return `${(componentsByTerm.get(String(t.id)) || []).map(component => {
+      const weight = rcWeightPercent(
+        termAssessments.filter(a => rcAssessmentComponentKey(a, types) === component.key),
+        termAssessments,
+        types
+      );
+      return `<th>${weight == null ? '' : `${weight}%`}</th>`;
+    }).join('')}<th>100%</th><th></th><th></th>`;
+  }).join('');
 
-  const availableSubjects = d.activeSubjects.filter(s => {
-    const subjectAssessments = d.allAssessments.filter(a => String(a.subject_id) === String(s.id));
-    return subjectAssessments.length > 0 || (d.selectedTerms || []).length > 0;
-  });
+  const availableSubjects = d.activeSubjects;
+  const termTotals = new Map(termCols.map(term => [String(term.id), {
+    components: new Map(components.map(component => [component.key, { obtained: 0, maximum: 0 }])),
+    obtained: 0,
+    maximum: 0,
+    percentages: []
+  }]));
+  const annualTotal = { obtained: 0, maximum: 0, percentages: [] };
+  const numberText = value => Number(value.toFixed(1)).toString();
+  const ratioText = (obtained, maximum) =>
+    maximum > 0 ? `${numberText(obtained)}/${numberText(maximum)}` : '';
+  const componentMaximumForSubject = (subject, component) => d.allAssessments
+    .filter(a => String(a.subject_id) === String(subject.id)
+      && rcAssessmentComponentKey(a, types) === component.key)
+    .reduce((sum, a) => sum + Number(a.maximum_mark || 0), 0);
+  const subjectMaximum = subject => d.allAssessments
+    .filter(a => String(a.subject_id) === String(subject.id))
+    .reduce((sum, a) => sum + Number(a.maximum_mark || 0), 0);
 
-  tbody += `<tr class="rc-all-subjects-row"><td colspan="${showAnn ? 4 + termCols.length * 5 + 4 : 4 + termCols.length * 5}">All Subjects</td></tr>`;
+  const overallColumnCount = showAnn ? 4 : 0;
+  const termColumnCount = termCols.reduce((sum, term) =>
+    sum + (componentsByTerm.get(String(term.id)) || []).length + 3, 0);
+  let tbody = `<tr class="rc-all-subjects-row"><td colspan="${1 + components.length + 1 + termColumnCount + overallColumnCount}">All Subjects</td></tr>`;
+  availableSubjects.forEach(subject => {
+    let row = `<tr><td class="rc-align-left rc-blue-text" style="font-weight:600">${Utils.escapeHtml(subject.name)}</td>`;
+    components.forEach(component => {
+      row += `<td>${numberText(componentMaximumForSubject(subject, component))}</td>`;
+    });
+    row += `<td>${numberText(subjectMaximum(subject))}</td>`;
 
-  availableSubjects.forEach(s => {
-    const sm = subjMaxVals[s.id] || { eu: 0, et: 0, tot: 0 };
-    maxTotEU += sm.eu || 0;
-    maxTotET += sm.et || 0;
-    maxTotTOT += sm.tot || 0;
-
-    let row = `<tr><td class="rc-align-left rc-blue-text" style="font-weight:600">${Utils.escapeHtml(s.name)}</td>`;
-    row += `<td>${sm.eu || ''}</td><td>${sm.et || ''}</td><td>${sm.tot || ''}</td>`;
-
-    let annualObt = 0;
-    let annualMax = 0;
-    let hasAnnual = false;
-
-    termCols.forEach(t => {
-      const td = (tData[t.id] || []).find(x => x.subjectId === s.id);
-      if (td && td.hasMarks) {
-        row += `
-          <td>${td.euObt != null ? td.euObt : ''}</td>
-          <td>${td.etObt != null ? td.etObt : ''}</td>
-          <td style="font-weight:700">${td.totObt != null ? td.totObt : ''}</td>
-          <td>${td.pct != null ? td.pct.toFixed(1) + '%' : ''}</td>
-          <td style="font-weight:700">${td.gr || ''}</td>`;
-
-        termTotals[t.id].eu += Number(td.euObt || 0);
-        termTotals[t.id].et += Number(td.etObt || 0);
-        termTotals[t.id].tot += Number(td.totObt || 0);
-        termTotals[t.id].hasData = true;
-        annualObt += Number(td.totObt || 0);
-        annualMax += Number(td.totMax || 0);
-        hasAnnual = true;
+    termCols.forEach(term => {
+      const score = termScores.get(String(term.id))?.get(String(subject.id));
+      const totals = termTotals.get(String(term.id));
+      (componentsByTerm.get(String(term.id)) || []).forEach(component => {
+        const value = score?.components.get(component.key);
+        const cellValue = value?.obtained == null ? '' : numberText(value.obtained);
+        row += `<td>${cellValue}</td>`;
+        if (value?.obtained != null) {
+          const total = totals.components.get(component.key);
+          total.obtained += value.obtained;
+          total.maximum += value.scoredMaximum;
+        }
+      });
+      if (score?.hasMarks) {
+        row += `<td class="rc-score-cell">${numberText(score.obtained)}</td><td>${score.pct.toFixed(1)}%</td><td class="rc-blue-text">${Utils.escapeHtml(score.grade)}</td>`;
+        totals.obtained += score.obtained;
+        totals.maximum += score.maximum;
+        totals.percentages.push(score.pct);
       } else {
-        row += '<td class="rc-empty-cell"></td><td class="rc-empty-cell"></td><td class="rc-empty-cell"></td><td class="rc-empty-cell"></td><td class="rc-empty-cell"></td>';
+        row += '<td></td><td></td><td></td>';
       }
     });
 
+    const annual = annualScores.get(String(subject.id));
     if (showAnn) {
-      if (hasAnnual && annualMax > 0) {
-        const annualPct = Math.round((annualObt / annualMax) * 1000) / 10;
-        row += `<td>${annualObt}</td><td>${annualMax}</td><td>${annualPct.toFixed(1)}%</td><td style="font-weight:700">${rcGrade(annualPct, d.scale)}</td>`;
+      if (annual?.hasMarks) {
+        row += `<td class="rc-score-cell">${numberText(annual.obtained)}</td><td>${numberText(subjectMaximum(subject))}</td><td>${annual.pct.toFixed(1)}%</td><td class="rc-blue-text">${Utils.escapeHtml(annual.grade)}</td>`;
+        annualTotal.obtained += annual.obtained;
+        annualTotal.maximum += annual.maximum;
+        annualTotal.percentages.push(annual.pct);
       } else {
-        row += '<td class="rc-empty-cell"></td><td class="rc-empty-cell"></td><td class="rc-empty-cell"></td><td class="rc-empty-cell"></td>';
+        row += `<td></td><td>${numberText(subjectMaximum(subject))}</td><td></td><td></td>`;
       }
     }
-
-    row += '</tr>';
-    tbody += row;
+    tbody += `${row}</tr>`;
   });
 
-  let totalAnnObt = 0;
-  let totalAnnMax = 0;
-  let hasTotalAnnual = false;
-
-  let tfTotal = '<tr><td class="rc-align-left rc-blue-bg-text font-bold">Total</td>';
-  tfTotal += `<td>${maxTotEU}</td><td>${maxTotET}</td><td>${maxTotTOT}</td>`;
-
-  termCols.forEach(t => {
-    const tt = termTotals[t.id];
-    const termMax = (d.allAssessments || []).filter(a => a.term_id === t.id).reduce((sum, a) => sum + (Number(a.maximum_mark) || 0), 0);
-    if (tt.hasData && termMax > 0) {
-      const pct = Math.round((tt.tot / termMax) * 1000) / 10;
-      tfTotal += `<td>${tt.eu}</td><td>${tt.et}</td><td>${tt.tot}</td><td>${pct.toFixed(1)}%</td><td>${rcGrade(pct, d.scale)}</td>`;
-      totalAnnObt += tt.tot;
-      totalAnnMax += termMax;
-      hasTotalAnnual = true;
-    } else {
-      tfTotal += '<td class="rc-empty-cell"></td><td class="rc-empty-cell"></td><td class="rc-empty-cell"></td><td class="rc-empty-cell"></td><td class="rc-empty-cell"></td>';
-    }
+  const average = values => values.length
+    ? values.reduce((sum, value) => sum + value, 0) / values.length
+    : null;
+  let totalRow = '<tr><td class="rc-align-left rc-blue-bg-text font-bold">Total</td>';
+  components.forEach(component => {
+    const maximum = d.allAssessments
+      .filter(a => rcAssessmentComponentKey(a, types) === component.key)
+      .reduce((sum, a) => sum + Number(a.maximum_mark || 0), 0);
+    totalRow += `<td>${numberText(maximum)}</td>`;
   });
-
+  totalRow += `<td>${numberText(maximumRaw)}</td>`;
+  termCols.forEach(term => {
+    const totals = termTotals.get(String(term.id));
+    (componentsByTerm.get(String(term.id)) || []).forEach(component => {
+      const value = totals.components.get(component.key);
+      totalRow += `<td>${value.maximum > 0 ? numberText(value.obtained) : ''}</td>`;
+    });
+    const pct = totals.maximum > 0 ? totals.obtained / totals.maximum * 100 : null;
+    totalRow += pct == null
+      ? '<td></td><td></td><td></td>'
+      : `<td>${numberText(totals.obtained)}</td><td>${pct.toFixed(1)}%</td><td class="rc-blue-text">${Utils.escapeHtml(rcGrade(pct, d.scale))}</td>`;
+  });
   if (showAnn) {
-    if (hasTotalAnnual && totalAnnMax > 0) {
-      const pct = Math.round((totalAnnObt / totalAnnMax) * 1000) / 10;
-      tfTotal += `<td>${totalAnnObt}</td><td>${totalAnnMax}</td><td>${pct.toFixed(1)}%</td><td>${rcGrade(pct, d.scale)}</td>`;
-    } else {
-      tfTotal += '<td class="rc-empty-cell"></td><td class="rc-empty-cell"></td><td class="rc-empty-cell"></td><td class="rc-empty-cell"></td>';
-    }
+    const annualPct = annualTotal.maximum > 0 ? annualTotal.obtained / annualTotal.maximum * 100 : null;
+    totalRow += annualPct == null
+      ? `<td></td><td>${numberText(maximumRaw)}</td><td></td><td></td>`
+      : `<td>${numberText(annualTotal.obtained)}</td><td>${numberText(maximumRaw)}</td><td>${annualPct.toFixed(1)}%</td><td class="rc-blue-text">${Utils.escapeHtml(rcGrade(annualPct, d.scale))}</td>`;
   }
-  tfTotal += '</tr>';
+  totalRow += '</tr>';
 
   const tableHeader = `
     <tr>
-      <th rowspan="3" class="rc-th-sub rc-align-left">SUBJECT</th>
-      <th colspan="3" class="rc-th-top">MAXIMUM</th>
+      <th rowspan="2" class="rc-th-sub rc-align-left">SUBJECT</th>
+      <th colspan="${components.length + 1}" class="rc-th-top">MAXIMUM</th>
       ${termHeading}
       ${showAnn ? '<th colspan="4" class="rc-th-top">Total</th>' : ''}
     </tr>
     <tr class="rc-th-row2">
-      <th>EU</th><th>ET</th><th>TOT</th>
+      ${components.map(component => `<th>${Utils.escapeHtml(component.label)}</th>`).join('')}<th>TOTAL</th>
       ${termBody}
-      ${showAnn ? '<th>TOT</th><th>MAX</th><th>%</th><th>GR</th>' : ''}
+      ${showAnn ? '<th>TOTAL</th><th>MAX</th><th>%</th><th>GR</th>' : ''}
     </tr>
     <tr class="rc-weight-row">
       <th class="rc-align-left rc-blue-text">WEIGHT</th>
-      <th>50%</th><th>50%</th><th>100%</th>
+      ${components.map(component => {
+        const weight = componentWeight(component);
+        return `<th>${weight == null ? '' : `${weight}%`}</th>`;
+      }).join('')}<th>100%</th>
       ${termWeight}
       ${showAnn ? '<th></th><th></th><th></th><th></th>' : ''}
     </tr>`;
 
+  const summaryScores = showAnn
+    ? [...annualScores.values()]
+    : [...(termScores.get(String(termCols[0]?.id))?.values() || [])];
+  const validSummaryScores = summaryScores.filter(score => score.hasMarks && score.pct != null);
+  const overallAverage = average(validSummaryScores.map(score => score.pct));
+  const passMark = Number(d.settings.pass_mark || 50);
+  const positionData = showAnn
+    ? d.annualPosData
+    : d.posData?.[termCols[0]?.id];
+  const learnerPosition = positionData?.positions?.[learner.id];
   const studentSummary = [
     { label: 'Total Subjects', value: String(d.activeSubjects.length || 0) },
-    { label: 'Subjects Passed', value: String((d.posData?.[termCols[0]?.id]?.positions && learner.id in d.posData?.[termCols[0]?.id]?.positions) ? d.activeSubjects.length : 0) },
-    { label: 'Overall Average', value: '—' },
-    { label: 'Class Position', value: '—' }
+    { label: 'Subjects Passed', value: String(validSummaryScores.filter(score => score.pct >= passMark).length) },
+    { label: 'Overall Average', value: overallAverage == null ? '—' : `${overallAverage.toFixed(1)}%` },
+    { label: 'Class Position', value: learnerPosition ? `${learnerPosition}/${positionData.total}` : '—' }
   ];
 
   const finalDesc = `
@@ -534,9 +663,9 @@ function rcRenderCard(learner, d) {
         </div>
       </div>
       <div class="rc-table-wrapper">
-        <table class="rc-data-table">
+        <table class="rc-data-table rc-data-table-dynamic">
           <thead>${tableHeader}</thead>
-          <tbody>${tbody}${tfTotal}</tbody>
+          <tbody>${tbody}${totalRow}</tbody>
         </table>
       </div>
       ${finalDesc}
