@@ -55,6 +55,14 @@
 .rw-option-row { display:flex; align-items:center; justify-content:space-between; gap:12px; padding:10px 12px; border:1px solid var(--gray-200); border-radius:8px; background:#fff; margin-bottom:8px; }
 .rw-option-row label { font-size:13px; font-weight:600; color:var(--gray-700); display:flex; align-items:center; gap:8px; }
 .rw-help { font-size:11px; color:var(--gray-500); }
+.rw-assessment-type-selection { border:1px solid var(--gray-200); border-radius:10px; padding:12px; margin:0 0 12px; background:var(--gray-50); }
+.rw-assessment-type-selection > strong { display:block; color:var(--gray-700); font-size:12px; margin-bottom:8px; }
+.rw-assessment-type-options { display:grid; grid-template-columns:repeat(auto-fill,minmax(170px,1fr)); gap:6px; }
+.rw-assessment-type-option { display:flex; align-items:center; gap:7px; min-width:0; border:1px solid var(--gray-200); border-radius:8px; padding:7px 9px; background:#fff; color:var(--gray-700); font-size:12px; cursor:pointer; }
+.rw-assessment-type-option input { accent-color:var(--blue-600); }
+.rw-assessment-type-option span { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.rw-assessment-type-option small { margin-left:auto; color:var(--gray-500); font-size:10px; white-space:nowrap; }
+.rw-assessment-type-option:has(input:checked) { border-color:var(--blue-300); background:var(--blue-50); }
 .rw-toast-err { display:flex; gap:10px; align-items:flex-start; background:#fef2f2; border:1px solid #fecaca; color:#991b1b; padding:10px 12px; border-radius:8px; font-size:13px; margin-bottom:12px; }
 .rw-preview-area { max-height:none; overflow:visible; padding:12px; background:#f1f5f9; border:1px solid #cbd5e1; border-radius:10px; }
 .rw-preview-area #rw-report-container { overflow:visible; }

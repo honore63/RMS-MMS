@@ -360,6 +360,7 @@ BEGIN
         'type', coalesce(atype.name, 'Assessment'),
         'type_id', a.assessment_type_id,
         'type_code', coalesce(atype.code, left(upper(atype.name), 6), 'ASSESS'),
+        'type_order', atype.display_order,
         'period_hint', atype.period_hint,
         'term', t.name,
         'term_id', a.term_id,

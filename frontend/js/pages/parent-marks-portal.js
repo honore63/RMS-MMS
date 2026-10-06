@@ -572,6 +572,7 @@ const ParentMarksPortal = {
         id: item.assessment_type_id,
         name: item.type,
         code: item.type_code,
+        display_order: item.type_order,
         weight: item.effective_weight,
         period_hint: item.period_hint
       }
@@ -591,20 +592,27 @@ const ParentMarksPortal = {
       terms: reportTerms,
       scale: data.grading_scale || []
     });
-    const maximumWeightByKind = { EU: 0, ET: 0 };
+    const typeColumns = ReportStudent.typeColumns(reportAssessments, reportTypes);
+    const maximumWeightByType = new Map(typeColumns.map(column => [column.key, 0]));
     const validWeights = reportAssessments.length > 0 && reportAssessments.every(item =>
       item.weight != null && Number(item.weight) > 0);
     const totalMaximumWeight = validWeights
       ? reportAssessments.reduce((sum, item) => sum + Number(item.weight), 0)
       : 0;
     if (validWeights) reportAssessments.forEach(item => {
-      maximumWeightByKind[ReportStudent.componentKind(item, reportTypes)] += Number(item.weight);
+      const column = typeColumns.find(typeColumn => ReportStudent.colMatches(typeColumn, item));
+      if (column) {
+        maximumWeightByType.set(
+          column.key,
+          maximumWeightByType.get(column.key) + Number(item.weight)
+        );
+      }
     });
     const maximumWeights = totalMaximumWeight > 0
-      ? {
-        EU: Math.round(maximumWeightByKind.EU / totalMaximumWeight * 100),
-        ET: Math.round(maximumWeightByKind.ET / totalMaximumWeight * 100)
-      }
+      ? Object.fromEntries(typeColumns.map(column => [
+        column.key,
+        Math.round(maximumWeightByType.get(column.key) / totalMaximumWeight * 100)
+      ]))
       : null;
     const columnTotals = columns.map((column, index) => {
       const values = subjRows.map(row => row.components[index]).filter(Boolean);

@@ -259,13 +259,14 @@ function rcAssessmentType(assessment, types) {
 
 function rcAssessmentComponentKey(assessment, types) {
   const type = rcAssessmentType(assessment, types);
-  const hint = String(type?.period_hint || assessment.period_type || '').toLowerCase();
-  const name = `${type?.name || assessment.name || assessment.unit || ''} ${type?.code || ''}`.toLowerCase();
-  return hint === 'term' || /\b(term|exam|et)\b/.test(name) ? 'ET' : 'EU';
+  return String(assessment.assessment_type_id || `name:${type?.name || assessment.type || assessment.name || 'Assessment'}`);
 }
 
 function rcAssessmentComponentLabel(assessment, types) {
-  return rcAssessmentComponentKey(assessment, types);
+  const type = rcAssessmentType(assessment, types);
+  const name = type?.name || assessment.type || assessment.name || 'Assessment';
+  const code = type?.code || assessment.type_code;
+  return String(code || name.split(/\s+/).map(word => word[0]).join('').slice(0, 6)).toUpperCase();
 }
 
 function rcAssessmentWeight(assessment, types) {
@@ -278,11 +279,30 @@ function rcAssessmentWeight(assessment, types) {
 }
 
 function rcComponentColumns(assessments, types) {
-  return ['EU', 'ET'].map(key => ({
-    key,
-    label: key,
+  const columns = new Map();
+  (assessments || []).forEach(assessment => {
+    const key = rcAssessmentComponentKey(assessment, types);
+    if (columns.has(key)) return;
+    const type = rcAssessmentType(assessment, types);
+    columns.set(key, {
+      key,
+      label: rcAssessmentComponentLabel(assessment, types),
+      name: type?.name || assessment.type || assessment.name || 'Assessment',
+      typeId: assessment.assessment_type_id || null
+    });
+  });
+  const typeOrder = new Map((types || []).map((type, index) => [
+    String(type.id),
+    Number(type.display_order ?? index)
+  ]));
+  return [...columns.values()].sort((a, b) =>
+    (typeOrder.get(String(a.typeId)) ?? Number.MAX_SAFE_INTEGER)
+      - (typeOrder.get(String(b.typeId)) ?? Number.MAX_SAFE_INTEGER)
+      || a.label.localeCompare(b.label)
+  ).map(column => ({
+    ...column,
     assessments: (assessments || []).filter(assessment =>
-      rcAssessmentComponentKey(assessment, types) === key)
+      rcAssessmentComponentKey(assessment, types) === column.key)
   }));
 }
 
@@ -397,6 +417,7 @@ async function rcBuildIndividualReport({ learnerId, classId, yearId, termIds, al
   const d = await rcFetchLearnerData({ learnerId, classId, yearId, termIds, allSubjects, selSubjects });
   if (!d.learner) throw new Error('Learner not found');
   d.annualMode = annualMode;
+  d.orientation = 'landscape';
   const html = rcRenderCard(d.learner, d);
   preview.innerHTML = `
     <div class="report-preview-toolbar-flex no-print" style="margin-bottom:16px">
@@ -408,6 +429,7 @@ async function rcBuildIndividualReport({ learnerId, classId, yearId, termIds, al
 async function rcBuildClassReport({ classId, yearId, termIds, allSubjects, selSubjects, annualMode, preview }) {
   const d = await rcFetchLearnerData({ classId, yearId, termIds, allSubjects, selSubjects });
   d.annualMode = annualMode;
+  d.orientation = 'landscape';
   const cards = d.learnersList.map(l => rcRenderCard(l, d));
   preview.innerHTML = `<div id="rc-paper" class="rc-paper-outer">${cards.join('<div style="page-break-after:always; width:100%; height:1px;"></div>')}</div>`;
 }
@@ -445,14 +467,21 @@ function rcRenderCard(learner, d) {
     d.allAssessments,
     types
   );
-  const termHeading = termCols.map(t =>
-    `<th colspan="5" class="rc-th-top">${Utils.escapeHtml(t.name)}${d.year?.name ? ` / ${Utils.escapeHtml(d.year.name)}` : ''}</th>`
-  ).join('');
-  const termBody = termCols.map(() =>
-    '<th>EU</th><th>ET</th><th>TOT</th><th>%</th><th>GR</th>'
+  const termHeading = termCols.map(t => {
+    const count = (componentsByTerm.get(String(t.id)) || []).length;
+    return `<th colspan="${count + 3}" class="rc-th-top">${Utils.escapeHtml(t.name)}${d.year?.name ? ` / ${Utils.escapeHtml(d.year.name)}` : ''}</th>`;
+  }).join('');
+  const termBody = termCols.map(t =>
+    `${(componentsByTerm.get(String(t.id)) || []).map(component =>
+      `<th title="${Utils.escapeHtml(component.name)}">${Utils.escapeHtml(component.label)}</th>`
+    ).join('')}<th>TOT</th><th>%</th><th>GR</th>`
   ).join('');
   const termWeight = termCols.map(t => {
     const termAssessments = assessmentsByTerm.get(String(t.id)) || [];
+    const termWeightsValid = termAssessments.length > 0 && termAssessments.every(assessment => {
+      const weight = rcAssessmentWeight(assessment, types);
+      return weight != null && Number.isFinite(weight) && weight > 0;
+    });
     return `${(componentsByTerm.get(String(t.id)) || []).map(component => {
       const weight = rcWeightPercent(
         termAssessments.filter(a => rcAssessmentComponentKey(a, types) === component.key),
@@ -460,7 +489,7 @@ function rcRenderCard(learner, d) {
         types
       );
       return `<th>${weight == null ? '' : `${weight}%`}</th>`;
-    }).join('')}<th>100%</th><th></th><th></th>`;
+    }).join('')}<th>${termWeightsValid ? '100%' : ''}</th><th></th><th></th>`;
   }).join('');
 
   const availableSubjects = d.activeSubjects;
@@ -547,13 +576,13 @@ function rcRenderCard(learner, d) {
       const value = totals.components.get(component.key);
       totalRow += `<td>${value.maximum > 0 ? numberText(value.obtained) : ''}</td>`;
     });
-    const pct = totals.maximum > 0 ? totals.obtained / totals.maximum * 100 : null;
+    const pct = average(totals.percentages);
     totalRow += pct == null
       ? '<td></td><td></td><td></td>'
       : `<td>${numberText(totals.obtained)}</td><td>${pct.toFixed(1)}%</td><td class="rc-blue-text">${Utils.escapeHtml(rcGrade(pct, d.scale))}</td>`;
   });
   if (showAnn) {
-    const annualPct = annualTotal.maximum > 0 ? annualTotal.obtained / annualTotal.maximum * 100 : null;
+    const annualPct = average(annualTotal.percentages);
     totalRow += annualPct == null
       ? `<td></td><td>${numberText(maximumRaw)}</td><td></td><td></td>`
       : `<td>${numberText(annualTotal.obtained)}</td><td>${numberText(maximumRaw)}</td><td>${annualPct.toFixed(1)}%</td><td class="rc-blue-text">${Utils.escapeHtml(rcGrade(annualPct, d.scale))}</td>`;
@@ -577,7 +606,10 @@ function rcRenderCard(learner, d) {
       ${components.map(component => {
         const weight = componentWeight(component);
         return `<th>${weight == null ? '' : `${weight}%`}</th>`;
-      }).join('')}<th>100%</th>
+      }).join('')}<th>${d.allAssessments.length && d.allAssessments.every(assessment => {
+        const weight = rcAssessmentWeight(assessment, types);
+        return weight != null && Number.isFinite(weight) && weight > 0;
+      }) ? '100%' : ''}</th>
       ${termWeight}
       ${showAnn ? '<th></th><th></th><th></th><th></th>' : ''}
     </tr>`;
@@ -624,7 +656,7 @@ function rcRenderCard(learner, d) {
     </div>`;
 
   return `
-    <div class="rc-paper">
+    <div class="rc-paper ${d.orientation === 'landscape' ? 'rc-paper-landscape' : ''}">
       <div class="rc-header">
         <div class="rc-title-group">
           <div class="rc-main-title">${Utils.escapeHtml(schoolName)}</div>
@@ -681,7 +713,7 @@ async function rcExportPdf() {
   if (!paper) return Utils.toast('Generate a report card first', 'error');
   if (typeof ReportCenter === 'undefined') return Utils.toast('The report download service is unavailable. Please reload and try again.', 'error');
   const filename = rcBuildOutputFilename();
-  await ReportCenter.downloadPdfDocument(paper.innerHTML, filename, 'portrait');
+  await ReportCenter.downloadPdfDocument(paper.innerHTML, filename, 'landscape');
 }
 
 function rcBuildOutputFilename() {
@@ -696,5 +728,5 @@ function rcPrintReport() {
   if (!paper) return Utils.toast('Generate a report card first', 'error');
   if (typeof ReportCenter === 'undefined') return Utils.toast('The report print service is unavailable. Please reload and try again.', 'error');
   const filename = rcBuildOutputFilename();
-  ReportCenter.printDocument(paper.innerHTML, filename.replace(/\.pdf$/i, ''), filename, 'portrait');
+  ReportCenter.printDocument(paper.innerHTML, filename.replace(/\.pdf$/i, ''), filename, 'landscape');
 }

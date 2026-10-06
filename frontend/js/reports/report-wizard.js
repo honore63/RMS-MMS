@@ -733,6 +733,14 @@ const ReportWizard = {
     return SelectionChips.render(items, { limit: 40 });
   },
   selectAll(key, ids){ this.state[key]=[...ids]; this.reRender(); },
+  selectAllAssessments(){
+    const assessments = this.state.cache.assessments || [];
+    const eligible = ['student-card', 'student-performance'].includes(this.state.reportType)
+      ? assessments.filter(assessment => ['submitted', 'approved', 'locked'].includes(assessment.status))
+      : assessments;
+    this.state.assessmentIds = eligible.map(assessment => assessment.id);
+    this.reRender();
+  },
   clear(key){ this.state[key]=[]; if(key==='classIds'){ this.state.studentIds=[]; this.state.subjectIds=[]; this.state.cache.students=[]; this.state.cache.subjects=[]; this.state.cache.assessments=[]; } this.reRender(); },
   setStream(value){
     this.state.stream = value || 'all';
@@ -746,9 +754,24 @@ const ReportWizard = {
   },
   setAssessmentType(value){
     this.state.assessmentTypeId = value || 'all';
-    this.state.assessmentIds = [];
-    this.state.cache.assessments = [];
     this.renderSinglePage();
+  },
+  toggleAssessmentType(typeId){
+    const key = String(typeId);
+    const ids = (this.state.cache.assessments || [])
+      .filter(assessment => !['student-card', 'student-performance'].includes(this.state.reportType)
+        || ['submitted', 'approved', 'locked'].includes(assessment.status))
+      .filter(assessment => String(assessment.assessment_type_id || 'none') === key)
+      .map(assessment => String(assessment.id));
+    if (!ids.length) return;
+    const selected = new Set((this.state.assessmentIds || []).map(String));
+    const shouldSelect = !ids.every(id => selected.has(id));
+    ids.forEach(id => {
+      if (shouldSelect) selected.add(id);
+      else selected.delete(id);
+    });
+    this.state.assessmentIds = [...selected];
+    this.reRender();
   },
 
   async renderStudents(){
@@ -883,27 +906,41 @@ const ReportWizard = {
     if (s.assessmentTypeId && s.assessmentTypeId !== 'all') {
       assessments = assessments.filter(a => String(a.assessment_type_id) === String(s.assessmentTypeId));
     }
-    s.cache.assessments = assessments;
     const q=(document.getElementById('rw-assess-q')?document.getElementById('rw-assess-q').value:'').toLowerCase();
     let list=assessments;
     if (q) list=list.filter(a=> (a.name+a.unit+(typeMap.get(String(a.assessment_type_id))||'')).toLowerCase().includes(q));
+    const assessmentTypeGroups = new Map();
+    s.cache.assessments.forEach(assessment => {
+      const key = String(assessment.assessment_type_id || 'none');
+      if (!assessmentTypeGroups.has(key)) assessmentTypeGroups.set(key, []);
+      assessmentTypeGroups.get(key).push(assessment);
+    });
     return `
       <div class="rw-card-hd"><h3><i data-lucide="clipboard-list"></i> Select Assessments</h3>
         <div style="margin-left:auto" class="rw-actions">
-          <button class="btn btn-outline btn-sm" onclick="ReportWizard.selectAll('assessmentIds', ReportWizard.state.cache.assessments.map(x=>x.id))">Select All</button>
+          <button class="btn btn-outline btn-sm" onclick="ReportWizard.selectAllAssessments()">Select All</button>
           <button class="btn btn-outline btn-sm" onclick="ReportWizard.clear('assessmentIds')">Clear</button>
         </div>
       </div>
       <div class="rw-card-bd">
         <p class="rw-help" style="margin-bottom:8px">Filtered by class ${s.classIds.length? s.classIds.join(','):''}${s.subjectIds.length?' + subjects':''}. Selected assessments alone are included; if none are selected, all assessments in this scope are used.</p>
-        <div class="form-group" style="max-width:300px"><label>Assessment Type</label><select class="select-field" onchange="ReportWizard.setAssessmentType(this.value)"><option value="all">All Assessment Types</option>${types.map(t=>`<option value="${t.id || ''}" ${String(s.assessmentTypeId)===String(t.id)?'selected':''}>${Utils.escapeHtml(t.name)}</option>`).join('')}</select></div>
+        <div class="rw-assessment-type-selection"><strong>Select assessment types</strong><div class="rw-assessment-type-options">${[...assessmentTypeGroups.entries()].map(([key, grouped])=>{
+          const selectable = ['student-card', 'student-performance'].includes(s.reportType)
+            ? grouped.filter(assessment => ['submitted', 'approved', 'locked'].includes(assessment.status))
+            : grouped;
+          const selectedCount = selectable.filter(assessment => s.assessmentIds.some(id => String(id) === String(assessment.id))).length;
+          const label = typeMap.get(key) || grouped[0]?.type || grouped[0]?.name || 'Assessment';
+          return `<label class="rw-assessment-type-option"><input type="checkbox" ${selectable.length && selectedCount === selectable.length ? 'checked' : ''} ${selectable.length ? '' : 'disabled'} onchange="ReportWizard.toggleAssessmentType('${Utils.escapeHtml(key)}')"><span>${Utils.escapeHtml(label)}</span><small>${selectedCount}/${selectable.length}</small></label>`;
+        }).join('')}</div><p class="rw-help">Selecting a type includes its available assessments in the chosen class, subjects, year and terms. You can also select individual assessments below.</p></div>
+        <div class="form-group" style="max-width:300px"><label>Filter assessment list by type</label><select class="select-field" onchange="ReportWizard.setAssessmentType(this.value)"><option value="all">All Assessment Types</option>${types.map(t=>`<option value="${t.id || ''}" ${String(s.assessmentTypeId)===String(t.id)?'selected':''}>${Utils.escapeHtml(t.name)}</option>`).join('')}</select></div>
         <div class="rw-search"><i data-lucide="search"></i><input id="rw-assess-q" placeholder="Search assessments..." oninput="ReportWizard.refreshStep()"></div>
         ${this.chipsFor('assessmentIds', s.cache.assessments, a=> (a.display_name||a.name||a.unit||'Assessment'))}
         <div class="rw-list">
           ${list.length? list.map(a=>{
             const sel=s.assessmentIds.some(id=> String(id)===String(a.id));
+            const disabled=['student-card', 'student-performance'].includes(s.reportType) && !['submitted', 'approved', 'locked'].includes(a.status);
             const tName = typeMap.get(String(a.assessment_type_id))||'Assessment';
-            return `<label class="rw-opt"><input type="checkbox" ${sel?'checked':''} onchange="ReportWizard.toggleArray('assessmentIds','${a.id}')"><span><span class="rw-opt-title">${Utils.escapeHtml(a.display_name || a.name)}${a.period_label ? ' — ' + Utils.escapeHtml(a.period_label) : (a.unit ? ' — ' + Utils.escapeHtml(a.unit) : '')}</span> <span class="rw-opt-sub">${Utils.escapeHtml(tName)} · ${Utils.escapeHtml(a.status)} · Max ${a.maximum_mark||'-'}</span></span></label>`;
+            return `<label class="rw-opt"><input type="checkbox" ${sel?'checked':''} ${disabled?'disabled':''} onchange="ReportWizard.toggleArray('assessmentIds','${a.id}')"><span><span class="rw-opt-title">${Utils.escapeHtml(a.display_name || a.name)}${a.period_label ? ' — ' + Utils.escapeHtml(a.period_label) : (a.unit ? ' — ' + Utils.escapeHtml(a.unit) : '')}</span> <span class="rw-opt-sub">${Utils.escapeHtml(tName)} · ${Utils.escapeHtml(a.status)} · Max ${a.maximum_mark||'-'}</span></span></label>`;
           }).join('') : `<div class="rw-empty">No assessments for selected scope. Check class/subject/term filters.</div>`}
         </div>
         <div style="margin-top:10px" class="rw-badge">${s.assessmentIds.length? s.assessmentIds.length+' selected' : 'All assessments (default)'}</div>

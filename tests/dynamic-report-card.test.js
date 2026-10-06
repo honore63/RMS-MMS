@@ -61,8 +61,8 @@ function loadReportCard() {
 }
 
 const types = [
-  { id: 'unit', name: 'End of Unit', weight: 40, display_order: 1 },
-  { id: 'exam', name: 'End of Term Exam', weight: 60, display_order: 2 }
+  { id: 'unit', name: 'End of Unit', code: 'EU', weight: 40, display_order: 1 },
+  { id: 'exam', name: 'End of Term Exam', code: 'ET', weight: 60, display_order: 2 }
 ];
 
 const assessments = [
@@ -92,8 +92,10 @@ test('report card uses configured weights and excludes unmarked assessments', ()
   assert.equal(score.obtained, 58);
   assert.equal(score.maximum, 70);
   assert.equal(score.hasMarks, true);
-  assert.equal(score.components.size, 3);
-  assert.equal([...score.components.values()].filter(component => component.obtained == null).length, 1);
+  assert.equal(score.components.size, 2);
+  assert.equal(score.components.get('unit').obtained, 18);
+  assert.equal(score.components.get('unit').maximum, 30);
+  assert.equal(score.components.get('unit').scoredMaximum, 20);
 });
 
 test('report card renders one grouped EU/ET grid across terms and annual totals', () => {
@@ -121,11 +123,30 @@ test('report card renders one grouped EU/ET grid across terms and annual totals'
   assert.match(html, /Term 1 \/ 2026/);
   assert.match(html, /Term 2 \/ 2026/);
   assert.match(html, /Total<\/th>/);
-  assert.match(html, /<th>EU<\/th><th>ET<\/th><th>TOT<\/th><th>%<\/th><th>GR<\/th>/);
+  assert.match(html, /<th title="End of Unit">EU<\/th><th title="End of Term Exam">ET<\/th><th>TOT<\/th><th>%<\/th><th>GR<\/th>/);
   assert.match(html, /<th>TOTAL<\/th><th>MAX<\/th><th>%<\/th><th>GR<\/th>/);
   assert.match(html, /78\.8%/);
   assert.match(html, /40%/);
   assert.match(html, /60%/);
   assert.doesNotMatch(html, /Term 1 RESULTS|Term 2 RESULTS/);
-  assert.doesNotMatch(html, /Fractions|Geometry|End of Term Exam/);
+});
+
+test('report card columns follow configured assessment types rather than EU/ET rules', () => {
+  const context = loadReportCard();
+  const types = [
+    { id: 'mid', name: 'Mid-Term Test', code: 'MTT', weight: 30, display_order: 1 },
+    { id: 'quiz', name: 'Weekly Quiz', code: 'QZ', weight: 10, display_order: 2 },
+    { id: 'project', name: 'Project', code: 'PRJ', weight: 60, display_order: 3 }
+  ];
+  const assessments = types.map((type, index) => ({
+    id: `a${index + 1}`,
+    subject_id: 'math',
+    term_id: 't1',
+    assessment_type_id: type.id,
+    maximum_mark: 20
+  }));
+  const columns = context.rcComponentColumns(assessments, types);
+
+  assert.deepEqual(Array.from(columns, column => column.key), ['mid', 'quiz', 'project']);
+  assert.deepEqual(Array.from(columns, column => column.label), ['MTT', 'QZ', 'PRJ']);
 });

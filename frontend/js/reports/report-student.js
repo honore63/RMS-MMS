@@ -126,19 +126,28 @@ const ReportStudent = {
     const seen = new Map();
     official.forEach(a => {
       const t = (types || []).find(x => String(x.id) === String(a.assessment_type_id));
-      const key = String(a.assessment_type_id || a.name || 'GEN');
+      const typeName = t ? t.name : (a.name || 'Assessment');
+      const key = String(a.assessment_type_id || `name:${typeName}`);
       if (!seen.has(key)) {
-        const nm = t ? t.name : (a.name || 'Assessment');
-        const storedCode = t && t.code ? String(t.code).trim().toUpperCase() : '';
+        const nm = typeName;
+        const storedCode = t?.code || a.type_code || '';
         seen.set(key, {
           key,
           name: nm,
-          code: storedCode || String(nm).split(/\s+/).map(w => w[0]).join('').slice(0, 6).toUpperCase(),
+          code: String(storedCode).trim().toUpperCase()
+            || String(nm).split(/\s+/).map(w => w[0]).join('').slice(0, 6).toUpperCase(),
           typeId: a.assessment_type_id || null
         });
       }
     });
-    return [...seen.values()];
+    const order = new Map((types || []).map((type, index) => [
+      String(type.id),
+      Number(type.display_order ?? index)
+    ]));
+    return [...seen.values()].sort((a, b) =>
+      (order.get(String(a.typeId)) ?? Number.MAX_SAFE_INTEGER)
+        - (order.get(String(b.typeId)) ?? Number.MAX_SAFE_INTEGER)
+    );
   },
 
   effWeight(a, types) {
@@ -176,14 +185,6 @@ const ReportStudent = {
       || col.key === String(a.assessment_type_id || a.name);
   },
 
-  componentKind(assessment, types) {
-    const type = (types || []).find(item =>
-      String(item.id) === String(assessment.assessment_type_id));
-    const hint = String(type?.period_hint || assessment.period_type || '').toLowerCase();
-    const label = `${type?.name || assessment.type || assessment.name || ''} ${type?.code || assessment.type_code || ''}`.toLowerCase();
-    return hint === 'term' || /\b(term|exam|et)\b/.test(label) ? 'ET' : 'EU';
-  },
-
   buildPeriodReports({ subjects, assessments, marks, types, terms, scale }) {
     const termMap = new Map((terms || []).map(item => [String(item.id), item]));
     const groups = new Map();
@@ -201,23 +202,17 @@ const ReportStudent = {
       })
       .map(([termKey, periodAssessments]) => {
         const term = termMap.get(termKey);
-        const kinds = ['EU', 'ET'];
         const weights = periodAssessments.map(assessment => this.effWeight(assessment, types));
         const weighted = weights.length > 0 && weights.every(weight => weight != null && weight > 0);
         const totalWeight = weighted ? weights.reduce((sum, weight) => sum + weight, 0) : 0;
-        const columns = kinds.map(kind => {
-          const related = periodAssessments.filter(assessment =>
-            this.componentKind(assessment, types) === kind);
-          const maximum = related.reduce((sum, assessment) => sum + Number(assessment.maximum_mark || 0), 0);
+        const columns = this.typeColumns(periodAssessments, types).map(column => {
+          const related = periodAssessments.filter(assessment => this.colMatches(column, assessment));
           const weight = weighted
             ? related.reduce((sum, assessment) => sum + this.effWeight(assessment, types), 0)
             : 0;
           return {
-            key: kind,
-            label: kind,
-            sub: weighted && totalWeight > 0
-              ? `${Math.round(weight / totalWeight * 100)}%`
-              : ''
+            ...column,
+            sub: weighted && totalWeight > 0 ? `${Math.round(weight / totalWeight * 100)}%` : ''
           };
         });
         const rows = (subjects || []).map(subject => {
@@ -228,8 +223,7 @@ const ReportStudent = {
               String(mark.assessment_id) === String(assessment.id)))
             .filter(mark => mark && mark.mark != null && mark.mark !== '');
           const components = columns.map(column => {
-            const componentAssessments = related.filter(assessment =>
-              this.componentKind(assessment, types) === column.key);
+            const componentAssessments = related.filter(assessment => this.colMatches(column, assessment));
             const componentMarks = componentAssessments
               .map(assessment => marks.find(mark =>
                 String(mark.assessment_id) === String(assessment.id)))
@@ -259,7 +253,7 @@ const ReportStudent = {
             components,
             maximumComponents: columns.map(column => periodAssessments
               .filter(assessment => String(assessment.subject_id) === String(subject.id)
-                && this.componentKind(assessment, types) === column.key)
+                && this.colMatches(column, assessment))
               .reduce((sum, assessment) => sum + Number(assessment.maximum_mark || 0), 0)),
             obtained: valid.length ? obtained : null,
             maximum,
@@ -271,6 +265,7 @@ const ReportStudent = {
           id: termKey,
           name: term?.name || periodAssessments[0]?.term || 'Reporting Period',
           columns,
+          weighted,
           rows
         };
       });
@@ -334,7 +329,7 @@ const ReportStudent = {
         sub: allWeighted && totalWeight > 0 ? `(${Math.round((wsum / totalWeight) * 100)}%)` : (max ? `(${max})` : '')
       };
     });
-    const weightByComponent = { EU: 0, ET: 0 };
+    const weightByComponent = new Map(columns.map(column => [column.key, 0]));
     let maximumWeight = 0;
     let hasAllWeights = official.length > 0;
     official.forEach(assessment => {
@@ -343,18 +338,19 @@ const ReportStudent = {
         hasAllWeights = false;
         return;
       }
-      weightByComponent[this.componentKind(assessment, types)] += weight;
+      const column = columns.find(item => this.colMatches(item, assessment));
+      if (column) weightByComponent.set(column.key, weightByComponent.get(column.key) + weight);
       maximumWeight += weight;
     });
     const maximumWeights = hasAllWeights && maximumWeight > 0
-      ? {
-        EU: Math.round(weightByComponent.EU / maximumWeight * 100),
-        ET: Math.round(weightByComponent.ET / maximumWeight * 100)
-      }
+      ? Object.fromEntries(columns.map(column => [
+        column.key,
+        Math.round(weightByComponent.get(column.key) / maximumWeight * 100)
+      ]))
       : null;
 
     const subjRows = [];
-    let totObt = 0, totMax = 0, withMarks = 0, passed = 0, failed = 0;
+    let totObt = 0, withMarks = 0, passed = 0, failed = 0;
     for (const subj of levelSubjects) {
       const sAssess = official.filter(a => String(a.subject_id) === String(subj.id));
       const sMarks = myMarks.filter(m => sAssess.some(a => String(a.id) === String(m.assessment_id)));
@@ -380,7 +376,7 @@ const ReportStudent = {
       const g = ReportUtils.calcGrade(pct == null ? 0 : pct, scale);
       const pf = pct == null ? 'Missing' : ReportUtils.calcPassFail(pct, passMark);
       const remark = pct == null ? 'No mark available.' : await ReportComments.getSubjectRemark(pct, { level: level.short, scale });
-      if (pct != null) { withMarks++; totObt += obt; totMax += mx; if (pf === 'PASS') passed++; else failed++; }
+      if (pct != null) { withMarks++; totObt += obt; if (pf === 'PASS') passed++; else failed++; }
       subjRows.push({ subject: subj, components, obtained: obt, maxMark: mx, pct, grade: pct == null ? '—' : g.grade, descriptor: g.descriptor, status: pf, remark, hasMarks: pct != null });
     }
 
@@ -394,7 +390,15 @@ const ReportStudent = {
       return { obtained: obt, max: col.max, has };
     });
 
-    const overallPct = totMax > 0 && withMarks > 0 ? Math.round((totObt / totMax) * 10000) / 100 : null;
+    const scoredPercentages = subjRows.filter(row => row.hasMarks && row.pct != null)
+      .map(row => row.pct);
+    const overallPct = scoredPercentages.length
+      ? Math.round(scoredPercentages.reduce((sum, percentage) => sum + percentage, 0)
+        / scoredPercentages.length * 100) / 100
+      : null;
+    const totalMax = levelSubjects.reduce((sum, subject) => sum + official
+      .filter(assessment => String(assessment.subject_id) === String(subject.id))
+      .reduce((subjectMax, assessment) => subjectMax + Number(assessment.maximum_mark || 0), 0), 0);
     const overallGrade = overallPct == null ? { grade: '—', descriptor: '' } : ReportUtils.calcGrade(overallPct, scale);
     const overallPf = overallPct == null ? 'Incomplete' : ReportUtils.calcPassFail(overallPct, passMark);
     const overallComment = overallPct == null
@@ -432,7 +436,7 @@ const ReportStudent = {
       subjRows, columns, columnMeta, columnTotals,
       periodReports, maximumWeights,
       totalSubjects: levelSubjects.length, withMarks,
-      passed, failed, totalObtained: Number(totObt || 0), totalMax: Number(totMax || 0),
+      passed, failed, totalObtained: Number(totObt || 0), totalMax: Number(totalMax || 0),
       overallPct, overallGrade, overallPf, avg: overallPct,
       gradeDist, teacherName, teacherComment: teacherFinal, dosComment: dosFinal,
       decision, autoDecision, overallComment,
@@ -620,57 +624,93 @@ const ReportStudent = {
 
     const fmtMark = value => Number(value).toLocaleString('en-US', { maximumFractionDigits: 1 });
     const periods = card.periodReports || [];
-    const periodRow = (term, subjectId) => term.rows.find(row =>
+    const termDisplay = periods.map(period => period.name).join(', ') || term?.name || '-';
+    const periodRow = (period, subjectId) => period.rows.find(row =>
       String(row.subject.id) === String(subjectId));
-    const maximumForSubject = (subject, componentIndex) => periods.reduce((sum, period) => {
+    const allPeriodColumns = new Map(periods.flatMap(period => period.columns)
+      .map(column => [column.key, column]));
+    const configuredColumns = card.columnMeta?.length
+      ? card.columnMeta
+      : card.columns || [];
+    const componentColumns = [
+      ...configuredColumns.filter(column => allPeriodColumns.has(column.key)),
+      ...[...allPeriodColumns.values()].filter(column =>
+        !configuredColumns.some(configured => configured.key === column.key))
+    ];
+    const componentIndex = (period, column) =>
+      period.columns.findIndex(item => item.key === column.key);
+    const maximumForSubject = (subject, column) => periods.reduce((sum, period) => {
       const row = periodRow(period, subject.id);
-      return sum + Number(row?.maximumComponents?.[componentIndex] || 0);
+      const index = componentIndex(period, column);
+      return sum + Number(index < 0 ? 0 : row?.maximumComponents?.[index] || 0);
     }, 0);
-    const totalMaximumForSubject = subject => maximumForSubject(subject, 0) + maximumForSubject(subject, 1);
+    const totalMaximumForSubject = subject => componentColumns.reduce(
+      (sum, column) => sum + maximumForSubject(subject, column),
+      0
+    );
     const maximumTotal = subjRows.reduce((sum, row) => sum + totalMaximumForSubject(row.subject), 0);
     const termHeader = periods.map(period =>
-      `<th colspan="5">${Utils.escapeHtml(period.name)}${year?.name ? ` / ${Utils.escapeHtml(year.name)}` : ''}</th>`
+      `<th colspan="${period.columns.length + 3}">${Utils.escapeHtml(period.name)}${year?.name ? ` / ${Utils.escapeHtml(year.name)}` : ''}</th>`
     ).join('');
-    const termSubHeaders = periods.map(() => '<th>EU</th><th>ET</th><th>TOT</th><th>%</th><th>GR</th>').join('');
+    const termSubHeaders = periods.map(period =>
+      `${period.columns.map(column => `<th title="${Utils.escapeHtml(column.name)}">${Utils.escapeHtml(column.code || column.name)}</th>`).join('')}<th>TOT</th><th>%</th><th>GR</th>`
+    ).join('');
     const termWeightHeaders = periods.map(period =>
-      `<th>${Utils.escapeHtml(period.columns[0]?.sub || '')}</th><th>${Utils.escapeHtml(period.columns[1]?.sub || '')}</th><th>100%</th><th></th><th></th>`
+      `${period.columns.map(column => `<th>${Utils.escapeHtml(column.sub || '')}</th>`).join('')}<th>${period.weighted ? '100%' : ''}</th><th></th><th></th>`
     ).join('');
     const rowMarkup = subjRows.map(subjectRow => {
       const cells = periods.map(period => {
         const row = periodRow(period, subjectRow.subject.id);
-        const eu = row?.components[0]?.obtained;
-        const et = row?.components[1]?.obtained;
-        return `<td>${eu == null ? '' : fmtMark(eu)}</td><td>${et == null ? '' : fmtMark(et)}</td><td>${row?.obtained == null ? '' : fmtMark(row.obtained)}</td><td>${row?.percentage == null ? '' : `${row.percentage.toFixed(1)}%`}</td><td>${Utils.escapeHtml(row?.grade || '—')}</td>`;
+        const components = period.columns.map((column, index) => {
+          const value = row?.components[index]?.obtained;
+          return `<td>${value == null ? '' : fmtMark(value)}</td>`;
+        }).join('');
+        return `${components}<td>${row?.obtained == null ? '' : fmtMark(row.obtained)}</td><td>${row?.percentage == null ? '' : `${row.percentage.toFixed(1)}%`}</td><td>${Utils.escapeHtml(row?.grade || '—')}</td>`;
       }).join('');
       const total = subjectRow.hasMarks
         ? `<td>${fmtMark(subjectRow.obtained)}</td><td>${fmtMark(totalMaximumForSubject(subjectRow.subject))}</td><td>${subjectRow.pct.toFixed(1)}%</td><td>${Utils.escapeHtml(subjectRow.grade)}</td>`
         : `<td></td><td>${fmtMark(totalMaximumForSubject(subjectRow.subject))}</td><td></td><td></td>`;
-      return `<tr><td class="src-subject">${Utils.escapeHtml(subjectRow.subject.name)}</td><td class="src-maximum-cell">${maximumForSubject(subjectRow.subject, 0) || ''}</td><td class="src-maximum-cell">${maximumForSubject(subjectRow.subject, 1) || ''}</td><td class="src-maximum-cell">${totalMaximumForSubject(subjectRow.subject) || ''}</td>${cells}${total}</tr>`;
+      const maximumCells = componentColumns.map(column =>
+        `<td class="src-maximum-cell">${maximumForSubject(subjectRow.subject, column) || ''}</td>`
+      ).join('');
+      return `<tr><td class="src-subject">${Utils.escapeHtml(subjectRow.subject.name)}</td>${maximumCells}<td class="src-maximum-cell">${totalMaximumForSubject(subjectRow.subject) || ''}</td>${cells}${total}</tr>`;
     }).join('');
     const totalsCells = periods.map(period => {
       const valid = period.rows.filter(row => row.percentage != null);
-      const eu = valid.reduce((sum, row) => sum + Number(row.components[0]?.obtained || 0), 0);
-      const et = valid.reduce((sum, row) => sum + Number(row.components[1]?.obtained || 0), 0);
+      const componentTotals = period.columns.map((column, index) => {
+        const obtained = valid.reduce((sum, row) =>
+          sum + Number(row.components[index]?.obtained || 0), 0);
+        return `<td>${valid.length ? fmtMark(obtained) : ''}</td>`;
+      }).join('');
       const obtained = valid.reduce((sum, row) => sum + Number(row.obtained || 0), 0);
-      const maximum = valid.reduce((sum, row) => sum + Number(row.maximum || 0), 0);
-      const pct = maximum > 0 ? obtained / maximum * 100 : null;
+      const percentages = valid.map(row => row.percentage);
+      const pct = percentages.length
+        ? percentages.reduce((sum, value) => sum + value, 0) / percentages.length
+        : null;
       const grade = pct == null ? '' : ReportUtils.calcGrade(pct, card.scale).grade;
-      return `<td>${valid.length ? fmtMark(eu) : ''}</td><td>${valid.length ? fmtMark(et) : ''}</td><td>${valid.length ? fmtMark(obtained) : ''}</td><td>${pct == null ? '' : `${pct.toFixed(1)}%`}</td><td>${Utils.escapeHtml(grade)}</td>`;
+      return `${componentTotals}<td>${valid.length ? fmtMark(obtained) : ''}</td><td>${pct == null ? '' : `${pct.toFixed(1)}%`}</td><td>${Utils.escapeHtml(grade)}</td>`;
     }).join('');
     const overallGrade = card.overallGrade?.grade || '—';
-    const totalMaximumEU = subjRows.reduce((sum, row) => sum + maximumForSubject(row.subject, 0), 0);
-    const totalMaximumET = subjRows.reduce((sum, row) => sum + maximumForSubject(row.subject, 1), 0);
+    const maximumCells = componentColumns.map(column => {
+      const maximum = subjRows.reduce((sum, row) => sum + maximumForSubject(row.subject, column), 0);
+      return `<td>${fmtMark(maximum)}</td>`;
+    }).join('');
+    const maximumWeightCells = componentColumns.map(column =>
+      `<th>${card.maximumWeights?.[column.key] == null ? '' : `${card.maximumWeights[column.key]}%`}</th>`
+    ).join('');
+    const allSubjectsColumnCount = 1 + componentColumns.length + 1
+      + periods.reduce((sum, period) => sum + period.columns.length + 3, 0) + 4;
     const table = `<div class="src-multi-term-wrap"><table class="src-table src-multi-term-table">
       <thead>
-        <tr><th rowspan="2" class="src-subject-heading">SUBJECT</th><th colspan="3">MAXIMUM</th>${termHeader}<th colspan="4">Total</th></tr>
-        <tr class="src-multi-term-subhead"><th>EU</th><th>ET</th><th>TOT</th>${termSubHeaders}<th>TOT</th><th>MAX</th><th>%</th><th>GR</th></tr>
-        <tr class="src-multi-term-weight"><th>WEIGHT</th><th>${card.maximumWeights?.EU == null ? '' : `${card.maximumWeights.EU}%`}</th><th>${card.maximumWeights?.ET == null ? '' : `${card.maximumWeights.ET}%`}</th><th>100%</th>${termWeightHeaders}<th></th><th></th><th></th><th></th></tr>
+        <tr><th rowspan="2" class="src-subject-heading">SUBJECT</th><th colspan="${componentColumns.length + 1}">MAXIMUM</th>${termHeader}<th colspan="4">Total</th></tr>
+        <tr class="src-multi-term-subhead">${componentColumns.map(column => `<th title="${Utils.escapeHtml(column.name)}">${Utils.escapeHtml(column.code || column.name)}</th>`).join('')}<th>TOT</th>${termSubHeaders}<th>TOT</th><th>MAX</th><th>%</th><th>GR</th></tr>
+        <tr class="src-multi-term-weight"><th>WEIGHT</th>${maximumWeightCells}<th>${card.maximumWeights ? '100%' : ''}</th>${termWeightHeaders}<th></th><th></th><th></th><th></th></tr>
       </thead>
       <tbody>
-        <tr class="src-all-subjects-row"><td colspan="${1 + 3 + periods.length * 5 + 4}">All Subjects</td></tr>
+        <tr class="src-all-subjects-row"><td colspan="${allSubjectsColumnCount}">All Subjects</td></tr>
         ${rowMarkup}
       </tbody>
-      <tfoot><tr><td class="src-subject">Total</td><td>${fmtMark(totalMaximumEU)}</td><td>${fmtMark(totalMaximumET)}</td><td>${fmtMark(maximumTotal)}</td>${totalsCells}<td>${fmtMark(card.totalObtained)}</td><td>${fmtMark(maximumTotal)}</td><td>${card.overallPct == null ? '' : `${card.overallPct.toFixed(1)}%`}</td><td>${Utils.escapeHtml(overallGrade)}</td></tr></tfoot>
+      <tfoot><tr><td class="src-subject">Total</td>${maximumCells}<td>${fmtMark(maximumTotal)}</td>${totalsCells}<td>${fmtMark(card.totalObtained)}</td><td>${fmtMark(maximumTotal)}</td><td>${card.overallPct == null ? '' : `${card.overallPct.toFixed(1)}%`}</td><td>${Utils.escapeHtml(overallGrade)}</td></tr></tfoot>
     </table></div>`;
     const posText = card.position ? `${card.position} out of ${card.positionOutOf}` : 'Not available';
 
@@ -709,7 +749,7 @@ const ReportStudent = {
         </div>
         <div class="src-info-col">
           <div class="src-info-row"><span class="src-info-lbl">Academic Year</span><span class="src-info-sep">:</span><span class="src-info-val">${Utils.escapeHtml(year?.name || '-')}</span></div>
-          <div class="src-info-row"><span class="src-info-lbl">Term</span><span class="src-info-sep">:</span><span class="src-info-val">${Utils.escapeHtml(term?.name || '-')}</span></div>
+          <div class="src-info-row"><span class="src-info-lbl">Term(s)</span><span class="src-info-sep">:</span><span class="src-info-val">${Utils.escapeHtml(termDisplay)}</span></div>
           ${dob ? `<div class="src-info-row"><span class="src-info-lbl">Date of Birth</span><span class="src-info-sep">:</span><span class="src-info-val">${Utils.escapeHtml(dob)}</span></div>` : ''}
           <div class="src-info-row"><span class="src-info-lbl">Gender</span><span class="src-info-sep">:</span><span class="src-info-val">${Utils.escapeHtml(learner?.gender === 'M' ? 'Male' : learner?.gender === 'F' ? 'Female' : (learner?.gender || '-'))}</span></div>
         </div>
@@ -766,7 +806,7 @@ const ReportStudent = {
       <div class="src-footer">
         <div class="src-footer-row">
           <div><strong>RMS-MIS &nbsp;|&nbsp; ${Utils.escapeHtml(s.school_name || 'Rukara Model School')}</strong><br>Marks Information System</div>
-          <div style="text-align:center">Academic Year: ${Utils.escapeHtml(year?.name || '-')}<br>Term: ${Utils.escapeHtml(term?.name || '-')}</div>
+          <div style="text-align:center">Academic Year: ${Utils.escapeHtml(year?.name || '-')}<br>Term(s): ${Utils.escapeHtml(termDisplay)}</div>
           <div style="text-align:right">Generated: ${Utils.escapeHtml(genDate)}</div>
         </div>
         <div class="src-footer-motto">Education, Work and Success</div>

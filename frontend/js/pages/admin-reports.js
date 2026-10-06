@@ -98,9 +98,9 @@ const ReportCenter = {
     const base = new URL('.', window.location.href).href;
     const css = [
       'css/styles.css?v=20261004-9',
-      'css/report-card.css?v=20261006-1',
+      'css/report-card.css?v=20261006-2',
       'css/student-report-card.css?v=20261006-3',
-      'css/report-wizard.css?v=20261004-3'
+      'css/report-wizard.css?v=20261006-1'
     ].map(path => `<link rel="stylesheet" href="${new URL(path, base).href}">`).join('');
     const fonts = `<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin><link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700;800&display=swap" rel="stylesheet">`;
     const landscape = orientation === 'landscape';
