@@ -895,7 +895,7 @@ const ReportWizard = {
         </div>
       </div>
       <div class="rw-card-bd">
-        <p class="rw-help" style="margin-bottom:8px">Filtered by class ${s.classIds.length? s.classIds.join(','):''}${s.subjectIds.length?' + subjects':''}. Select one, multiple, or all.</p>
+        <p class="rw-help" style="margin-bottom:8px">Filtered by class ${s.classIds.length? s.classIds.join(','):''}${s.subjectIds.length?' + subjects':''}. Selected assessments alone are included; if none are selected, all assessments in this scope are used.</p>
         <div class="form-group" style="max-width:300px"><label>Assessment Type</label><select class="select-field" onchange="ReportWizard.setAssessmentType(this.value)"><option value="all">All Assessment Types</option>${types.map(t=>`<option value="${t.id || ''}" ${String(s.assessmentTypeId)===String(t.id)?'selected':''}>${Utils.escapeHtml(t.name)}</option>`).join('')}</select></div>
         <div class="rw-search"><i data-lucide="search"></i><input id="rw-assess-q" placeholder="Search assessments..." oninput="ReportWizard.refreshStep()"></div>
         ${this.chipsFor('assessmentIds', s.cache.assessments, a=> (a.display_name||a.name||a.unit||'Assessment'))}
@@ -1114,6 +1114,12 @@ const ReportWizard = {
       const renderStudentCard = data => typeof ReportStudent !== 'undefined' && typeof ReportStudent.renderCardInner === 'function'
         ? ReportStudent.renderCardInner(data)
         : ReportTemplates.studentCard(data);
+      const resolveCardOrientation = cards => {
+        if (orientation && orientation !== 'auto') return orientation;
+        return (cards || []).some(card => (card.periodReports || []).length > 1)
+          ? 'landscape'
+          : 'portrait';
+      };
       if (isStudentCard && (mode==='whole' || !cfg.studentIds || cfg.studentIds.length===0 || cfg.studentIds.length>1)){
         // Determine target student ids: whole class -> all in classIds, individual -> selected list
         let targetIds = cfg.studentIds;
@@ -1140,19 +1146,21 @@ const ReportWizard = {
           }
           if (!cards.length) throw new Error('No active learners found in the selected class(es).');
           cards.sort((a,b)=> (a.position||9999)-(b.position||9999));
+          orientation = resolveCardOrientation(cards);
           bodyHtml = cards.map(card =>
-            ReportHeader.getA4Container(renderStudentCard(card), 'portrait', false, 'rms-student-card-page')
+            ReportHeader.getA4Container(renderStudentCard(card), orientation, false, 'rms-student-card-page')
           ).join('');
-          orientation = (orientation==='auto' || !orientation) ? 'portrait' : orientation;
         } else if (cfg.reportType === 'student-card') {
           // Specific student selection (1+): per-student via engine + rich card layout
-          const parts=[];
+          const cards=[];
           for (const sid of targetIds){
             const one = await ReportEngine.generate({...cfg, studentId:sid, studentIds:[sid]});
-            parts.push(ReportHeader.getA4Container(renderStudentCard(one), 'portrait', false, 'rms-student-card-page'));
+            cards.push(one);
           }
-          bodyHtml = parts.join(ReportHeader.getPageBreak());
-          orientation = (orientation==='auto' || !orientation) ? 'portrait' : orientation;
+          orientation = resolveCardOrientation(cards);
+          bodyHtml = cards.map(card =>
+            ReportHeader.getA4Container(renderStudentCard(card), orientation, false, 'rms-student-card-page')
+          ).join(ReportHeader.getPageBreak());
         } else {
           // student-performance batch: one top-half-template section per student
           const fnMap={ 'student-performance':'studentPerformance', 'teacher-student-performance':'teacherStudentPerformance', 'exam-class-summary':'examClassSummary', 'subject-performance':'subjectPerformance', 'class-performance':'classPerformance', 'missing-marks':'missingMarks', 'school-performance':'schoolPerformance', 'teacher-performance':'teacherPerformance', 'teacher-assessment-class':'teacherAssessmentClass', 'grade-distribution':'gradeDistribution'};
@@ -1174,7 +1182,9 @@ const ReportWizard = {
             'student-marks':'studentMarks', 'class-marks-sheet':'marksSheet', 'subject-marks-sheet':'marksSheet', 'class-ranking':'classPerformance', 'subject-grade-distribution':'gradeDistribution', 'subject-assessment-comparison':'subjectAssessmentComparison', 'assessment-summary':'assessmentSummary', 'assessment-completion':'assessmentCompletion', 'teacher-assessment-submission':'teacherAssessmentSubmission', 'term-performance-summary':'schoolPerformance', 'academic-year-performance':'schoolPerformance'};
           const tfn=ReportTemplates[fnMap[data.type]];
           _bodyHtml = cfg.reportType === 'student-card' ? renderStudentCard(data) : (tfn ? tfn(data) : '<p>Template not found</p>');
-          _orientation = orientation==='auto'? ReportHeader.getOrientation(data.type) : orientation;
+          _orientation = cfg.reportType === 'student-card'
+            ? resolveCardOrientation([data])
+            : orientation==='auto' ? ReportHeader.getOrientation(data.type) : orientation;
           bodyHtml = _bodyHtml;
           orientation = _orientation;
         }

@@ -669,8 +669,9 @@ const ParentMarksPortal = {
     }
     const card = this.buildReportCard();
     const html = ReportStudent.renderCard(card);
+    const orientation = (card.periodReports || []).length > 1 ? 'landscape' : 'portrait';
     ReportWizard.state.previewHtml = html;
-    ReportWizard.state.previewOrientation = 'portrait';
+    ReportWizard.state.previewOrientation = orientation;
     ReportWizard.state.previewConfig = '';
     const safePart = value => String(value || '').replace(/[^a-z0-9_-]/gi, '_');
     ReportWizard.state.previewFilename = `RMS-MIS_Student_Report_${safePart(this.result.student.code || 'RMS')}_${safePart(this.result.academic_year?.name || '')}.pdf`;
@@ -705,7 +706,7 @@ const ParentMarksPortal = {
     ReportCenter.openPreviewDocument(
       ReportWizard.state.previewHtml,
       title,
-      'portrait',
+      ReportWizard.state.previewOrientation || 'portrait',
       ReportWizard.state.previewFilename,
       previewWindow
     );

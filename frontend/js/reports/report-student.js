@@ -100,6 +100,20 @@ const ReportStudent = {
       list = list.filter(a => !a.term_id || tSet.has(String(a.term_id)));
     }
     const official = list.filter(a => ['submitted', 'approved', 'locked'].includes(a.status));
+    if (assessmentIds && assessmentIds.length) {
+      const selectedIds = new Set(assessmentIds.map(String));
+      const foundIds = new Set(list
+        .filter(assessment => selectedIds.has(String(assessment.id)))
+        .map(assessment => String(assessment.id)));
+      if (assessmentIds.some(id => !foundIds.has(String(id)))) {
+        throw new Error('One or more selected assessments do not match the chosen class, year, subject, or term.');
+      }
+      if (list.some(assessment =>
+        selectedIds.has(String(assessment.id))
+        && !['submitted', 'approved', 'locked'].includes(assessment.status))) {
+        throw new Error('Every selected assessment must be submitted, approved, or locked before a report card can be generated.');
+      }
+    }
     const pending = list.filter(a => a.status === 'submitted');
     const drafts = list.filter(a => !['approved', 'locked', 'submitted'].includes(a.status));
     let approval = 'DRAFT';
@@ -762,10 +776,17 @@ const ReportStudent = {
   },
 
   renderCard(card) {
-    return ReportHeader.getA4Container(this.renderCardInner(card), 'portrait');
+    const orientation = (card.periodReports || []).length > 1 ? 'landscape' : 'portrait';
+    return ReportHeader.getA4Container(this.renderCardInner(card), orientation);
   },
 
   renderBatch(cards) {
-    return cards.map(c => ReportHeader.getA4Container(this.renderCardInner(c), 'portrait')).join(ReportHeader.getPageBreak());
+    const orientation = (cards || []).some(card => (card.periodReports || []).length > 1)
+      ? 'landscape'
+      : 'portrait';
+    return cards.map(card => ReportHeader.getA4Container(
+      this.renderCardInner(card),
+      orientation
+    )).join(ReportHeader.getPageBreak());
   }
 };
