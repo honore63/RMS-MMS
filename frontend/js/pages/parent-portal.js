@@ -24,7 +24,11 @@ async function renderParentDashboard() {
     }
 
     const learnerClass = classes.find(c => c.id === learner.class_id);
-    const learnerAssessments = assessments.filter(a => a.class_id === learner.class_id);
+    const learnerAssessments = assessments.filter(a => {
+      if (a.class_id !== learner.class_id) return false;
+      const subject = subjects.find(item => item.id === a.subject_id);
+      return EducationLevels.subjectMatchesClass(subject, learnerClass);
+    });
     const learnerMarks = marks.filter(m => learnerAssessments.some(a => a.id === m.assessment_id));
 
     const subjectPerformance = {};
@@ -137,7 +141,11 @@ async function renderParentPerformance() {
     }
 
     const learnerClass = classes.find(c => c.id === learner.class_id);
-    const learnerAssessments = assessments.filter(a => a.class_id === learner.class_id);
+    const learnerAssessments = assessments.filter(a => {
+      if (a.class_id !== learner.class_id) return false;
+      const subject = subjects.find(item => item.id === a.subject_id);
+      return EducationLevels.subjectMatchesClass(subject, learnerClass);
+    });
     const learnerMarks = marks.filter(m => learnerAssessments.some(a => a.id === m.assessment_id));
 
     const selectedTerm = terms[0]?.id || null;
@@ -247,12 +255,11 @@ async function renderParentReports() {
       return;
     }
 
-    const [learner, classes, assessments, marks, subjects] = await Promise.all([
+    const [learner, classes, years, terms] = await Promise.all([
       sbClient.from('learners').select('*').eq('id', learnerId).maybeSingle().then(r => r.data),
       DB.get('classes').catch(() => []),
-      sbClient.from('assessments').select('*').in('status', ['submitted', 'approved', 'locked']).then(r => r.data || []).catch(() => []),
-      sbClient.from('marks').select('*').eq('learner_id', learnerId).in('status', ['submitted', 'approved', 'locked']).then(r => r.data || []).catch(() => []),
-      DB.get('subjects').catch(() => [])
+      DB.get('academic_years'),
+      DB.get('terms')
     ]);
 
     if (!learner) {
@@ -260,62 +267,20 @@ async function renderParentReports() {
       return;
     }
 
-    const learnerClass = classes.find(c => c.id === learner.class_id);
-    const learnerAssessments = assessments.filter(a => a.class_id === learner.class_id);
-    const learnerMarks = marks.filter(m => learnerAssessments.some(a => a.id === m.assessment_id));
+    const orderedYears = years.slice().sort((a, b) => String(b.name).localeCompare(String(a.name)));
+    const activeYear = orderedYears.find(year => year.status === 'active' || year.is_current) || orderedYears[0];
+    const activeTerms = terms.filter(term => !activeYear || String(term.academic_year_id) === String(activeYear.id));
+    const selectedTerm = activeTerms.find(term => term.status === 'active' || term.is_current) || activeTerms[0];
+    ParentReports.state = {
+      learner,
+      cls: classes.find(cls => String(cls.id) === String(learner.class_id)) || null,
+      years: orderedYears,
+      terms,
+      yearId: activeYear?.id || '',
+      termId: selectedTerm?.id || ''
+    };
 
-    const html = `
-      <div class="card" style="background:#fff;border:1px solid var(--gray-200);border-radius:12px;padding:24px">
-        <h3 style="margin:0 0 16px;font-size:16px;font-weight:600">Available Reports</h3>
-        <p style="color:var(--gray-500);margin-bottom:24px">Select a report to view or download your learner's academic performance.</p>
-
-        <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:16px">
-          <div class="card" style="border:1px solid var(--gray-200);border-radius:8px;padding:20px">
-            <h4 style="margin:0 0 8px;font-size:14px;font-weight:600">Overall Performance Summary</h4>
-            <p style="font-size:12px;color:var(--gray-500);margin-bottom:16px">Complete overview of all subjects and assessments</p>
-            <button class="btn btn-primary btn-sm" onclick="window.print()"><i data-lucide="printer"></i> Print</button>
-          </div>
-
-          <div class="card" style="border:1px solid var(--gray-200);border-radius:8px;padding:20px">
-            <h4 style="margin:0 0 8px;font-size:14px;font-weight:600">Subject Performance</h4>
-            <p style="font-size:12px;color:var(--gray-500);margin-bottom:16px">Detailed breakdown by subject</p>
-            <button class="btn btn-primary btn-sm" onclick="window.print()"><i data-lucide="printer"></i> Print</button>
-          </div>
-
-          <div class="card" style="border:1px solid var(--gray-200);border-radius:8px;padding:20px">
-            <h4 style="margin:0 0 8px;font-size:14px;font-weight:600">Assessment Results</h4>
-            <p style="font-size:12px;color:var(--gray-500);margin-bottom:16px">All published assessment marks and grades</p>
-            <button class="btn btn-primary btn-sm" onclick="window.print()"><i data-lucide="printer"></i> Print</button>
-          </div>
-        </div>
-
-        ${learnerMarks.length ? `
-          <div style="margin-top:24px">
-            <h4 style="margin:0 0 12px;font-size:14px;font-weight:600">Performance Summary</h4>
-            <table class="table">
-              <thead><tr><th>Subject</th><th>Assessments</th><th>Average</th></tr></thead>
-              <tbody>
-                ${Object.entries(learnerMarks.reduce((acc, m) => {
-                  const a = learnerAssessments.find(x => x.id === m.assessment_id);
-                  const subj = subjects.find(s => s.id === a?.subject_id);
-                  if (!subj) return acc;
-                  if (!acc[subj.id]) acc[subj.id] = { name: subj.name, marks: [] };
-                  acc[subj.id].marks.push(m);
-                  return acc;
-                }, {})).map(([_, v]) => {
-                  const avg = v.marks.length ? Math.round(v.marks.reduce((s, m) => s + (m.percentage || 0), 0) / v.marks.length) : null;
-                  return `<tr>
-                    <td>${Utils.escapeHtml(v.name)}</td>
-                    <td>${v.marks.length}</td>
-                    <td>${avg !== null ? avg + '%' : '-'}</td>
-                  </tr>`;
-                }).join('')}
-              </tbody>
-            </table>
-          </div>
-        ` : '<p style="color:var(--gray-500);margin-top:24px">No published results available for reports.</p>'}
-      </div>
-    `;
+    const html = ParentReports.render();
 
     setContent(html);
     if (typeof lucide !== 'undefined') lucide.createIcons();
@@ -323,3 +288,112 @@ async function renderParentReports() {
     setContent(Utils.error('Failed to load reports', e.message));
   }
 }
+
+const ParentReports = {
+  state: null,
+
+  render() {
+    const state = this.state;
+    const filteredTerms = state.terms
+      .filter(term => !state.yearId || String(term.academic_year_id) === String(state.yearId))
+      .sort((a, b) => Number(a.term_no || 0) - Number(b.term_no || 0));
+    return `
+      <section class="card" style="padding:24px">
+        <h3 style="margin:0 0 8px;font-size:18px;font-weight:700">Official Student Report Card</h3>
+        <p style="color:var(--gray-500);margin:0 0 20px">Generate the same official report card available to school administrators. Only approved and locked results are included.</p>
+        <div class="flex gap-4 items-end" style="flex-wrap:wrap">
+          <div class="form-group" style="min-width:200px">
+            <label for="parent-report-year">Academic Year</label>
+            <select id="parent-report-year" class="select-field" onchange="ParentReports.changeYear(this.value)">
+              <option value="">Select Year</option>
+              ${state.years.map(year => `<option value="${year.id}" ${String(state.yearId) === String(year.id) ? 'selected' : ''}>${Utils.escapeHtml(year.name)}</option>`).join('')}
+            </select>
+          </div>
+          <div class="form-group" style="min-width:180px">
+            <label for="parent-report-term">Term</label>
+            <select id="parent-report-term" class="select-field" onchange="ParentReports.changeTerm(this.value)">
+              <option value="">Select Term</option>
+              ${filteredTerms.map(term => `<option value="${term.id}" ${String(state.termId) === String(term.id) ? 'selected' : ''}>${Utils.escapeHtml(term.name)}</option>`).join('')}
+            </select>
+          </div>
+          <button class="btn btn-primary" type="button" onclick="ParentReports.generate()"><i data-lucide="file-badge"></i> Generate Report</button>
+        </div>
+        <div id="parent-report-preview" style="margin-top:24px"></div>
+      </section>`;
+  },
+
+  changeYear(yearId) {
+    const state = this.state;
+    state.yearId = yearId;
+    const terms = state.terms
+      .filter(term => !yearId || String(term.academic_year_id) === String(yearId))
+      .sort((a, b) => Number(a.term_no || 0) - Number(b.term_no || 0));
+    const activeTerm = terms.find(term => term.status === 'active' || term.is_current) || terms[0];
+    state.termId = activeTerm?.id || '';
+    const select = document.getElementById('parent-report-term');
+    if (select) {
+      select.innerHTML = '<option value="">Select Term</option>' + terms.map(term =>
+        `<option value="${term.id}" ${String(state.termId) === String(term.id) ? 'selected' : ''}>${Utils.escapeHtml(term.name)}</option>`
+      ).join('');
+    }
+    const preview = document.getElementById('parent-report-preview');
+    if (preview) preview.innerHTML = '';
+  },
+
+  changeTerm(termId) {
+    this.state.termId = termId;
+    const preview = document.getElementById('parent-report-preview');
+    if (preview) preview.innerHTML = '';
+  },
+
+  async generate() {
+    const state = this.state;
+    const preview = document.getElementById('parent-report-preview');
+    if (!preview || !state) return;
+    if (!state.cls) {
+      preview.innerHTML = Utils.error('The learner is not assigned to a class.');
+      return;
+    }
+    if (!state.yearId || !state.termId) {
+      preview.innerHTML = Utils.error('Select an academic year and term.');
+      return;
+    }
+    if (typeof ReportStudent === 'undefined' || typeof ReportWizard === 'undefined') {
+      preview.innerHTML = Utils.error('The official report service is unavailable. Please reload and try again.');
+      return;
+    }
+    preview.innerHTML = Utils.loading();
+    try {
+      const card = await ReportStudent.fetchCardData({
+        learnerId: state.learner.id,
+        classId: state.cls.id,
+        yearId: state.yearId,
+        termId: state.termId,
+        termIds: [state.termId],
+        assessmentStatuses: ['approved', 'locked']
+      });
+      if (!card.withMarks) {
+        preview.innerHTML = '<p class="text-muted">No published results are available for this learner in the selected term.</p>';
+        return;
+      }
+      const html = ReportStudent.renderCard(card);
+      const safePart = value => String(value || '').replace(/[^a-z0-9_-]/gi, '_');
+      ReportWizard.state.previewHtml = html;
+      ReportWizard.state.previewOrientation = 'portrait';
+      ReportWizard.state.previewConfig = '';
+      ReportWizard.state.previewFilename = `RMS-MIS_Student_Report_${safePart(state.learner.learner_code || 'RMS')}_${safePart(card.year?.name || '')}_${safePart(card.term?.name || '')}.pdf`;
+      preview.innerHTML = `
+        <div class="report-preview-toolbar-flex no-print" style="margin-bottom:16px;display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap">
+          <div><h4 style="font-size:16px;font-weight:700;margin:0">Official Student Report</h4><p class="text-sm text-muted" style="margin:4px 0 0">${Utils.escapeHtml(state.learner.full_name)}</p></div>
+          <div class="flex gap-2" style="flex-wrap:wrap">
+            <button class="btn btn-outline btn-sm" onclick="ReportWizard.print()"><i data-lucide="printer"></i> Print</button>
+            <button class="btn btn-primary btn-sm" onclick="ReportWizard.downloadPDF()"><i data-lucide="file-down"></i> Download PDF</button>
+          </div>
+        </div>
+        <div class="pmp-report-preview rms-full-report-preview">${html}</div>`;
+      if (typeof lucide !== 'undefined') lucide.createIcons();
+    } catch (error) {
+      preview.innerHTML = Utils.error('Failed to generate report', error.message);
+    }
+  }
+};

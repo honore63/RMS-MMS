@@ -2,6 +2,7 @@ let assignFilter = 'all';
 let assignmentQueue = [];
 let assignmentSubjects = [];
 let assignmentClassLookup = {};
+let assignmentClassData = {};
 
 function renderAssignmentClassSubjects() {
   const classId = document.getElementById('af-class-picker')?.value || '';
@@ -15,9 +16,14 @@ function renderAssignmentClassSubjects() {
 
   const existing = assignmentQueue.find(item => item.class_id === classId);
   const checked = new Set(existing ? existing.subject_ids : []);
-  const list = (assignmentSubjects || []).map(s => `
+  const cls = assignmentClassData[classId];
+  const classSubjects = (assignmentSubjects || [])
+    .filter(subject => !cls || EducationLevels.subjectMatchesClass(subject, cls));
+  const allowedIds = new Set(classSubjects.map(subject => String(subject.id)));
+  const visibleChecked = new Set([...checked].filter(id => allowedIds.has(String(id))));
+  const list = classSubjects.map(s => `
     <label style="display:flex;align-items:center;gap:8px;padding:4px 0">
-      <input type="checkbox" name="af-subject" value="${s.id}" ${checked.has(s.id) ? 'checked' : ''} onchange="renderAssignmentSubjectCount()"> 
+      <input type="checkbox" name="af-subject" value="${s.id}" ${visibleChecked.has(String(s.id)) ? 'checked' : ''} onchange="renderAssignmentSubjectCount()">
       ${Utils.escapeHtml(s.name)}
     </label>
   `).join('') || '<div class="text-sm text-muted">No active subjects available for this class.</div>';
@@ -180,6 +186,10 @@ async function renderAssignments() {
   ]);
   
   const filtered = assignFilter === 'all' ? assignments : assignments.filter(a => a.teacher_id === assignFilter);
+  const subjectsForClass = classId => {
+    const cls = classes.find(item => String(item.id) === String(classId));
+    return subjects.filter(subject => !cls || EducationLevels.subjectMatchesClass(subject, cls));
+  };
   
   // teacher_id -> year_id -> class_id -> Set(subject_ids)
   const byTeacher = {};
@@ -209,7 +219,10 @@ async function renderAssignments() {
       const yearLines = Object.entries(classMap).map(([cid, subjSet]) => {
         classCount++;
         subjectCount += subjSet.size;
-        const subs = Array.from(subjSet).map(subjectName).join(', ');
+        const allowedSubjectIds = new Set(subjectsForClass(cid).map(subject => String(subject.id)));
+        const subs = Array.from(subjSet)
+          .filter(subjectId => allowedSubjectIds.has(String(subjectId)))
+          .map(subjectName).join(', ');
         return `<div class="assign-line"><span class="assign-class">${Utils.escapeHtml(className(cid))}</span><span class="assign-subjects">${Utils.escapeHtml(subs)}</span></div>`;
       }).join('');
       return (yearLabel ? `<div class="assign-year">${Utils.escapeHtml(yearLabel)}</div>` : '') + yearLines;
@@ -266,6 +279,7 @@ async function buildAssignmentModal(title, preSelectedTeacher = null, preSelecte
   const scopedSubjects = typeof Scope !== 'undefined' && Scope.isScoped() ? Scope.filterSubjects(subjects) : subjects;
   assignmentSubjects = scopedSubjects || [];
   assignmentClassLookup = Object.fromEntries((scopedClasses || []).map(c => [c.id, c.name]));
+  assignmentClassData = Object.fromEntries((scopedClasses || []).map(c => [c.id, c]));
   assignmentQueue = Object.entries(selectedClassSubjects || {}).map(([class_id, subject_ids]) => ({
     class_id,
     subject_ids: Array.isArray(subject_ids) ? subject_ids : [...new Set((subject_ids || []).map(s => s))]
@@ -348,13 +362,15 @@ async function assignSaveMultiple(btn) {
   const payLoad = [];
   assignmentQueue.forEach(item => {
     (item.subject_ids || []).forEach(subject_id => {
+      const cls = assignmentClassData[item.class_id];
+      const subject = assignmentSubjects.find(row => String(row.id) === String(subject_id));
+      if (!cls || !subject || !EducationLevels.subjectMatchesClass(subject, cls)) return;
       payLoad.push({ teacher_id, class_id: item.class_id, subject_id, academic_year_id: year_id });
     });
   });
-
   if (!payLoad.length) {
-    if (btn) { btn.disabled = false; btn.innerHTML = '<i data-lucide="check"></i> Create Assignments'; }
-    return Utils.toast('Each added class must include at least one subject', 'error');
+    if (btn) { btn.disabled = false; btn.innerHTML = '<i data-lucide="save"></i> Assign Teacher'; }
+    return Utils.toast('No valid subjects are selected for the chosen class levels.', 'error');
   }
 
   try {
@@ -393,13 +409,15 @@ async function assignUpdateMultiple(teacherId, yearId, btn) {
   const payLoad = [];
   assignmentQueue.forEach(item => {
     (item.subject_ids || []).forEach(subject_id => {
+      const cls = assignmentClassData[item.class_id];
+      const subject = assignmentSubjects.find(row => String(row.id) === String(subject_id));
+      if (!cls || !subject || !EducationLevels.subjectMatchesClass(subject, cls)) return;
       payLoad.push({ teacher_id: teacherId, class_id: item.class_id, subject_id, academic_year_id: yearId === 'null' ? null : yearId });
     });
   });
-
   if (!payLoad.length) {
     if (btn) { btn.disabled = false; btn.innerHTML = '<i data-lucide="save"></i> Update Assignments'; }
-    return Utils.toast('Each added class must include at least one subject', 'error');
+    return Utils.toast('No valid subjects are selected for the chosen class levels.', 'error');
   }
 
   try {

@@ -58,6 +58,35 @@ test('grade selection should prefer the highest matching percentage band', () =>
   assert.equal(Utils.remark(92, scale), 'Excellent');
 });
 
+test('assessment normalization keeps raw values separate and rejects an invalid maximum', () => {
+  const Utils = loadUtils();
+  assert.deepEqual(Utils.assessmentResult(57, 60, []), {
+    normalized_mark: 95,
+    percentage: 95,
+    grade: 'A',
+    remark: 'Excellent'
+  });
+  assert.deepEqual(Utils.assessmentResult(8, 0, []), {
+    normalized_mark: null,
+    percentage: null,
+    grade: null,
+    remark: null
+  });
+  assert.equal(Utils.normalizedMark(null, 10), null);
+});
+
+test('subject availability is isolated by class education level and configured grades', () => {
+  const Utils = loadUtils();
+  const primaryClass = { education_level: 'Primary', level: 'P5', name: 'P5A' };
+  const lowerSecondaryClass = { education_level: 'Lower Secondary', level: 'S2', name: 'S2' };
+
+  assert.equal(Utils.matchesSubjectForClass({ level: 'Secondary' }, primaryClass), false);
+  assert.equal(Utils.matchesSubjectForClass({ level: 'Lower Secondary' }, lowerSecondaryClass), true);
+  assert.equal(Utils.matchesSubjectForClass({ level: 'Primary' }, lowerSecondaryClass), false);
+  assert.equal(Utils.matchesSubjectForClass({ level: 'Both' }, primaryClass), true);
+  assert.equal(Utils.matchesSubjectForClass({ level: 'Both', grades: 'P1,P2,P3' }, primaryClass), false);
+});
+
 test('DOS assessment type catalog should include exactly the official RMS-MIS set', () => {
   const Utils = loadUtils();
   const required = [

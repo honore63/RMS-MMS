@@ -12,7 +12,7 @@ function renderTeacherAnalytics() { analyticsRefresh(true); }
 
 let analyticsState = {
   yearId: 'all', termId: 'all', classId: 'all', stream: 'all', subjectId: 'all',
-  typeId: 'all', assessmentId: 'all', studentId: 'all', teacherId: 'all', status: 'official',
+  typeId: 'all', assessmentId: 'all', studentId: 'all', teacherId: 'all', status: 'all',
   limit: 10, metric: 'avg', compare: 'none'
 };
 let analyticsIsTeacher = false;
@@ -256,7 +256,7 @@ function analyticsEmptySections() {
     ${analyticsStat('Pass Rate', '—', 'badge-check', 'green')}
   </div></section>
   <div class="grid-2">
-    <div class="card"><div class="card-header"><h3><i data-lucide="pie-chart"></i>Overall Performance</h3></div><div class="chart-box" style="padding:32px;text-align:center;color:var(--gray-400)"><i data-lucide="bar-chart-3" style="width:36px;height:36px;margin-bottom:8px"></i><p>No completed assessment data yet</p><p class="text-xs">Charts will appear once marks are approved</p></div></div>
+    <div class="card"><div class="card-header"><h3><i data-lucide="pie-chart"></i>Overall Performance</h3></div><div class="chart-box" style="padding:32px;text-align:center;color:var(--gray-400)"><i data-lucide="bar-chart-3" style="width:36px;height:36px;margin-bottom:8px"></i><p>No completed assessment data yet</p><p class="text-xs">Charts will appear once marks are entered</p></div></div>
     <div class="card"><div class="card-header"><h3><i data-lucide="circle-dot"></i>Pass / Fail</h3></div><div class="chart-box" style="padding:32px;text-align:center;color:var(--gray-400)"><i data-lucide="circle-dot" style="width:36px;height:36px;margin-bottom:8px"></i><p>No pass/fail data yet</p></div></div>
   </div>
   <div class="card mt-6"><div class="card-header"><h3><i data-lucide="bar-chart-3"></i>Class / Subject Performance</h3></div><div class="chart-box" style="padding:32px;text-align:center;color:var(--gray-400)"><i data-lucide="school" style="width:32px;height:32px;margin-bottom:8px"></i><p>No class data yet — illustrations appear when assessments are created</p></div></div>`;

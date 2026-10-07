@@ -66,15 +66,15 @@ const MarksImport = (() => {
   }
 
   function computeDerived(rec) {
-    const max = Number(S.ctx.assessment ? S.ctx.assessment.maximum_mark : 30) || 30;
     if (rec.mark == null) return { pct: null, grade: '', remark: '', pf: '' };
-    const pct = Utils.pct(rec.mark, max);
     const scale = S.grading && S.grading.length ? S.grading : [];
-    const grade = Utils.grade(pct, scale);
-    const remark = Utils.remark(pct, scale);
+    const assessment = S.ctx.assessment;
+    const result = Utils.assessmentResult(rec.mark, assessment && assessment.maximum_mark, scale);
+    const pct = result.percentage;
+    if (pct == null) return { pct: null, grade: '', remark: '', pf: '' };
     const passMark = (S.settings && S.settings.pass_mark != null) ? S.settings.pass_mark : 50;
     const pf = Utils.passFail(pct, passMark);
-    return { pct: pct, grade: grade, remark: remark, pf: pf };
+    return { pct: pct, grade: result.grade, remark: result.remark, pf: pf };
   }
 
   function downloadBlob(name, blob) {
@@ -576,10 +576,7 @@ const MarksImport = (() => {
       }));
     }
     if (!S.existingMarks || Object.keys(S.existingMarks).length === 0) {
-      loaders.push(DB.query('marks', 'id, assessment_id, learner_id, mark', { assessment_id: S.ctx.assessment.id, status: 'draft' }).then(() => {}).catch(() => {}));
-      loaders.push(DB.query('marks', 'id, assessment_id, learner_id, mark', { assessment_id: S.ctx.assessment.id, status: 'submitted' }).then(() => {}).catch(() => {}));
-      loaders.push(DB.query('marks', 'id, assessment_id, learner_id, mark', { assessment_id: S.ctx.assessment.id, status: 'locked' }).then(() => {}).catch(() => {}));
-      loaders.push(DB.query('marks', 'id, assessment_id, learner_id, mark', { assessment_id: S.ctx.assessment.id }).then(list => {
+      loaders.push(DB.getFresh('marks', { assessment_id: S.ctx.assessment.id }).then(list => {
         S.existingMarks = {};
         (list || []).forEach(m => { S.existingMarks[m.learner_id] = m; });
       }));
@@ -1158,7 +1155,7 @@ const MarksImport = (() => {
     try {
       const grad = S.grading && S.grading.length ? S.grading : (await Utils.getGradingScale()) || [];
       const passMark = (S.settings && S.settings.pass_mark != null) ? S.settings.pass_mark : 50;
-      const max = Number(a.maximum_mark) || 30;
+      const max = Number(a.maximum_mark);
       const status = a.status === 'submitted' || a.status === 'approved' || a.status === 'locked' ? 'submitted' : 'draft';
 
       const toInsert = [];
@@ -1173,14 +1170,19 @@ const MarksImport = (() => {
 
       for (let i = 0; i < toInsert.length; i++) {
         const rec = toInsert[i];
-        const pct = Utils.pct(rec.mark, max);
+        const result = Utils.assessmentResult(rec.mark, max, grad);
+        const pct = result.percentage;
+        if (pct == null) throw new Error('Assessment maximum mark must be greater than zero before marks can be imported.');
         const row = {
           assessment_id: a.id,
           learner_id: rec.learner.id,
           mark: rec.mark,
+          original_mark: rec.mark,
+          original_maximum: max,
+          normalized_mark: result.normalized_mark,
           percentage: pct,
-          grade: Utils.grade(pct, grad),
-          remark: Utils.remark(pct, grad),
+          grade: result.grade,
+          remark: result.remark,
           status: status
         };
         await retryUpsert(() => sbClient.from('marks').insert([row]).select());
@@ -1191,12 +1193,15 @@ const MarksImport = (() => {
 
       for (let i = 0; i < toUpdate.length; i++) {
         const rec = toUpdate[i];
-        const pct = Utils.pct(rec.mark, max);
+        const result = Utils.assessmentResult(rec.mark, max, grad);
+        const pct = result.percentage;
+        if (pct == null) throw new Error('Assessment maximum mark must be greater than zero before marks can be imported.');
         const row = {
           mark: rec.mark,
+          normalized_mark: result.normalized_mark,
           percentage: pct,
-          grade: Utils.grade(pct, grad),
-          remark: Utils.remark(pct, grad)
+          grade: result.grade,
+          remark: result.remark
         };
         await retryUpsert(() => sbClient.from('marks').update(row).eq('id', rec.existing.id).select());
         updated++;
@@ -1233,8 +1238,13 @@ const MarksImport = (() => {
         details: errRows.length ? errRows : null,
         status: (c.errors || c.duplicates) ? 'partial' : 'completed'
       };
-      await sbClient.from('import_history').insert([historyRow]).catch(() => {});
-      await sbClient.from('audit_logs').insert({
+      let auxiliarySaveWarning = '';
+      const { error: historyError } = await sbClient.from('import_history').insert([historyRow]);
+      if (historyError) {
+        console.error('[MarksImport] import history save error:', historyError);
+        auxiliarySaveWarning = 'Marks were imported, but import history could not be saved: ' + historyError.message;
+      }
+      const { error: auditError } = await sbClient.from('audit_logs').insert({
         user_id: Auth.currentUser ? Auth.currentUser.id : null,
         user_name: Auth.currentUser ? Auth.currentUser.full_name : null,
         role: Auth.currentUser ? Auth.currentUser.role : null,
@@ -1242,20 +1252,26 @@ const MarksImport = (() => {
         assessment_id: a.id,
         new_value: 'Imported ' + imported + ' marks (updated ' + updated + ', skipped ' + skipped + ') from ' + S.fileName,
         timestamp: new Date().toISOString()
-      }).catch(() => {});
+      });
+      if (auditError) {
+        console.error('[MarksImport] audit log save error:', auditError);
+        auxiliarySaveWarning = [auxiliarySaveWarning, 'The marks were imported, but the audit log could not be saved: ' + auditError.message]
+          .filter(Boolean)
+          .join(' ');
+      }
       // === SYNC EVERYWHERE: bulk import → analytics/reports/DOS dashboards ===
       DB.invalidate('marks');
       DB.invalidate('assessments');
       DB.invalidate('import_history');
       if (typeof AnalyticsEngine !== 'undefined') AnalyticsEngine.resetContext();
       if (typeof ReportUtils !== 'undefined') ReportUtils.invalidate();
+      API.renderSummary(auxiliarySaveWarning);
     } catch (e) {
       console.error('[MarksImport] save error:', e);
       Utils.toast('Import failed: ' + e.message, 'error');
       Modal.close();
       return;
     }
-    API.renderSummary();
   };
 
   async function retryUpsert(fn, tries) {
@@ -1266,13 +1282,17 @@ const MarksImport = (() => {
         if (error) throw error;
         return;
       } catch (e) {
+        const status = Number(e && e.status);
+        if ((status >= 400 && status < 500 && status !== 408 && status !== 429) || (e && e.code === '23505')) {
+          throw e;
+        }
         if (i === tries - 1) throw e;
         await new Promise(r => setTimeout(r, 400));
       }
     }
   }
 
-  API.renderSummary = () => {
+  API.renderSummary = (warningMessage = '') => {
     const c = S.counts;
     const imported = c.valid;
     const updated = c.replaces;
@@ -1280,6 +1300,7 @@ const MarksImport = (() => {
     const viewRoute = S.isAdmin ? 'admin/marks' : 'teacher/enter-marks?assessment=' + S.ctx.assessment.id;
     const body = `
       <div class="alert alert-success" style="margin-bottom:12px"><i data-lucide="check-circle-2"></i> <strong>Marks Imported Successfully.</strong> Percentage, Grade, Pass/Fail and Remark were computed for every mark saved. Class and assessment statistics refresh automatically on the reports.</div>
+      ${warningMessage ? `<div class="alert alert-warning" style="margin-bottom:12px"><i data-lucide="alert-triangle"></i> ${esc(warningMessage)}</div>` : ''}
       <div class="import-stats">
         <div class="import-stat"><div class="is-value">${S.records.length}</div><div class="is-label">Total Records</div></div>
         <div class="import-stat is-green"><div class="is-value">${imported}</div><div class="is-label">Imported</div></div>

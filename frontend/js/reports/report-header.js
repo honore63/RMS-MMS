@@ -96,6 +96,44 @@ const ReportHeader = {
     return `<div class="rms-info-banner"><i data-lucide="info" style="width:14px;height:14px;flex:none"></i><span>${Utils.escapeHtml(message || '')}</span></div>`;
   },
 
+  /* ---------------------------------------------------------
+     Approval/status resolution.
+     Approval never BLOCKS report generation: it only shapes the
+     label printed near the report title (PRELIMINARY vs OFFICIAL).
+     --------------------------------------------------------- */
+  getReportStatus(dataOrApproval) {
+    if (dataOrApproval == null) return 'PENDING APPROVAL';
+    if (typeof dataOrApproval === 'string') {
+      const s = String(dataOrApproval).trim().toUpperCase();
+      if (s === 'APPROVED' || s === 'OFFICIAL') return 'APPROVED';
+      if (s === 'DRAFT' || s === 'DRAFT REPORT — MARKS PENDING APPROVAL') return 'DRAFT REPORT — MARKS PENDING APPROVAL';
+      return 'PENDING APPROVAL';
+    }
+    const candidates = [];
+    const push = items => (items || []).forEach(item => {
+      const st = item && (item.status || (item.assessment && item.assessment.status) || '');
+      if (st) candidates.push(String(st).toLowerCase());
+    });
+    push(dataOrApproval.assessments);
+    push((dataOrApproval.rows || []).map(r => r && (r.assessment ? r.assessment : r)));
+    push((dataOrApproval.blocks || []).flatMap(b => (b && b.assessments) || []));
+    if (!candidates.length && dataOrApproval.approval) return this.getReportStatus(dataOrApproval.approval);
+    if (!candidates.length) return 'PENDING APPROVAL';
+    const hasApproved = candidates.some(s => s === 'approved' || s === 'locked');
+    const hasNotApproved = candidates.some(s => s !== 'approved' && s !== 'locked');
+    if (hasApproved && hasNotApproved) return 'MIXED — SOME ASSESSMENTS NOT APPROVED';
+    if (hasApproved) return 'APPROVED';
+    return 'PENDING APPROVAL';
+  },
+
+  statusBadge(status) {
+    return '';
+  },
+
+  injectReportStatus(html, dataOrApproval) {
+    return html;
+  },
+
   applyPageNumbers(root) {
     try {
       const host = root || document;

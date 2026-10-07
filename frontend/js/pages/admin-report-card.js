@@ -191,7 +191,7 @@ async function rcFetchLearnerData({ learnerId, classId, yearId, termIds, allSubj
     DB.get('assessment_types'),
     typeof getSchoolSettings === 'function' ? getSchoolSettings() : {},
     typeof getGrading === 'function' ? getGrading() : [],
-    DB.query('learners', '*', { class_id: classId, status: 'active' }, { column: 'full_name', asc: true })
+    DB.getFreshQuery('learners', '*', { class_id: classId, status: 'active' }, { column: 'full_name', asc: true })
   ]);
   const year = allYears.find(y => y.id === yearId);
   const selectedTermIds = new Set((termIds || []).map(String));
@@ -200,14 +200,14 @@ async function rcFetchLearnerData({ learnerId, classId, yearId, termIds, allSubj
     ? EducationLevels.getCategory(cls)
     : (/^P[1-6]/i.test(String(cls?.level || cls?.name || '')) ? 'Primary' : 'Secondary');
   const assignedSubjectIds = new Set((classSubjectRows || []).map(row => String(row.subject_id)));
-  const hasClassSubjectAssignments = assignedSubjectIds.size > 0;
+  const hasClassSubjectAssignments = classCategory !== 'Primary' && assignedSubjectIds.size > 0;
   const selectedSubjectIds = new Set((selSubjects || []).map(String));
   const activeSubjects = (subjects || [])
     .filter(subject => subject.status === 'active' || !subject.status)
     .filter(subject => allSubjects || selectedSubjectIds.has(String(subject.id)))
     .filter(subject => {
       if (hasClassSubjectAssignments && !assignedSubjectIds.has(String(subject.id))) return false;
-      return rcSubjectMatchesLevel(subject, classCategory);
+      return rcSubjectMatchesLevel(subject, cls, classCategory);
     })
     .sort((a,b) => a.name.localeCompare(b.name));
   const activeSubjectIds = new Set(activeSubjects.map(subject => String(subject.id)));
@@ -242,7 +242,10 @@ async function rcFetchLearnerData({ learnerId, classId, yearId, termIds, allSubj
   };
 }
 
-function rcSubjectMatchesLevel(subject, category) {
+function rcSubjectMatchesLevel(subject, cls, category) {
+  if (typeof EducationLevels !== 'undefined' && EducationLevels.subjectMatchesClass) {
+    return EducationLevels.subjectMatchesClass(subject, cls);
+  }
   const values = [subject.level, subject.education_level]
     .filter(Boolean)
     .map(value => String(value).trim().toLowerCase());
@@ -397,41 +400,78 @@ function rcClassPositions(learnersList, allAssessments, allMarks, termId, subjec
   return { positions: pos, total: scores.length };
 }
 
-function rcWeightPercent(componentAssessments, allAssessments, types) {
-  if (!allAssessments.length) return null;
-  const weightedAssessments = allAssessments.map(assessment => ({
-    assessment,
-    weight: rcAssessmentWeight(assessment, types)
-  }));
-  if (weightedAssessments.some(item => item.weight == null || !Number.isFinite(item.weight) || item.weight <= 0)) return null;
-  const totalWeight = weightedAssessments.reduce((sum, item) => sum + item.weight, 0);
-  if (!totalWeight) return null;
-  const componentIds = new Set(componentAssessments.map(assessment => String(assessment.id)));
-  const weight = weightedAssessments
-    .filter(item => componentIds.has(String(item.assessment.id)))
-    .reduce((sum, item) => sum + item.weight, 0);
-  return Math.round(weight / totalWeight * 1000) / 10;
-}
-
 async function rcBuildIndividualReport({ learnerId, classId, yearId, termIds, allSubjects, selSubjects, annualMode, preview }) {
   const d = await rcFetchLearnerData({ learnerId, classId, yearId, termIds, allSubjects, selSubjects });
   if (!d.learner) throw new Error('Learner not found');
   d.annualMode = annualMode;
-  d.orientation = 'landscape';
+  d.orientation = 'portrait';
   const html = rcRenderCard(d.learner, d);
   preview.innerHTML = `
     <div class="report-preview-toolbar-flex no-print" style="margin-bottom:16px">
       <div><h3 style="font-size:16px;font-weight:700">Preview</h3><p class="text-sm text-muted">${Utils.escapeHtml(d.learner.full_name)}</p></div>
     </div>
     <div id="rc-paper" class="rc-paper-outer">${html}</div>`;
+  rcFitReportPages(preview);
 }
 
 async function rcBuildClassReport({ classId, yearId, termIds, allSubjects, selSubjects, annualMode, preview }) {
   const d = await rcFetchLearnerData({ classId, yearId, termIds, allSubjects, selSubjects });
+  if (!d.learnersList.length) throw new Error('No active learners found in the selected class.');
   d.annualMode = annualMode;
-  d.orientation = 'landscape';
+  d.orientation = 'portrait';
   const cards = d.learnersList.map(l => rcRenderCard(l, d));
-  preview.innerHTML = `<div id="rc-paper" class="rc-paper-outer">${cards.join('<div style="page-break-after:always; width:100%; height:1px;"></div>')}</div>`;
+  const learnerIds = new Set(d.learnersList.map(learner => String(learner.id)));
+  const generatedPageCount = cards.reduce((count, card) =>
+    count + (card.match(/class="rc-paper rc-paper-fit"/g) || []).length, 0);
+  if (cards.length !== d.learnersList.length || learnerIds.size !== d.learnersList.length
+    || generatedPageCount !== d.learnersList.length) {
+    throw new Error(`Report generation produced ${generatedPageCount} cards for ${d.learnersList.length} active learners.`);
+  }
+  preview.innerHTML = `
+    <div class="report-preview-toolbar-flex no-print" style="margin-bottom:16px">
+      <div><h3 style="font-size:16px;font-weight:700">Whole-Class Preview</h3><p class="text-sm text-muted">Generated ${cards.length} of ${d.learnersList.length} active student reports.</p></div>
+    </div>
+    <div id="rc-paper" class="rc-paper-outer">${cards.join(ReportHeader.getPageBreak())}</div>`;
+  rcFitReportPages(preview);
+}
+
+function rcFitReportPages(root) {
+  if (!root) return;
+  const pages = [...root.querySelectorAll('.rc-paper-fit')];
+  pages.forEach((page, index) => {
+    page.classList.toggle('rc-page-last', index === pages.length - 1);
+    const content = page.querySelector('.rc-fit-content');
+    if (!content) return;
+    page.style.setProperty('position', 'relative', 'important');
+    page.style.setProperty('width', '210mm', 'important');
+    page.style.setProperty('height', '297mm', 'important');
+    page.style.setProperty('min-height', '297mm', 'important');
+    page.style.setProperty('max-height', '297mm', 'important');
+    page.style.setProperty('padding', '0', 'important');
+    page.style.setProperty('overflow', 'hidden', 'important');
+    content.style.setProperty('position', 'static', 'important');
+    content.style.setProperty('width', '200mm', 'important');
+    content.style.setProperty('transform', 'none', 'important');
+    const bounds = content.getBoundingClientRect();
+    const pageWidth = page.clientWidth;
+    const pageHeight = page.clientHeight;
+    const mmToPx = pageWidth / 210;
+    const availableWidth = pageWidth - 10 * mmToPx;
+    const availableHeight = pageHeight - 10 * (pageHeight / 297);
+    const viewScale = Math.min(
+      1,
+      Math.max(0.01, (document.documentElement.clientWidth - 16) / pageWidth)
+    );
+    const scale = Math.min(
+      1,
+      availableWidth / Math.max(bounds.width, 1),
+      availableHeight / Math.max(bounds.height, 1)
+    );
+    page.removeAttribute('style');
+    page.style.setProperty('--rc-fit-scale', String(Math.max(scale, 0.01)));
+    page.style.setProperty('--rc-view-scale', String(viewScale));
+    content.removeAttribute('style');
+  });
 }
 
 function rcRenderCard(learner, d) {
@@ -443,14 +483,11 @@ function rcRenderCard(learner, d) {
   const termCols = (d.selectedTerms || []).map(t => ({ id: t.id, name: t.name }));
   const showAnn = Boolean(d.annualMode);
   const types = d.assessmentTypes || [];
-  const components = rcComponentColumns(d.allAssessments, types);
   const assessmentsByTerm = new Map();
-  const componentsByTerm = new Map();
   const termScores = new Map();
   termCols.forEach(t => {
     const termAssessments = d.allAssessments.filter(a => String(a.term_id) === String(t.id));
     assessmentsByTerm.set(String(t.id), termAssessments);
-    componentsByTerm.set(String(t.id), rcComponentColumns(termAssessments, types));
     termScores.set(String(t.id), new Map(d.activeSubjects.map(subject => [
       String(subject.id),
       rcCalcSubject(subject, termAssessments, mMarks, d.scale, types)
@@ -461,100 +498,75 @@ function rcRenderCard(learner, d) {
     String(subject.id),
     rcCalcSubject(subject, d.allAssessments, mMarks, d.scale, types)
   ]));
-  const maximumRaw = d.allAssessments.reduce((sum, a) => sum + Number(a.maximum_mark || 0), 0);
-  const componentWeight = component => rcWeightPercent(
-    d.allAssessments.filter(a => rcAssessmentComponentKey(a, types) === component.key),
-    d.allAssessments,
-    types
-  );
-  const termHeading = termCols.map(t => {
-    const count = (componentsByTerm.get(String(t.id)) || []).length;
-    return `<th colspan="${count + 3}" class="rc-th-top">${Utils.escapeHtml(t.name)}${d.year?.name ? ` / ${Utils.escapeHtml(d.year.name)}` : ''}</th>`;
-  }).join('');
-  const termBody = termCols.map(t =>
-    `${(componentsByTerm.get(String(t.id)) || []).map(component =>
-      `<th title="${Utils.escapeHtml(component.name)}">${Utils.escapeHtml(component.label)}</th>`
-    ).join('')}<th>TOT</th><th>%</th><th>GR</th>`
-  ).join('');
-  const termWeight = termCols.map(t => {
-    const termAssessments = assessmentsByTerm.get(String(t.id)) || [];
-    const termWeightsValid = termAssessments.length > 0 && termAssessments.every(assessment => {
-      const weight = rcAssessmentWeight(assessment, types);
-      return weight != null && Number.isFinite(weight) && weight > 0;
-    });
-    return `${(componentsByTerm.get(String(t.id)) || []).map(component => {
-      const weight = rcWeightPercent(
-        termAssessments.filter(a => rcAssessmentComponentKey(a, types) === component.key),
-        termAssessments,
-        types
-      );
-      return `<th>${weight == null ? '' : `${weight}%`}</th>`;
-    }).join('')}<th>${termWeightsValid ? '100%' : ''}</th><th></th><th></th>`;
-  }).join('');
-
   const availableSubjects = d.activeSubjects;
+  const numberText = value => Number(value.toFixed(1)).toString();
   const termTotals = new Map(termCols.map(term => [String(term.id), {
-    components: new Map(components.map(component => [component.key, { obtained: 0, maximum: 0 }])),
     obtained: 0,
     maximum: 0,
     percentages: []
   }]));
   const annualTotal = { obtained: 0, maximum: 0, percentages: [] };
-  const numberText = value => Number(value.toFixed(1)).toString();
-  const ratioText = (obtained, maximum) =>
-    maximum > 0 ? `${numberText(obtained)}/${numberText(maximum)}` : '';
-  const componentMaximumForSubject = (subject, component) => d.allAssessments
-    .filter(a => String(a.subject_id) === String(subject.id)
-      && rcAssessmentComponentKey(a, types) === component.key)
-    .reduce((sum, a) => sum + Number(a.maximum_mark || 0), 0);
-  const subjectMaximum = subject => d.allAssessments
-    .filter(a => String(a.subject_id) === String(subject.id))
-    .reduce((sum, a) => sum + Number(a.maximum_mark || 0), 0);
+  const tableColumnCount = 1 + termCols.length + (showAnn ? 1 : 0);
+  const headingRow = `<tr>
+    <th class="rc-th-sub rc-align-left">SUBJECT</th>
+    ${termCols.map(term => `<th>${Utils.escapeHtml(term.name)}${d.year?.name ? ` / ${Utils.escapeHtml(d.year.name)}` : ''}</th>`).join('')}
+    ${showAnn ? '<th>OVERALL</th>' : ''}
+  </tr>`;
+  const isComplete = assessments => assessments.length > 0 && assessments.every(assessment => {
+    const mark = mMarks.find(item => String(item.assessment_id) === String(assessment.id));
+    return mark && mark.mark != null && mark.mark !== '';
+  });
+  const renderAssessmentDetails = assessments => {
+    if (!assessments.length) return '<span class="rc-no-assessment">No assessment</span>';
+    return assessments.map(assessment => {
+      const component = rcAssessmentType(assessment, types);
+      const label = assessment.period_label || assessment.name || assessment.unit_name || assessment.unit || '';
+      const mark = mMarks.find(item => String(item.assessment_id) === String(assessment.id));
+      const markText = mark && mark.mark != null && mark.mark !== ''
+        ? numberText(Number(mark.mark))
+        : '—';
+      return `<span class="rc-assessment-mark"><b>${Utils.escapeHtml(component?.code || rcAssessmentComponentLabel(assessment, types))}</b>${label ? ` ${Utils.escapeHtml(label)}` : ''} ${markText}/${numberText(Number(assessment.maximum_mark || 0))}</span>`;
+    }).join(' ');
+  };
+  let tbody = `<tr class="rc-all-subjects-row"><td colspan="${tableColumnCount}">All Subjects</td></tr>`;
 
-  const overallColumnCount = showAnn ? 4 : 0;
-  const termColumnCount = termCols.reduce((sum, term) =>
-    sum + (componentsByTerm.get(String(term.id)) || []).length + 3, 0);
-  let tbody = `<tr class="rc-all-subjects-row"><td colspan="${1 + components.length + 1 + termColumnCount + overallColumnCount}">All Subjects</td></tr>`;
   availableSubjects.forEach(subject => {
-    let row = `<tr><td class="rc-align-left rc-blue-text" style="font-weight:600">${Utils.escapeHtml(subject.name)}</td>`;
-    components.forEach(component => {
-      row += `<td>${numberText(componentMaximumForSubject(subject, component))}</td>`;
-    });
-    row += `<td>${numberText(subjectMaximum(subject))}</td>`;
+    let row = `<tr><td class="rc-align-left" style="font-weight:500">${Utils.escapeHtml(subject.name)}</td>`;
 
     termCols.forEach(term => {
       const score = termScores.get(String(term.id))?.get(String(subject.id));
-      const totals = termTotals.get(String(term.id));
-      (componentsByTerm.get(String(term.id)) || []).forEach(component => {
-        const value = score?.components.get(component.key);
-        const cellValue = value?.obtained == null ? '' : numberText(value.obtained);
-        row += `<td>${cellValue}</td>`;
-        if (value?.obtained != null) {
-          const total = totals.components.get(component.key);
-          total.obtained += value.obtained;
-          total.maximum += value.scoredMaximum;
-        }
-      });
-      if (score?.hasMarks) {
-        row += `<td class="rc-score-cell">${numberText(score.obtained)}</td><td>${score.pct.toFixed(1)}%</td><td class="rc-blue-text">${Utils.escapeHtml(score.grade)}</td>`;
-        totals.obtained += score.obtained;
-        totals.maximum += score.maximum;
-        totals.percentages.push(score.pct);
-      } else {
-        row += '<td></td><td></td><td></td>';
+      const assessments = (assessmentsByTerm.get(String(term.id)) || [])
+        .filter(assessment => String(assessment.subject_id) === String(subject.id));
+      const complete = isComplete(assessments);
+      const scoreSummary = complete && score?.hasMarks
+        ? `<strong>${numberText(score.obtained)}/${numberText(score.maximum)} · ${score.pct.toFixed(1)}% ${Utils.escapeHtml(score.grade)}</strong>`
+        : '<strong>Incomplete</strong>';
+      row += `<td class="rc-term-detail"><div>${renderAssessmentDetails(assessments)}</div>${scoreSummary}</td>`;
+      const termTotal = termTotals.get(String(term.id));
+      termTotal.maximum += assessments.reduce((sum, assessment) =>
+        sum + Number(assessment.maximum_mark || 0), 0);
+      if (complete && score?.hasMarks) {
+        termTotal.obtained += score.obtained;
+        termTotal.percentages.push(score.pct);
       }
     });
 
-    const annual = annualScores.get(String(subject.id));
     if (showAnn) {
-      if (annual?.hasMarks) {
-        row += `<td class="rc-score-cell">${numberText(annual.obtained)}</td><td>${numberText(subjectMaximum(subject))}</td><td>${annual.pct.toFixed(1)}%</td><td class="rc-blue-text">${Utils.escapeHtml(annual.grade)}</td>`;
+      const annual = annualScores.get(String(subject.id));
+      const assessments = d.allAssessments.filter(assessment =>
+        String(assessment.subject_id) === String(subject.id));
+      const complete = isComplete(assessments);
+      const maximum = assessments.reduce((sum, assessment) =>
+        sum + Number(assessment.maximum_mark || 0), 0);
+      const overallSummary = annual?.hasMarks
+        ? `<strong>${numberText(annual.obtained)}/${numberText(maximum)}${complete && annual.pct != null ? `<br>${annual.pct.toFixed(1)}% ${Utils.escapeHtml(annual.grade)}` : ''}</strong>`
+        : `<strong>—/${numberText(maximum)}</strong>`;
+      row += `<td class="rc-overall-cell">${overallSummary}</td>`;
+      if (complete && annual?.hasMarks) {
         annualTotal.obtained += annual.obtained;
-        annualTotal.maximum += annual.maximum;
         annualTotal.percentages.push(annual.pct);
-      } else {
-        row += `<td></td><td>${numberText(subjectMaximum(subject))}</td><td></td><td></td>`;
       }
+      annualTotal.maximum += maximum;
     }
     tbody += `${row}</tr>`;
   });
@@ -562,57 +574,17 @@ function rcRenderCard(learner, d) {
   const average = values => values.length
     ? values.reduce((sum, value) => sum + value, 0) / values.length
     : null;
-  let totalRow = '<tr><td class="rc-align-left rc-blue-bg-text font-bold">Total</td>';
-  components.forEach(component => {
-    const maximum = d.allAssessments
-      .filter(a => rcAssessmentComponentKey(a, types) === component.key)
-      .reduce((sum, a) => sum + Number(a.maximum_mark || 0), 0);
-    totalRow += `<td>${numberText(maximum)}</td>`;
-  });
-  totalRow += `<td>${numberText(maximumRaw)}</td>`;
+  let totalRow = '<tr class="rc-total-row"><td class="rc-align-left font-bold">Total</td>';
   termCols.forEach(term => {
-    const totals = termTotals.get(String(term.id));
-    (componentsByTerm.get(String(term.id)) || []).forEach(component => {
-      const value = totals.components.get(component.key);
-      totalRow += `<td>${value.maximum > 0 ? numberText(value.obtained) : ''}</td>`;
-    });
-    const pct = average(totals.percentages);
-    totalRow += pct == null
-      ? '<td></td><td></td><td></td>'
-      : `<td>${numberText(totals.obtained)}</td><td>${pct.toFixed(1)}%</td><td class="rc-blue-text">${Utils.escapeHtml(rcGrade(pct, d.scale))}</td>`;
+    const total = termTotals.get(String(term.id));
+    const pct = average(total.percentages);
+    totalRow += `<td><strong>${numberText(total.obtained)}/${numberText(total.maximum)}${pct == null ? '' : `<br>${pct.toFixed(1)}% ${Utils.escapeHtml(rcGrade(pct, d.scale))}`}</strong></td>`;
   });
   if (showAnn) {
-    const annualPct = average(annualTotal.percentages);
-    totalRow += annualPct == null
-      ? `<td></td><td>${numberText(maximumRaw)}</td><td></td><td></td>`
-      : `<td>${numberText(annualTotal.obtained)}</td><td>${numberText(maximumRaw)}</td><td>${annualPct.toFixed(1)}%</td><td class="rc-blue-text">${Utils.escapeHtml(rcGrade(annualPct, d.scale))}</td>`;
+    const pct = average(annualTotal.percentages);
+    totalRow += `<td><strong>${numberText(annualTotal.obtained)}/${numberText(annualTotal.maximum)}${pct == null ? '' : `<br>${pct.toFixed(1)}% ${Utils.escapeHtml(rcGrade(pct, d.scale))}`}</strong></td>`;
   }
   totalRow += '</tr>';
-
-  const tableHeader = `
-    <tr>
-      <th rowspan="2" class="rc-th-sub rc-align-left">SUBJECT</th>
-      <th colspan="${components.length + 1}" class="rc-th-top">MAXIMUM</th>
-      ${termHeading}
-      ${showAnn ? '<th colspan="4" class="rc-th-top">Total</th>' : ''}
-    </tr>
-    <tr class="rc-th-row2">
-      ${components.map(component => `<th>${Utils.escapeHtml(component.label)}</th>`).join('')}<th>TOTAL</th>
-      ${termBody}
-      ${showAnn ? '<th>TOTAL</th><th>MAX</th><th>%</th><th>GR</th>' : ''}
-    </tr>
-    <tr class="rc-weight-row">
-      <th class="rc-align-left rc-blue-text">WEIGHT</th>
-      ${components.map(component => {
-        const weight = componentWeight(component);
-        return `<th>${weight == null ? '' : `${weight}%`}</th>`;
-      }).join('')}<th>${d.allAssessments.length && d.allAssessments.every(assessment => {
-        const weight = rcAssessmentWeight(assessment, types);
-        return weight != null && Number.isFinite(weight) && weight > 0;
-      }) ? '100%' : ''}</th>
-      ${termWeight}
-      ${showAnn ? '<th></th><th></th><th></th><th></th>' : ''}
-    </tr>`;
 
   const summaryScores = showAnn
     ? [...annualScores.values()]
@@ -656,7 +628,8 @@ function rcRenderCard(learner, d) {
     </div>`;
 
   return `
-    <div class="rc-paper ${d.orientation === 'landscape' ? 'rc-paper-landscape' : ''}">
+    <div class="rc-paper rc-paper-fit">
+    <div class="rc-fit-content">
       <div class="rc-header">
         <div class="rc-title-group">
           <div class="rc-main-title">${Utils.escapeHtml(schoolName)}</div>
@@ -694,16 +667,18 @@ function rcRenderCard(learner, d) {
           <div><span class="rc-lbl-blue">Class:</span> <span style="margin-left:4px">${Utils.escapeHtml(d.cls?.name || '-')}</span></div>
         </div>
       </div>
-      <div class="rc-table-wrapper">
-        <table class="rc-data-table rc-data-table-dynamic">
-          <thead>${tableHeader}</thead>
-          <tbody>${tbody}${totalRow}</tbody>
+      <div class="rc-table-wrapper rc-summary-table-wrapper">
+        <table class="rc-data-table rc-data-table-dynamic rc-compact-term-table rc-summary-table">
+          <thead>${headingRow}</thead>
+          <tbody>${tbody}</tbody>
+          <tfoot>${totalRow}</tfoot>
         </table>
       </div>
       ${finalDesc}
       <div class="rc-absolute-bottom">
         Generated by RMS-MIS &nbsp;|&nbsp; ${Utils.dateStr(new Date())} ${new Date().toLocaleTimeString('en-GB',{hour:'2-digit',minute:'2-digit'})}
         <span style="float:right; font-weight:700; color:#f59e0b; font-style:italic">Excellence Through Education</span>
+      </div>
       </div>
     </div>`;
 }
@@ -713,7 +688,7 @@ async function rcExportPdf() {
   if (!paper) return Utils.toast('Generate a report card first', 'error');
   if (typeof ReportCenter === 'undefined') return Utils.toast('The report download service is unavailable. Please reload and try again.', 'error');
   const filename = rcBuildOutputFilename();
-  await ReportCenter.downloadPdfDocument(paper.innerHTML, filename, 'landscape');
+  await ReportCenter.downloadPdfDocument(paper.innerHTML, filename, 'portrait');
 }
 
 function rcBuildOutputFilename() {
@@ -728,5 +703,5 @@ function rcPrintReport() {
   if (!paper) return Utils.toast('Generate a report card first', 'error');
   if (typeof ReportCenter === 'undefined') return Utils.toast('The report print service is unavailable. Please reload and try again.', 'error');
   const filename = rcBuildOutputFilename();
-  ReportCenter.printDocument(paper.innerHTML, filename.replace(/\.pdf$/i, ''), filename, 'landscape');
+  ReportCenter.printDocument(paper.innerHTML, filename.replace(/\.pdf$/i, ''), filename, 'portrait');
 }

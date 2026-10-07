@@ -261,6 +261,7 @@ CREATE TABLE IF NOT EXISTS marks (
   mark NUMERIC,
   original_mark NUMERIC,
   original_maximum NUMERIC,
+  normalized_mark NUMERIC,
   percentage NUMERIC,
   grade TEXT,
   status TEXT NOT NULL DEFAULT 'draft' CHECK (status IN ('draft', 'submitted', 'locked')),
@@ -649,6 +650,22 @@ END $do$;
 
 ALTER TABLE marks ADD COLUMN IF NOT EXISTS original_mark NUMERIC;
 ALTER TABLE marks ADD COLUMN IF NOT EXISTS original_maximum NUMERIC;
+ALTER TABLE marks ADD COLUMN IF NOT EXISTS normalized_mark NUMERIC;
+UPDATE marks m
+SET original_mark = COALESCE(m.original_mark, m.mark),
+    original_maximum = COALESCE(m.original_maximum, a.maximum_mark)
+FROM assessments a
+WHERE a.id = m.assessment_id
+  AND m.mark IS NOT NULL
+  AND (m.original_mark IS NULL OR m.original_maximum IS NULL);
+UPDATE marks m
+SET normalized_mark = ROUND((m.mark / a.maximum_mark) * 100, 2),
+    percentage = ROUND((m.mark / a.maximum_mark) * 100, 2)
+FROM assessments a
+WHERE a.id = m.assessment_id
+  AND m.mark IS NOT NULL
+  AND a.maximum_mark > 0
+  AND m.normalized_mark IS NULL;
 
 ALTER TABLE grading_scales ADD COLUMN IF NOT EXISTS descriptor TEXT;
 ALTER TABLE grading_scales ADD COLUMN IF NOT EXISTS comment TEXT;
@@ -813,6 +830,31 @@ CREATE OR REPLACE FUNCTION public.rms_is_dos()
 RETURNS boolean LANGUAGE sql STABLE AS $fn$
   SELECT EXISTS (SELECT 1 FROM users u WHERE u.id = auth.uid() AND u.role = 'dos' AND u.status = 'active');
 $fn$;
+
+CREATE OR REPLACE FUNCTION public.rms_enforce_subject_class_level()
+RETURNS TRIGGER LANGUAGE plpgsql SECURITY DEFINER SET search_path = public, pg_temp AS $fn$
+BEGIN
+  IF NEW.class_id IS NOT NULL AND NEW.subject_id IS NOT NULL
+    AND NOT public.rms_subject_matches_class(NEW.subject_id, NEW.class_id) THEN
+    RAISE EXCEPTION 'Subject is not available for the selected class education level'
+      USING ERRCODE = 'check_violation';
+  END IF;
+  RETURN NEW;
+END;
+$fn$;
+
+DROP TRIGGER IF EXISTS rms_class_subject_level_guard ON public.class_subjects;
+CREATE TRIGGER rms_class_subject_level_guard
+  BEFORE INSERT OR UPDATE OF class_id, subject_id ON public.class_subjects
+  FOR EACH ROW EXECUTE FUNCTION public.rms_enforce_subject_class_level();
+DROP TRIGGER IF EXISTS rms_teacher_assignment_level_guard ON public.teacher_assignments;
+CREATE TRIGGER rms_teacher_assignment_level_guard
+  BEFORE INSERT OR UPDATE OF class_id, subject_id ON public.teacher_assignments
+  FOR EACH ROW EXECUTE FUNCTION public.rms_enforce_subject_class_level();
+DROP TRIGGER IF EXISTS rms_assessment_subject_level_guard ON public.assessments;
+CREATE TRIGGER rms_assessment_subject_level_guard
+  BEFORE INSERT OR UPDATE OF class_id, subject_id ON public.assessments
+  FOR EACH ROW EXECUTE FUNCTION public.rms_enforce_subject_class_level();
 
 CREATE OR REPLACE FUNCTION public.rms_dos_education_level()
 RETURNS TEXT LANGUAGE sql STABLE AS $fn$
@@ -1050,6 +1092,42 @@ RETURNS BOOLEAN LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public, p
     ELSE false END;
 $fn$;
 
+CREATE OR REPLACE FUNCTION public.rms_dashboard_scoped_learner_count(p_class_ids UUID[])
+RETURNS BIGINT
+LANGUAGE plpgsql
+STABLE
+SECURITY DEFINER
+SET search_path = public, pg_temp
+AS $fn$
+DECLARE
+  v_class_ids UUID[] := coalesce(p_class_ids, ARRAY[]::UUID[]);
+  v_count BIGINT;
+BEGIN
+  IF public.rms_account_role() IS DISTINCT FROM 'dos' THEN
+    RAISE EXCEPTION 'Only DOS accounts can request dashboard learner counts'
+      USING ERRCODE = 'insufficient_privilege';
+  END IF;
+
+  IF EXISTS (
+    SELECT 1
+    FROM unnest(v_class_ids) AS requested(class_id)
+    LEFT JOIN public.classes AS c ON c.id = requested.class_id
+    WHERE c.id IS NULL
+      OR NOT public.rms_dos_can_level(c.education_level)
+  ) THEN
+    RAISE EXCEPTION 'Dashboard learner count includes a class outside the DOS scope'
+      USING ERRCODE = 'insufficient_privilege';
+  END IF;
+
+  SELECT count(*)
+  INTO v_count
+  FROM public.learners AS l
+  WHERE l.class_id = ANY(v_class_ids);
+
+  RETURN v_count;
+END;
+$fn$;
+
 -- Class teacher (classes.class_teacher_id) gets a READ-ONLY view of the
 -- assessments/marks of their class. Never used on write policies.
 CREATE OR REPLACE FUNCTION public.rms_class_teacher_can_assessment(p_assessment_id UUID)
@@ -1074,10 +1152,75 @@ RETURNS BOOLEAN LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public, p
     ELSE false END;
 $fn$;
 
+CREATE OR REPLACE FUNCTION public.rms_subject_matches_class(p_subject_id UUID, p_class_id UUID)
+RETURNS BOOLEAN LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public, pg_temp AS $fn$
+  SELECT coalesce(bool_or(CASE
+    WHEN s.grades IS NOT NULL AND btrim(s.grades) <> ''
+      AND NOT EXISTS (
+        SELECT 1 FROM unnest(string_to_array(s.grades, ',')) AS g
+        WHERE upper(btrim(g)) = substring(
+          upper(coalesce(c.level, '') || ' ' || coalesce(c.name, ''))
+          FROM '(P[1-6]|S[1-6])'
+        )
+      ) THEN false
+    WHEN coalesce(nullif(upper(btrim(s.level)), 'BOTH'),
+      nullif(upper(btrim(s.education_level)), 'BOTH'), 'BOTH') IN ('', 'BOTH', 'ALL') THEN true
+    WHEN coalesce(nullif(upper(btrim(s.level)), 'BOTH'),
+      nullif(upper(btrim(s.education_level)), 'BOTH'), '') = 'PRIMARY'
+      THEN upper(coalesce(c.education_level, '') || ' ' || coalesce(c.level, '') || ' ' || coalesce(c.name, '')) LIKE '%PRIMARY%'
+        OR upper(coalesce(c.level, '') || ' ' || coalesce(c.name, '')) ~ '(^|[^A-Z0-9])P[1-6]'
+    WHEN coalesce(nullif(upper(btrim(s.level)), 'BOTH'),
+      nullif(upper(btrim(s.education_level)), 'BOTH'), '') = 'SECONDARY'
+      THEN upper(coalesce(c.education_level, '') || ' ' || coalesce(c.level, '') || ' ' || coalesce(c.name, '')) LIKE '%SECONDARY%'
+        OR upper(coalesce(c.level, '') || ' ' || coalesce(c.name, '')) ~ '(^|[^A-Z0-9])S[1-6]'
+    WHEN coalesce(nullif(upper(btrim(s.level)), 'BOTH'),
+      nullif(upper(btrim(s.education_level)), 'BOTH'), '') = 'LOWER SECONDARY'
+      THEN upper(coalesce(c.education_level, '') || ' ' || coalesce(c.level, '') || ' ' || coalesce(c.name, '')) LIKE '%LOWER SECONDARY%'
+        OR upper(coalesce(c.level, '') || ' ' || coalesce(c.name, '')) ~ '(^|[^A-Z0-9])S[1-3]'
+    WHEN coalesce(nullif(upper(btrim(s.level)), 'BOTH'),
+      nullif(upper(btrim(s.education_level)), 'BOTH'), '') = 'UPPER SECONDARY'
+      THEN upper(coalesce(c.education_level, '') || ' ' || coalesce(c.level, '') || ' ' || coalesce(c.name, '')) LIKE '%UPPER SECONDARY%'
+        OR upper(coalesce(c.level, '') || ' ' || coalesce(c.name, '')) ~ '(^|[^A-Z0-9])S[4-6]'
+    ELSE coalesce(nullif(upper(btrim(s.level)), 'BOTH'),
+      nullif(upper(btrim(s.education_level)), 'BOTH'), '')
+      = upper(btrim(coalesce(c.education_level, c.level, c.name, '')))
+  END), false)
+  FROM public.classes c
+  JOIN public.subjects s ON s.id = p_subject_id
+  WHERE c.id = p_class_id;
+$fn$;
+
+-- Recheck legacy assessment rows after the class/subject matcher is available.
+CREATE OR REPLACE FUNCTION public.rms_account_can_assessment(p_assessment_id UUID)
+RETURNS BOOLEAN LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public, pg_temp AS $fn$
+  SELECT EXISTS (
+    SELECT 1
+    FROM public.assessments a
+    WHERE a.id = p_assessment_id
+      AND public.rms_subject_matches_class(a.subject_id, a.class_id)
+      AND CASE public.rms_account_role()
+        WHEN 'dos' THEN EXISTS (
+          SELECT 1
+          FROM public.classes c
+          JOIN public.subjects s ON s.id = a.subject_id
+          WHERE c.id = a.class_id
+            AND public.rms_dos_can_level(c.education_level)
+            AND public.rms_dos_can_subject(s.level)
+        )
+        WHEN 'teacher' THEN public.rms_teacher_can_assessment(p_assessment_id)
+          OR public.rms_class_teacher_can_assessment(p_assessment_id)
+        WHEN 'headteacher' THEN public.rms_teacher_can_assessment(p_assessment_id)
+          OR public.rms_class_teacher_can_assessment(p_assessment_id)
+        ELSE false
+      END
+  );
+$fn$;
+
 CREATE OR REPLACE FUNCTION public.rms_account_can_assessment_fields(
   p_teacher_id UUID, p_class_id UUID, p_subject_id UUID, p_academic_year_id UUID)
 RETURNS BOOLEAN LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public, pg_temp AS $fn$
-  SELECT CASE public.rms_account_role()
+  SELECT public.rms_subject_matches_class(p_subject_id, p_class_id)
+    AND CASE public.rms_account_role()
     WHEN 'dos' THEN EXISTS (SELECT 1 FROM public.classes c CROSS JOIN public.subjects s
       WHERE c.id = p_class_id AND s.id = p_subject_id
       AND public.rms_dos_can_level(c.education_level) AND public.rms_dos_can_subject(s.level))
@@ -1094,7 +1237,8 @@ $fn$;
 
 CREATE OR REPLACE FUNCTION public.rms_account_can_assignment(p_teacher_id UUID, p_class_id UUID, p_subject_id UUID)
 RETURNS BOOLEAN LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public, pg_temp AS $fn$
-  SELECT CASE public.rms_account_role()
+  SELECT public.rms_subject_matches_class(p_subject_id, p_class_id)
+    AND CASE public.rms_account_role()
     WHEN 'dos' THEN EXISTS (SELECT 1 FROM public.classes c JOIN public.subjects s ON s.id = p_subject_id
       WHERE c.id = p_class_id AND public.rms_dos_can_level(c.education_level) AND public.rms_dos_can_subject(s.level))
     WHEN 'teacher' THEN p_teacher_id = public.rms_account_teacher_id()
@@ -1417,6 +1561,40 @@ $fn$ LANGUAGE plpgsql SECURITY DEFINER;
 -- ============================================================================
 -- 5) DOS ACCOUNTS + REFERENCE BACKFILL
 -- ============================================================================
+-- Public profile IDs are re-linked to auth.users below. Cascade those ID
+-- updates through every FK targeting users so existing notifications and
+-- other dependent records remain attached to the same profile.
+DO $do$
+DECLARE
+  r RECORD;
+  v_definition TEXT;
+BEGIN
+  FOR r IN
+    SELECT c.oid, c.conname, c.conrelid
+    FROM pg_constraint c
+    WHERE c.contype = 'f'
+      AND c.confrelid = 'public.users'::regclass
+  LOOP
+    v_definition := pg_get_constraintdef(r.oid);
+    v_definition := regexp_replace(
+      v_definition,
+      ' ON UPDATE (NO ACTION|RESTRICT|CASCADE|SET NULL|SET DEFAULT)',
+      '',
+      'i'
+    );
+    v_definition := regexp_replace(
+      v_definition,
+      'REFERENCES (public\.)?users\(id\)',
+      'REFERENCES public.users(id) ON UPDATE CASCADE',
+      'i'
+    );
+    EXECUTE format('ALTER TABLE %s DROP CONSTRAINT %I',
+      r.conrelid::regclass, r.conname);
+    EXECUTE format('ALTER TABLE %s ADD CONSTRAINT %I %s',
+      r.conrelid::regclass, r.conname, v_definition);
+  END LOOP;
+END $do$;
+
 INSERT INTO public.education_levels (name, code, description, display_order, active)
 VALUES
   ('Primary', 'PRIMARY', 'Primary Education (P1 - P6)', 1, true),
@@ -2131,8 +2309,26 @@ SELECT * FROM (VALUES
 WHERE NOT EXISTS (SELECT 1 FROM subjects s WHERE UPPER(TRIM(s.name)) = UPPER(TRIM(v.name)))
   AND NOT EXISTS (SELECT 1 FROM subjects s WHERE UPPER(TRIM(s.code)) = UPPER(TRIM(v.code)));
 
+-- Legacy seed rows were created with level = 'Both'. Set the known
+-- level-specific curriculum subjects so they are not offered cross-level.
+UPDATE public.subjects
+SET status = 'active', level = 'Primary', education_level = 'Primary'
+WHERE upper(btrim(code)) IN ('SET', 'SRS', 'CA', 'PE');
+UPDATE public.subjects
+SET status = 'active', level = 'Both', education_level = 'Both'
+WHERE upper(btrim(code)) IN ('MATH', 'ENG', 'KIN', 'FRE');
+UPDATE public.subjects
+SET level = 'Secondary', education_level = 'Secondary'
+WHERE upper(btrim(code)) IN (
+  'KISW', 'PHY', 'CHEM', 'BIO', 'GEO', 'HIST', 'ENT', 'ICT', 'CS',
+  'ECON', 'PSY', 'LIT', 'GSCS', 'SUB_MATH', 'REL_ETH', 'REL_STU',
+  'PES', 'MDD', 'FAC', 'HS', 'FARM'
+);
+
 INSERT INTO assessment_types (name, code, description, default_maximum_mark, weight, contributes_to_combined, display_order, status, period_hint, is_standard)
-SELECT * FROM (VALUES
+SELECT v.name, v.code, v.description, v.default_maximum_mark, v.weight,
+  v.contributes_to_combined, v.display_order, v.status, v.period_hint, v.is_standard
+FROM (VALUES
   ('CAT','CAT','Continuous assessment test',20,NULL::NUMERIC,TRUE,1,'active',NULL,TRUE),
   ('Weekly Test','WKT','Weekly classroom test',10,NULL::NUMERIC,TRUE,2,'active','week',TRUE),
   ('Monthly Test','MLT','Monthly assessment',20,NULL::NUMERIC,TRUE,3,'active','month',TRUE),
@@ -2148,7 +2344,22 @@ SELECT * FROM (VALUES
   ('Oral','ORAL','Oral assessment',10,NULL::NUMERIC,TRUE,13,'active',NULL,TRUE),
   ('Other','OTHER','Other assessment',30,NULL::NUMERIC,TRUE,14,'active','other',TRUE)
 ) AS v (name, code, description, default_maximum_mark, weight, contributes_to_combined, display_order, status, period_hint, is_standard)
-ON CONFLICT (name) DO UPDATE SET code = EXCLUDED.code, description = EXCLUDED.description,
+WHERE NOT EXISTS (
+  SELECT 1
+  FROM assessment_types existing
+  WHERE existing.code = v.code
+    AND existing.name <> v.name
+)
+ON CONFLICT (name) DO UPDATE SET
+  code = CASE
+    WHEN EXISTS (
+      SELECT 1 FROM assessment_types existing
+      WHERE existing.code = EXCLUDED.code
+        AND existing.id <> assessment_types.id
+    ) THEN assessment_types.code
+    ELSE EXCLUDED.code
+  END,
+  description = EXCLUDED.description,
   default_maximum_mark = EXCLUDED.default_maximum_mark, display_order = EXCLUDED.display_order,
   status = EXCLUDED.status, period_hint = EXCLUDED.period_hint, is_standard = EXCLUDED.is_standard;
 
@@ -2386,8 +2597,11 @@ REVOKE ALL ON FUNCTION public.rms_account_can_teacher(UUID) FROM PUBLIC, anon;
 REVOKE ALL ON FUNCTION public.rms_account_can_class(UUID) FROM PUBLIC, anon;
 REVOKE ALL ON FUNCTION public.rms_account_can_subject(UUID) FROM PUBLIC, anon;
 REVOKE ALL ON FUNCTION public.rms_account_can_learner(UUID) FROM PUBLIC, anon;
+REVOKE ALL ON FUNCTION public.rms_dashboard_scoped_learner_count(UUID[]) FROM PUBLIC, anon;
 REVOKE ALL ON FUNCTION public.rms_account_can_assessment(UUID) FROM PUBLIC, anon;
 REVOKE ALL ON FUNCTION public.rms_class_teacher_can_assessment(UUID) FROM PUBLIC, anon;
+REVOKE ALL ON FUNCTION public.rms_subject_matches_class(UUID, UUID) FROM PUBLIC, anon;
+REVOKE ALL ON FUNCTION public.rms_enforce_subject_class_level() FROM PUBLIC, anon;
 REVOKE ALL ON FUNCTION public.rms_account_can_assessment_fields(UUID, UUID, UUID, UUID) FROM PUBLIC, anon;
 REVOKE ALL ON FUNCTION public.rms_account_can_assignment(UUID, UUID, UUID) FROM PUBLIC, anon;
 REVOKE ALL ON FUNCTION public.rms_account_can_document(UUID) FROM PUBLIC, anon;
@@ -2400,8 +2614,11 @@ GRANT EXECUTE ON FUNCTION public.rms_account_can_teacher(UUID) TO authenticated;
 GRANT EXECUTE ON FUNCTION public.rms_account_can_class(UUID) TO authenticated;
 GRANT EXECUTE ON FUNCTION public.rms_account_can_subject(UUID) TO authenticated;
 GRANT EXECUTE ON FUNCTION public.rms_account_can_learner(UUID) TO authenticated;
+GRANT EXECUTE ON FUNCTION public.rms_dashboard_scoped_learner_count(UUID[]) TO authenticated;
 GRANT EXECUTE ON FUNCTION public.rms_account_can_assessment(UUID) TO authenticated;
 GRANT EXECUTE ON FUNCTION public.rms_class_teacher_can_assessment(UUID) TO authenticated;
+GRANT EXECUTE ON FUNCTION public.rms_subject_matches_class(UUID, UUID) TO authenticated;
+GRANT EXECUTE ON FUNCTION public.rms_enforce_subject_class_level() TO authenticated;
 GRANT EXECUTE ON FUNCTION public.rms_account_can_assessment_fields(UUID, UUID, UUID, UUID) TO authenticated;
 GRANT EXECUTE ON FUNCTION public.rms_account_can_assignment(UUID, UUID, UUID) TO authenticated;
 GRANT EXECUTE ON FUNCTION public.rms_account_can_document(UUID) TO authenticated;

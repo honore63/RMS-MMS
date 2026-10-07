@@ -98,9 +98,9 @@ const ReportCenter = {
     const base = new URL('.', window.location.href).href;
     const css = [
       'css/styles.css?v=20261004-9',
-      'css/report-card.css?v=20261006-2',
-      'css/student-report-card.css?v=20261006-3',
-      'css/report-wizard.css?v=20261006-1'
+      'css/report-card.css?v=20261006-9',
+      'css/student-report-card.css?v=20261008-3',
+      'css/report-wizard.css?v=20261006-2'
     ].map(path => `<link rel="stylesheet" href="${new URL(path, base).href}">`).join('');
     const fonts = `<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin><link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700;800&display=swap" rel="stylesheet">`;
     const landscape = orientation === 'landscape';
@@ -110,15 +110,16 @@ const ReportCenter = {
     return `<!DOCTYPE html><html><head><meta charset="utf-8"><title>RMS-MIS Report</title>${fonts}${css}<style>
       @page{size:${page};margin:0}
       *{box-sizing:border-box;-webkit-print-color-adjust:exact;print-color-adjust:exact}
-      html,body{width:100%;min-height:100%;height:auto!important;margin:0;padding:0;background:#fff;overflow-x:auto!important;overflow-y:auto!important}
+      html,body{width:100%;min-height:100%;height:auto!important;margin:0;padding:0;background:#fff;overflow-x:hidden!important;overflow-y:auto!important}
       body{font-family:'Poppins',Arial,Helvetica,sans-serif;color:#0f172a}
       body>*:not(.report-tab-toolbar){max-height:none!important;overflow:visible!important}
       .rms-a4-container,.rc-paper{width:${width}!important;max-width:none!important;height:auto!important;min-height:${height}!important;max-height:none!important;margin:0 auto!important;padding:10mm!important;overflow:visible!important;box-shadow:none!important;break-inside:auto!important;page-break-inside:auto!important;break-after:auto!important;page-break-after:auto!important}
       .rms-a4-container.rms-a4-landscape,.rc-paper.rms-a4-landscape{width:297mm!important;min-height:210mm!important}
+      @media print{.rms-student-card-page{--src-view-scale:1!important;width:210mm!important;height:297mm!important;min-height:297mm!important;max-height:297mm!important;max-width:210mm!important;padding:0!important;overflow:hidden!important}.rms-student-card-page>.src-sheet{top:5mm!important;left:5mm!important;transform:scale(var(--src-fit-scale,1))!important}.rc-paper-fit{--rc-view-scale:1!important;width:210mm!important;height:297mm!important;min-height:297mm!important;max-height:297mm!important;padding:0!important;overflow:hidden!important}.rc-paper-fit .rc-fit-content{top:5mm!important;left:5mm!important;transform:scale(var(--rc-fit-scale,1))!important}}
       .rms-a4-container.rms-report-document{height:auto!important;min-height:0!important;overflow:visible!important;break-inside:auto!important;page-break-inside:auto!important}
       .rms-page-break{display:block!important;height:0!important;margin:0!important;padding:0!important;break-after:page!important;page-break-after:always!important}
       .rms-student-card-page{break-inside:avoid!important;page-break-inside:avoid!important}
-      @media print{.rms-student-card-page:not(:last-child){break-after:page!important;page-break-after:always!important}.rms-student-card-page:last-child{break-after:auto!important;page-break-after:auto!important}}
+      @media print{.rms-student-card-page{break-after:auto!important;page-break-after:auto!important}}
       @media screen{.rms-student-card-page:not(:last-child){margin-bottom:16px!important}}
       table{width:100%;border-collapse:collapse;break-inside:auto;page-break-inside:auto}
       thead{display:table-header-group}tfoot{display:table-footer-group}
@@ -146,12 +147,12 @@ const ReportCenter = {
     const documentHtml=this.buildPdfDocument(`<main class="rms-full-report-preview">${html}</main>`, orientation)
       .replace('<title>RMS-MIS Report</title>', `<title>${Utils.escapeHtml(title || 'RMS-MIS Report Preview')}</title>`)
       .replace('</style>', `
-      .rms-full-report-preview{width:max-content;min-width:100%}
+      .rms-full-report-preview{width:100%;min-width:0;max-width:100%;overflow-x:hidden}
       .report-tab-toolbar{position:sticky;top:0;z-index:1000;display:flex;justify-content:space-between;align-items:center;gap:12px;padding:12px 20px;background:#0f2e63;color:#fff;font:600 14px Arial,sans-serif;box-shadow:0 2px 8px rgba(0,0,0,.18)}
       .report-tab-toolbar span{display:flex;gap:8px;flex-wrap:wrap}
       .report-tab-toolbar button{display:inline-flex!important;border:1px solid rgba(255,255,255,.55);border-radius:6px;padding:8px 12px;background:#fff;color:#0f2e63;font-weight:700;cursor:pointer}
       @media(max-width:640px){.report-tab-toolbar{align-items:flex-start;flex-direction:column;padding:10px}.report-tab-toolbar span{width:100%}.report-tab-toolbar button{flex:1}}
-      @media screen and (max-width:900px){.rms-full-report-preview .rms-a4-container,.rms-full-report-preview .rc-paper{width:210mm!important;max-width:210mm!important;min-height:297mm!important;margin:0 auto!important;padding:12mm!important;overflow:visible!important;box-shadow:none!important}.rms-full-report-preview .src-table{min-width:0!important}}
+      @media screen and (max-width:900px){.rms-full-report-preview .rms-a4-container,.rms-full-report-preview .rc-paper{width:210mm!important;max-width:210mm!important;min-height:297mm!important;margin:0 auto!important;padding:12mm!important;overflow:visible!important;box-shadow:none!important}.rms-full-report-preview .rms-student-card-page{width:calc(210mm * var(--src-view-scale,1))!important;max-width:calc(210mm * var(--src-view-scale,1))!important;height:calc(297mm * var(--src-view-scale,1))!important;min-height:calc(297mm * var(--src-view-scale,1))!important;max-height:calc(297mm * var(--src-view-scale,1))!important;padding:0!important;overflow:hidden!important}.rms-full-report-preview .rms-student-card-page>.src-sheet{top:calc(5mm * var(--src-view-scale,1))!important;left:calc(5mm * var(--src-view-scale,1))!important;transform:scale(calc(var(--src-fit-scale,1) * var(--src-view-scale,1)))!important}.rms-full-report-preview .rc-paper-fit{width:calc(210mm * var(--rc-view-scale,1))!important;max-width:calc(210mm * var(--rc-view-scale,1))!important;height:calc(297mm * var(--rc-view-scale,1))!important;min-height:calc(297mm * var(--rc-view-scale,1))!important;max-height:calc(297mm * var(--rc-view-scale,1))!important;padding:0!important;overflow:hidden!important}.rms-full-report-preview .rc-paper-fit .rc-fit-content{top:calc(5mm * var(--rc-view-scale,1))!important;left:calc(5mm * var(--rc-view-scale,1))!important;transform:scale(calc(var(--rc-fit-scale,1) * var(--rc-view-scale,1)))!important}.rms-full-report-preview .src-table{min-width:0!important}}
       @media print{.report-tab-toolbar{display:none!important}html,body{height:auto!important;overflow:visible!important}}
       @page{size:${orientation === 'landscape' ? 'A4 landscape' : 'A4 portrait'};margin:0}
       </style>`)

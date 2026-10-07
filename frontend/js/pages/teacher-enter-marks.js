@@ -623,12 +623,15 @@ async function doConvertMarks(curMax, target, rows) {
     for (const r of rows) {
       const oldMark = Number(r.mark);
       const newMark = convertCompute(oldMark, curMax, target);
-      const pct = Utils.pct(newMark, target);
+      const result = Utils.assessmentResult(newMark, target, convertState.grading);
+      const pct = result.percentage;
+      if (pct == null) throw new Error('Target maximum mark must be greater than zero.');
       const patch = {
         mark: newMark,
+        normalized_mark: result.normalized_mark,
         percentage: pct,
-        grade: Utils.grade(pct, convertState.grading),
-        remark: Utils.remark(pct, convertState.grading),
+        grade: result.grade,
+        remark: result.remark,
         updated_at: now
       };
       if (r.markId) {
@@ -734,7 +737,10 @@ async function renderMarksEntry(assessId) {
   markEntries = learners.map(l => {
     const em = marksMap[l.id];
     const markVal = em?.mark != null ? em.mark.toString() : '';
-    const pct = markVal ? Utils.pct(parseFloat(markVal), markAssessment.maximum_mark) : 0;
+    const normalized = markVal
+      ? Utils.normalizedMark(parseFloat(markVal), markAssessment.maximum_mark)
+      : 0;
+    const pct = normalized == null ? 0 : normalized;
     return {
       learnerId: l.id,
       name: l.full_name,
@@ -932,7 +938,8 @@ function updateMark(index, value) {
 
   if (value !== '' && value != null) {
     const n = parseFloat(value);
-    if (isNaN(n) || n < 0 || n > maxMark) {
+    if (!Number.isFinite(n) || n < 0 || n > maxMark
+      || Utils.normalizedMark(n, maxMark) == null) {
       showMarkError(`Invalid mark. Enter a value between 0 and ${maxMark}.`);
       const input = document.querySelector(`#marks-table-body tr[data-mark-index="${index}"] input`);
       if (input) input.value = markEntries[index].mark || '';
@@ -942,7 +949,10 @@ function updateMark(index, value) {
 
   const e = markEntries[index];
   e.mark = value;
-  const pct = (value !== '' && value != null) ? Utils.pct(parseFloat(value), maxMark) : 0;
+  const normalized = (value !== '' && value != null)
+    ? Utils.normalizedMark(parseFloat(value), maxMark)
+    : 0;
+  const pct = normalized == null ? 0 : normalized;
   e.pct = pct;
 
   Utils.getGradingScale().then(scale => {
@@ -1017,6 +1027,11 @@ async function saveMarks(isAuto = false) {
   if (isAuto) showSaveStatus('saving');
 
   const toSave = markEntries.filter(e => e.mark !== '' && e.mark != null);
+  if (toSave.length && Utils.normalizedMark(toSave[0].mark, markAssessment.maximum_mark) == null) {
+    showSaveStatus('error');
+    Utils.toast('Assessment maximum mark must be greater than zero before marks can be saved.', 'error');
+    return;
+  }
 
   try {
     for (const e of toSave) {
@@ -1024,6 +1039,7 @@ async function saveMarks(isAuto = false) {
         assessment_id: markAssessment.id,
         learner_id: e.learnerId,
         mark: parseFloat(e.mark),
+        normalized_mark: e.pct,
         percentage: e.pct,
         grade: e.grade,
         remark: e.remark,
@@ -1033,6 +1049,8 @@ async function saveMarks(isAuto = false) {
         const { error } = await sbClient.from('marks').update(data).eq('id', e.markId);
         if (error) throw error;
       } else {
+        data.original_mark = parseFloat(e.mark);
+        data.original_maximum = Number(markAssessment.maximum_mark);
         const { data: newMark, error } = await sbClient.from('marks').insert(data).select().single();
         if (error) throw error;
         e.markId = newMark.id;
@@ -1129,6 +1147,9 @@ async function submitMarks() {
             assessment_id: markAssessment.id,
             learner_id: e.learnerId,
             mark: parseFloat(e.mark),
+            original_mark: parseFloat(e.mark),
+            original_maximum: Number(markAssessment.maximum_mark),
+            normalized_mark: e.pct,
             percentage: e.pct,
             grade: e.grade,
             remark: e.remark,
@@ -1189,4 +1210,3 @@ async function downloadMarksTemplateForCurrentAssessment(){
     Utils.toast('Failed to generate template: '+e.message,'error');
   }
 }
-

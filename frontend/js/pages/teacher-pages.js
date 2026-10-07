@@ -597,7 +597,7 @@ async function buildCombinedReportData(assessmentIds) {
   const unitPerf = assessments.map(a => {
     const attended = learnerRows.filter(r => r.unitMarks[a.id] !== 'N/R');
     const sumMarks = attended.reduce((acc, r) => acc + Number(r.unitMarks[a.id]), 0);
-    const maxPoss = attended.length * (a.maximum_mark || 30);
+    const maxPoss = attended.length * Number(a.maximum_mark || 0);
     const unitAvg = maxPoss > 0 ? Math.round((sumMarks / maxPoss) * 1000) / 10 : 0;
     return {
       unit: a.unit,

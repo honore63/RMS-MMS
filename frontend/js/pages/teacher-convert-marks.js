@@ -762,14 +762,17 @@ async function bulkEditSavedMark(assessId, learnerId, val) {
   if (!isFinite(num) || num < 0 || num > v.max) { Utils.toast('Enter a mark between 0 and ' + v.max, 'error'); bulkRenderHelperModal(); return; }
   const factor = Math.pow(10, bulkConvert.decimals);
   const mark = Math.round(num * factor) / factor;
-  const pct = Utils.pct(mark, v.max);
+  const result = Utils.assessmentResult(mark, v.max, bulkConvert.grading);
+  const pct = result.percentage;
+  if (pct == null) return Utils.toast('Assessment maximum mark must be greater than zero.', 'error');
   const { error } = await sbClient.from('marks').upsert({
     assessment_id: assessId,
     learner_id: learnerId,
     mark,
+    normalized_mark: result.normalized_mark,
     percentage: pct,
-    grade: Utils.grade(pct, bulkConvert.grading),
-    remark: Utils.remark(pct, bulkConvert.grading),
+    grade: result.grade,
+    remark: result.remark,
     status: 'draft',
     updated_at: new Date().toISOString()
   }, { onConflict: 'assessment_id,learner_id' });
@@ -1077,6 +1080,7 @@ async function doBulkSave() {
       assessment_id: targetId,
       learner_id: r.l.id,
       mark: r.conv,
+      normalized_mark: r.pct,
       percentage: r.pct,
       grade: r.grade === '-' ? null : r.grade,
       remark: r.remark === 'Incomplete' ? null : r.remark,

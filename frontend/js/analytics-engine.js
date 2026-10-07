@@ -83,7 +83,7 @@ const AnalyticsEngine = {
 
   pctFor(mark, assessment) {
     if (mark == null || assessment == null || assessment.maximum_mark == null) return null;
-    return Utils.pct(Number(mark), Number(assessment.maximum_mark));
+    return Utils.normalizedMark(Number(mark), Number(assessment.maximum_mark));
   },
 
   learnerPct(marks, assessments, types) {
@@ -92,7 +92,8 @@ const AnalyticsEngine = {
     const units = has
       .map(m => {
         const a = assessments.find(x => x.id === m.assessment_id);
-        return a ? { a, m } : null;
+        const pct = a ? this.pctFor(m.mark, a) : null;
+        return pct == null ? null : { a, m, pct };
       })
       .filter(Boolean);
     if (!units.length) return null;
@@ -102,7 +103,7 @@ const AnalyticsEngine = {
     });
     let pct;
     if (weighted) {
-      const num = units.reduce((s, u) => s + this.pctFor(u.m.mark, u.a) * this.effWeight(u.a, types), 0);
+      const num = units.reduce((s, u) => s + u.pct * this.effWeight(u.a, types), 0);
       const den = units.reduce((s, u) => s + this.effWeight(u.a, types), 0);
       pct = den > 0 ? (num / den) : null;
     } else {
@@ -159,7 +160,7 @@ const AnalyticsEngine = {
       });
     }
 
-    const statusMode = filters.status || 'official';
+    const statusMode = filters.status || 'all';
     if (statusMode === 'official') {
       assessments = assessments.filter(a => a.status === 'submitted' || a.status === 'approved' || a.status === 'locked');
     } else if (statusMode !== 'all') {

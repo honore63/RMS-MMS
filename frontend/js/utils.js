@@ -68,6 +68,27 @@ const Utils = {
     return Math.round((mark / max) * 10000) / 100;
   },
 
+  normalizedMark(mark, maximum) {
+    if (mark == null || mark === '' || maximum == null || maximum === '') return null;
+    const raw = Number(mark);
+    const max = Number(maximum);
+    if (!Number.isFinite(raw) || raw < 0 || !Number.isFinite(max) || max <= 0) return null;
+    return Math.round((raw / max) * 10000) / 100;
+  },
+
+  assessmentResult(mark, maximum, scale) {
+    const normalized = this.normalizedMark(mark, maximum);
+    if (normalized == null) {
+      return { normalized_mark: null, percentage: null, grade: null, remark: null };
+    }
+    return {
+      normalized_mark: normalized,
+      percentage: normalized,
+      grade: this.grade(normalized, scale),
+      remark: this.remark(normalized, scale)
+    };
+  },
+
   _matchingGradeRange(pct, scale) {
     if (!scale || !scale.length) return null;
     const ranges = [...scale].sort((a, b) => Number(b.minimum_percentage) - Number(a.minimum_percentage));
@@ -654,6 +675,9 @@ const Scope = {
     return true;
   },
 
+  matchesSubjectForClass(subject, cls) {
+    return EducationLevels.subjectMatchesClass(subject, cls);
+  },
   filterClasses(classes) {
     return (classes || []).filter(c => this.matchesClass(c));
   },
@@ -710,6 +734,25 @@ const EducationLevels = {
     if (clean.includes('NURSERY')) return 'Nursery';
     if (clean.includes('TVET')) return 'TVET';
     return 'Lower Secondary';
+  },
+
+  subjectMatchesClass(subject, cls) {
+    if (!subject || !cls) return false;
+    const classCategory = this.getCategory(cls);
+    const configuredLevel = subject.level && !['BOTH', 'ALL'].includes(String(subject.level).trim().toUpperCase())
+      ? subject.level
+      : subject.education_level || subject.level || 'Both';
+    const subjectLevel = String(configuredLevel)
+      .trim().toUpperCase().replace(/[_-]+/g, ' ');
+    const gradeMatch = String(cls.level || cls.name || '').toUpperCase().match(/\b([PS][1-6])\b/);
+    const subjectGrades = String(subject.grades || '').split(',').map(grade => grade.trim().toUpperCase()).filter(Boolean);
+    if (gradeMatch && subjectGrades.length && !subjectGrades.includes(gradeMatch[1])) return false;
+    if (!subjectLevel || subjectLevel === 'BOTH' || subjectLevel === 'ALL') return true;
+    if (subjectLevel === 'PRIMARY') return classCategory === 'Primary';
+    if (subjectLevel === 'SECONDARY') return String(classCategory).includes('Secondary');
+    if (subjectLevel === 'LOWER SECONDARY') return classCategory === 'Lower Secondary';
+    if (subjectLevel === 'UPPER SECONDARY') return classCategory === 'Upper Secondary';
+    return subjectLevel === String(classCategory).toUpperCase();
   },
 
   getAllowedGrades(category) {

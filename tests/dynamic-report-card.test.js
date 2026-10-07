@@ -98,7 +98,7 @@ test('report card uses configured weights and excludes unmarked assessments', ()
   assert.equal(score.components.get('unit').scoredMaximum, 20);
 });
 
-test('report card renders one grouped EU/ET grid across terms and annual totals', () => {
+test('report card renders term assessment details and an overall summary', () => {
   const context = loadReportCard();
   const html = context.rcRenderCard(
     { id: 'student', full_name: 'A Student', learner_code: 'S001' },
@@ -118,17 +118,21 @@ test('report card renders one grouped EU/ET grid across terms and annual totals'
     }
   );
 
-  assert.match(html, /class="rc-data-table rc-data-table-dynamic"/);
+  assert.match(html, /class="rc-data-table rc-data-table-dynamic rc-compact-term-table rc-summary-table"/);
+  assert.match(html, /class="rc-paper rc-paper-fit"/);
+  assert.match(html, /class="rc-fit-content"/);
   assert.match(html, /class="rc-all-subjects-row"/);
   assert.match(html, /Term 1 \/ 2026/);
   assert.match(html, /Term 2 \/ 2026/);
-  assert.match(html, /Total<\/th>/);
-  assert.match(html, /<th title="End of Unit">EU<\/th><th title="End of Term Exam">ET<\/th><th>TOT<\/th><th>%<\/th><th>GR<\/th>/);
-  assert.match(html, /<th>TOTAL<\/th><th>MAX<\/th><th>%<\/th><th>GR<\/th>/);
+  assert.match(html, /<th class="rc-th-sub rc-align-left">SUBJECT<\/th><th>Term 1 \/ 2026<\/th><th>Term 2 \/ 2026<\/th><th>OVERALL<\/th>/);
+  assert.match(html, /EU<\/b> Fractions 18\/20/);
+  assert.match(html, /ET<\/b> 40\/50/);
+  assert.match(html, /EU<\/b> Geometry —\/10/);
+  assert.match(html, /<strong>Incomplete<\/strong>/);
+  assert.match(html, /<strong>93\/130<\/strong>/);
+  assert.match(html, /<tfoot><tr class="rc-total-row">/);
   assert.match(html, /78\.8%/);
-  assert.match(html, /40%/);
-  assert.match(html, /60%/);
-  assert.doesNotMatch(html, /Term 1 RESULTS|Term 2 RESULTS/);
+  assert.doesNotMatch(html, />MAXIMUM<\/th>|rc-reference-matrix/);
 });
 
 test('report card columns follow configured assessment types rather than EU/ET rules', () => {

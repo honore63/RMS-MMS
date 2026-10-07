@@ -463,7 +463,7 @@ const ReportTemplates = {
         <div class="rms-stat"><span class="rms-stat-val font-bold">${bestText}</span><span class="rms-stat-lbl">Best Assessment</span></div>
       </div>
       ${charts}
-      ${rows && rows.length ? `<table class="rms-table"><thead><tr><th>#</th><th>Assessment</th><th>Max</th><th>Entered</th><th>Missing</th><th>Average</th><th>Highest</th><th>Lowest</th><th>Pass Rate</th></tr></thead><tbody>${tbody}</tbody></table>` : ReportHeader.emptyState('No approved assessments are available for comparison.', { icon: 'file-x' })}
+      ${rows && rows.length ? `<table class="rms-table"><thead><tr><th>#</th><th>Assessment</th><th>Max</th><th>Entered</th><th>Missing</th><th>Average</th><th>Highest</th><th>Lowest</th><th>Pass Rate</th></tr></thead><tbody>${tbody}</tbody></table>` : ReportHeader.emptyState('No assessments are available for comparison.', { icon: 'file-x' })}
       ${footer}`;
   },
 
@@ -545,7 +545,7 @@ const ReportTemplates = {
       ${header}
       <div class="rms-report-title">${data.title}</div>
       <div class="rms-meta">Academic Year: ${Utils.escapeHtml(year.name || '-')} | Term: ${Utils.escapeHtml(term.name || '-')} | Teachers: ${totalTeachers}</div>
-      <div class="rms-info-banner" style="display:flex;gap:6px"><i data-lucide="info" style="width:14px;height:14px;flex:none"></i><span>Submitted % = assessments submitted, approved or locked (ready for reports).</span></div>
+      <div class="rms-info-banner" style="display:flex;gap:6px"><i data-lucide="info" style="width:14px;height:14px;flex:none"></i><span>Submitted % = assessments submitted, approved or locked. Reports can be generated from marks of any status.</span></div>
       ${rows && rows.length ? `<table class="rms-table"><thead><tr><th>Teacher</th><th>Total</th><th>Classes</th><th>Subjects</th><th>Draft</th><th>Submitted</th><th>Approved/Locked</th><th>Marks Entered</th><th>Submitted %</th></tr></thead><tbody>${tbody}</tbody></table>` : ReportHeader.emptyState('No teacher submissions found for the selected period.', { icon: 'file-x' })}
       ${footer}`;
   }

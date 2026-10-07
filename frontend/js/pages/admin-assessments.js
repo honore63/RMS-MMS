@@ -1,6 +1,8 @@
 let assessFilter = 'all';
 let assessEduLevel = 'all';
 let asfTypes = [];
+let asfSubjects = [];
+let asfClasses = [];
 
 /* Build the Assessment Type dropdown from the canonical ASSESSMENT_TYPES
    constant, resolving each name to its assessment_types row so the existing
@@ -183,6 +185,8 @@ async function assessForm() {
   const scoped = typeof Scope !== 'undefined' && Scope.isScoped();
   const scopedClasses = scoped ? Scope.filterClasses(classes) : classes;
   const scopedSubjects = scoped ? Scope.filterSubjects(subjects) : subjects;
+  asfClasses = scopedClasses || [];
+  asfSubjects = scopedSubjects || [];
   const scopedTeachers = scoped ? teachers.filter(t => {
     /* Only show teachers whose assigned class education level matches the DOS scope */
     const assigned = (typeof teacherAssignmentsCache !== 'undefined' && teacherAssignmentsCache) || [];
@@ -213,8 +217,8 @@ async function assessForm() {
     </div>
     <div class="asf-section">
       <div class="asf-section-title"><i data-lucide="users" style="width:14px;height:14px"></i> 2 — Class • Subject • Teacher</div>
-      <div class="form-row"><div class="form-group"><label>Class <span class="required">*</span></label><select id="asf-class" class="select-field"><option value="">Select class</option>${scopedClasses.map(c => `<option value="${c.id}">${Utils.escapeHtml(c.name)} — ${Utils.escapeHtml(EducationLevels.getCategory(c))}</option>`).join('')}</select></div>
-      <div class="form-group"><label>Subject <span class="required">*</span></label><select id="asf-subject" class="select-field"><option value="">Select subject</option>${scopedSubjects.map(s => `<option value="${s.id}">${Utils.escapeHtml(s.name)} (${Utils.escapeHtml(s.code || '')})</option>`).join('')}</select></div></div>
+      <div class="form-row"><div class="form-group"><label>Class <span class="required">*</span></label><select id="asf-class" class="select-field" onchange="assessClassChanged()"><option value="">Select class</option>${scopedClasses.map(c => `<option value="${c.id}">${Utils.escapeHtml(c.name)} — ${Utils.escapeHtml(EducationLevels.getCategory(c))}</option>`).join('')}</select></div>
+      <div class="form-group"><label>Subject <span class="required">*</span></label><select id="asf-subject" class="select-field"><option value="">Select a class first</option></select></div></div>
       <div class="form-group"><label>Teacher <span class="required">*</span></label><select id="asf-teacher" class="select-field"><option value="">Select teacher</option>${scopedTeachers.map(t => `<option value="${t.id}">${Utils.escapeHtml(t.full_name)} — ${Utils.escapeHtml(t.teacher_code || '')}</option>`).join('')}</select></div>
     </div>
     <div class="asf-section">
@@ -235,6 +239,7 @@ async function assessForm() {
      <button class="btn btn-primary" onclick="assessSave(this)"><i data-lucide="save"></i> Create Assessment</button>`, true);
   if (typeof lucide !== 'undefined') lucide.createIcons();
   assessTypeChanged();
+  assessClassChanged();
   // keep Term list in sync when Year changes
   document.getElementById('asf-year')?.addEventListener('change', (e) => {
     const yId = e.target.value;
@@ -244,6 +249,22 @@ async function assessForm() {
     termSel.innerHTML = '<option value="">Select term</option>' + filtered.map(t => `<option value="${t.id}">${Utils.escapeHtml(t.name)}</option>`).join('');
     asfUpdatePreview();
   });
+}
+
+function assessClassChanged() {
+  const classId = document.getElementById('asf-class')?.value || '';
+  const subjectSelect = document.getElementById('asf-subject');
+  if (!subjectSelect) return;
+  const cls = asfClasses.find(row => String(row.id) === String(classId)) || null;
+  const matches = cls
+    ? asfSubjects.filter(subject => EducationLevels.subjectMatchesClass(subject, cls))
+    : [];
+  subjectSelect.innerHTML = '<option value="">Select subject</option>' + matches.map(subject =>
+    `<option value="${subject.id}">${Utils.escapeHtml(subject.name)} (${Utils.escapeHtml(subject.code || '')})</option>`
+  ).join('');
+  if (!matches.length && classId) {
+    subjectSelect.innerHTML = '<option value="">No subjects are configured for this class level</option>';
+  }
 }
 
 function assessTypeChanged() {
@@ -436,12 +457,17 @@ async function assessSave(btn) {
     const [dbClasses, dbSubjects] = await Promise.all([DB.get('classes'), DB.get('subjects')]);
     const cls = dbClasses.find(c => String(c.id) === String(d.class_id));
     const subj = dbSubjects.find(s => String(s.id) === String(d.subject_id));
-    if (typeof Scope !== 'undefined' && Scope.isScoped() && cls && subj) {
-      if (!Scope.matchesClass(cls) || !Scope.matchesSubject(subj)) {
-        return fail('This class/subject combination is outside your education-level scope. Primary subjects cannot be assigned to Secondary classes, and vice versa.');
-      }
+    if (!cls || !subj) return fail('Could not verify the selected class and subject.');
+    if (!EducationLevels.subjectMatchesClass(subj, cls)) {
+      return fail('This subject is not available for the selected class level.');
     }
-  } catch (e) { /* ignore */ }
+    if (typeof Scope !== 'undefined' && Scope.isScoped()
+      && (!Scope.matchesClass(cls) || !Scope.matchesSubject(subj))) {
+      return fail('This class/subject combination is outside your education-level scope.');
+    }
+  } catch (e) {
+    return fail('Could not verify the selected class and subject: ' + e.message);
+  }
   // student check — tell DOS if class has no active learners
   try {
     const { count: _classLearnerCount } = await sbClient.from('learners').select('id', { count: 'exact', head: true }).eq('class_id', d.class_id).eq('status', 'active');

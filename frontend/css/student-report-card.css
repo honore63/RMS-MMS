@@ -12,6 +12,7 @@
   font-size: 11px;
   line-height: 1.35;
 }
+.src-compact-term-table { width: 100% !important; min-width: 0 !important; table-layout: fixed !important; }
 
 /* ---------- Header ---------- */
 .src-header {
@@ -231,6 +232,51 @@
   font-weight: 800;
 }
 .src-multi-term-table tfoot { border-top: 12px solid #fff; }
+.src-compact-term-table {
+  width: 100%;
+  min-width: 0;
+  table-layout: fixed;
+  font-size: 8px;
+  line-height: 1.15;
+}
+.src-compact-term-table th:first-child,
+.src-compact-term-table td:first-child { width: 27%; }
+.src-compact-term-table th:not(:first-child),
+.src-compact-term-table td:not(:first-child) { width: auto; }
+.src-compact-term-table td.src-term-detail-cell { text-align: left; }
+.src-assessment-marks {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 1px 4px;
+}
+.src-assessment-mark { white-space: nowrap; }
+.src-term-summary,
+.src-overall-cell { font-weight: 700; }
+.src-term-summary { display: block; margin-top: 2px; }
+.src-no-mark { color: #555; font-style: italic; }
+.rms-student-card-page {
+  position: relative !important;
+  width: calc(210mm * var(--src-view-scale, 1)) !important;
+  height: calc(297mm * var(--src-view-scale, 1)) !important;
+  min-height: calc(297mm * var(--src-view-scale, 1)) !important;
+  max-height: calc(297mm * var(--src-view-scale, 1)) !important;
+  max-width: calc(210mm * var(--src-view-scale, 1)) !important;
+  margin: 0 auto !important;
+  padding: 0 !important;
+  overflow: hidden !important;
+  box-sizing: border-box !important;
+  break-inside: avoid !important;
+  page-break-inside: avoid !important;
+}
+.rms-student-card-page > .src-sheet {
+  position: absolute !important;
+  top: calc(5mm * var(--src-view-scale, 1)) !important;
+  left: calc(5mm * var(--src-view-scale, 1)) !important;
+  width: calc(200mm / var(--src-fit-scale, 1)) !important;
+  min-height: 0 !important;
+  transform: scale(calc(var(--src-fit-scale, 1) * var(--src-view-scale, 1))) !important;
+  transform-origin: top left !important;
+}
 /* ---------- Summary + performance ---------- */
 .src-panels {
   display: flex;
@@ -400,6 +446,9 @@
   }
   .src-multi-term-table td.src-subject { min-width: 0; }
   .src-multi-term-table .src-all-subjects-row td { text-align: left; }
+  .src-compact-term-table { display: table; width: 100%; min-width: 0; }
+  .src-compact-term-table th,
+  .src-compact-term-table td { padding: 2px 3px; white-space: normal; }
   .src-panels, .src-comments, .src-signatures { page-break-inside: avoid; break-inside: avoid; }
 }
 
@@ -462,6 +511,8 @@
   .rms-full-report-preview .src-multi-term-wrap { overflow-x: auto; max-width: 100%; }
   .pmp-report-preview .src-multi-term-table,
   .rms-full-report-preview .src-multi-term-table { display: table; width: max-content; min-width: 1100px; table-layout: auto; }
+  .pmp-report-preview .src-compact-term-table,
+  .rms-full-report-preview .src-compact-term-table { display: table; width: 100%; min-width: 0; table-layout: fixed; }
   .pmp-report-preview .src-table th,
   .pmp-report-preview .src-table td,
   .rms-full-report-preview .src-table th,
@@ -470,6 +521,10 @@
   .pmp-report-preview .src-multi-term-table td,
   .rms-full-report-preview .src-multi-term-table th,
   .rms-full-report-preview .src-multi-term-table td { padding: 4px 5px; white-space: nowrap; }
+  .pmp-report-preview .src-compact-term-table th,
+  .pmp-report-preview .src-compact-term-table td,
+  .rms-full-report-preview .src-compact-term-table th,
+  .rms-full-report-preview .src-compact-term-table td { padding: 2px 3px; white-space: normal; }
   .pmp-report-preview .src-panels,
   .rms-full-report-preview .src-panels { flex-direction: row; }
   .pmp-report-preview .src-panel,
@@ -577,6 +632,211 @@
 }
 .src-sheet .src-wave { background: #111 !important; }
 
+.src-sheet .src-multi-term-wrap {
+  max-width: 100% !important;
+  overflow-x: hidden !important;
+}
+.src-sheet .src-multi-term-table {
+  width: 100% !important;
+  min-width: 0 !important;
+  max-width: 100% !important;
+  table-layout: fixed !important;
+  border-collapse: collapse !important;
+  border: 1.5px solid #111 !important;
+}
+.src-sheet .src-multi-term-table th,
+.src-sheet .src-multi-term-table td {
+  border: 1.5px solid #111 !important;
+  white-space: normal !important;
+  overflow-wrap: anywhere;
+}
+
+.src-sheet .src-reference-matrix-wrap {
+  width: 100% !important;
+  max-width: 100% !important;
+  overflow-x: hidden !important;
+}
+.src-reference-matrix {
+  width: 100% !important;
+  min-width: 0 !important;
+  max-width: 100% !important;
+  table-layout: fixed !important;
+  border: 1px solid #64748b !important;
+  border-radius: 4px;
+  border-collapse: collapse !important;
+  border-spacing: 0 !important;
+  color: #172033;
+  font-size: 8px;
+}
+.src-sheet .src-multi-term-table.src-reference-matrix {
+  width: 100% !important;
+  min-width: 0 !important;
+  max-width: 100% !important;
+  table-layout: fixed !important;
+}
+.src-reference-matrix th,
+.src-reference-matrix td {
+  padding: 4px 2px;
+  line-height: 1.2;
+  vertical-align: middle;
+  overflow-wrap: anywhere;
+  white-space: normal !important;
+  text-align: center;
+}
+.src-sheet .src-multi-term-table.src-reference-matrix th,
+.src-sheet .src-multi-term-table.src-reference-matrix td {
+  border: 1px solid #cbd5e1 !important;
+}
+.src-sheet .src-multi-term-table.src-reference-matrix tr > :first-child {
+  border-left: 2px solid #172033 !important;
+}
+.src-sheet .src-multi-term-table.src-reference-matrix tr > :last-child {
+  border-right: 2px solid #172033 !important;
+}
+.src-sheet .src-multi-term-table.src-reference-matrix thead tr:first-child > :first-child,
+.src-sheet .src-multi-term-table.src-reference-matrix thead tr:first-child > :last-child {
+  border-top: 2px solid #172033 !important;
+}
+.src-sheet .src-multi-term-table.src-reference-matrix tfoot tr:last-child > * {
+  border-bottom: 2px solid #172033 !important;
+}
+.src-sheet .src-reference-matrix .src-subject-heading,
+.src-sheet .src-reference-matrix tbody tr:not(.src-all-subjects-row) td:first-child,
+.src-sheet .src-reference-matrix tfoot td:first-child {
+  width: 22%;
+  min-width: 0;
+}
+.src-reference-matrix .src-subject-heading,
+.src-reference-matrix tbody td.src-subject,
+.src-reference-matrix .src-multi-term-weight th:first-child {
+  text-align: left;
+}
+.src-reference-matrix tbody td.src-subject {
+  color: #172033;
+  font-weight: 600;
+  padding-left: 6px;
+}
+.src-sheet .src-reference-matrix thead th {
+  background: #f8fafc !important;
+  color: #334155 !important;
+  font-size: 8px;
+  font-weight: 700;
+  letter-spacing: .03em;
+  padding: 5px 2px;
+}
+.src-sheet .src-reference-matrix thead .src-group-heading {
+  background: #17365d !important;
+  color: #fff !important;
+  font-size: 9px;
+  letter-spacing: .06em;
+  text-transform: uppercase;
+}
+.src-sheet .src-reference-matrix thead .src-maximum-group {
+  background: #334155 !important;
+}
+.src-sheet .src-reference-matrix thead .src-overall-group {
+  background: #0f4c5c !important;
+}
+.src-sheet .src-reference-matrix thead .src-multi-term-subhead th,
+.src-sheet .src-reference-matrix thead .src-multi-term-weight th {
+  background: #eaf0f7 !important;
+  color: #1e3a5f !important;
+}
+.src-sheet .src-reference-matrix thead .src-multi-term-subhead th {
+  white-space: nowrap !important;
+  overflow-wrap: normal;
+  padding-left: 1px;
+  padding-right: 1px;
+}
+.src-sheet .src-reference-matrix .src-multi-term-weight th {
+  background: #f1f5f9 !important;
+  color: #475569 !important;
+  font-size: 7.5px;
+  font-weight: 600;
+}
+.src-reference-matrix .src-subtotal-heading,
+.src-reference-matrix .src-term-total {
+  background: #f1f5f9 !important;
+  color: #17365d !important;
+  font-weight: 700;
+}
+.src-reference-matrix .src-term-start {
+  border-left: 2px solid #94a3b8 !important;
+}
+.src-reference-matrix .src-all-subjects-row td {
+  background: #e2e8f0 !important;
+  color: #17365d !important;
+  text-align: left !important;
+  font-weight: 700;
+  font-size: 9px;
+  letter-spacing: .04em;
+  padding: 6px 7px !important;
+}
+.src-reference-matrix tbody tr:not(.src-all-subjects-row) td {
+  background: #fff !important;
+}
+.src-reference-matrix tbody tr:nth-child(even):not(.src-all-subjects-row) td {
+  background: #f8fafc !important;
+}
+.src-reference-matrix .src-maximum-cell,
+.src-reference-matrix .src-term-total,
+.src-reference-matrix tfoot td {
+  font-weight: 700;
+}
+.src-sheet .src-reference-matrix tbody tr:last-child:not(.src-all-subjects-row) td {
+  border-bottom: 2px solid #64748b !important;
+}
+.src-reference-matrix tfoot {
+  border-top: 10px solid #fff;
+}
+.src-sheet .src-reference-matrix tfoot .src-total-row td {
+  border-top: 2px solid #64748b !important;
+}
+.src-sheet .src-reference-matrix tfoot td {
+  background: #eaf0f7 !important;
+  color: #17365d !important;
+  border-top: 1px solid #94a3b8 !important;
+}
+.src-reference-matrix .src-total-row td:first-child {
+  text-align: left;
+  font-weight: 700;
+}
+
+@media print {
+  .src-sheet .src-reference-matrix-wrap {
+    overflow: visible !important;
+  }
+  .src-reference-matrix {
+    min-width: 0 !important;
+    font-size: 6.2px;
+    table-layout: fixed !important;
+    border-radius: 0;
+  }
+  .src-reference-matrix th,
+  .src-reference-matrix td {
+    padding: 2px 1px;
+    overflow-wrap: anywhere;
+  }
+  .src-sheet .src-reference-matrix .src-subject-heading,
+  .src-sheet .src-reference-matrix tbody tr:not(.src-all-subjects-row) td:first-child,
+  .src-sheet .src-reference-matrix tfoot td:first-child {
+    min-width: 0;
+  }
+  .src-sheet .src-reference-matrix thead .src-group-heading,
+  .src-sheet .src-reference-matrix thead .src-multi-term-subhead th,
+  .src-sheet .src-reference-matrix thead .src-multi-term-weight th {
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
+  .src-sheet .src-reference-matrix thead .src-multi-term-subhead th {
+    white-space: normal !important;
+    overflow-wrap: anywhere;
+  }
+  .src-reference-matrix tfoot {
+    border-top-width: 8px;
+  }
+}
+
 /* Dense cards stay on one A4 page when many subjects/components are present. */
 .src-sheet-compact { font-size: 9.5px; }
 .src-sheet-compact .src-logo { height: 62px; }
@@ -624,3 +884,140 @@
 .src-sheet-ultra .src-sig h5 { font-size: 7.5px; }
 .src-sheet-ultra .src-comments { margin-bottom: 4px; }
 .src-sheet-ultra .src-footer { font-size: 6.5px; }
+
+/* Keep the official report card strictly black and grayscale in preview and print. */
+.src-sheet .src-logo-caption,
+.src-sheet .src-motto,
+.src-sheet .src-school-line,
+.src-sheet .src-school-meta,
+.src-sheet .src-info-lbl,
+.src-sheet .src-info-sep,
+.src-sheet .src-info-val,
+.src-sheet .src-table tbody td,
+.src-sheet .src-table tfoot td,
+.src-sheet .src-kv,
+.src-sheet .src-kv b,
+.src-sheet .src-chart-title,
+.src-sheet .src-comment h5,
+.src-sheet .src-comment p,
+.src-sheet .src-sig h5,
+.src-sheet .src-sig .sig-name,
+.src-sheet .src-sig .sig-line,
+.src-sheet .src-footer,
+.src-sheet .src-badge,
+.src-sheet .src-reference-matrix,
+.src-sheet .src-reference-matrix tbody td.src-subject,
+.src-sheet .src-reference-matrix .src-subtotal-heading,
+.src-sheet .src-reference-matrix .src-term-total,
+.src-sheet .src-reference-matrix tfoot td {
+  color: #111 !important;
+}
+.src-sheet .src-head-rule,
+.src-sheet .src-info,
+.src-sheet .src-info-col + .src-info-col,
+.src-sheet .src-title-sub,
+.src-sheet .src-table th,
+.src-sheet .src-table td,
+.src-sheet .src-panel,
+.src-sheet .src-chart-box,
+.src-sheet .src-comments,
+.src-sheet .src-comment + .src-comment,
+.src-sheet .src-signatures,
+.src-sheet .src-sig + .src-sig,
+.src-sheet .src-sig .sig-line,
+.src-sheet .src-badge,
+.src-sheet .src-reference-matrix,
+.src-sheet .src-reference-matrix th,
+.src-sheet .src-reference-matrix td,
+.src-sheet .src-reference-matrix .src-term-start {
+  border-color: #333 !important;
+}
+.src-sheet .src-title-main,
+.src-sheet .src-section-title,
+.src-sheet .src-table thead th,
+.src-sheet .src-panel-title,
+.src-sheet .src-badge.solid,
+.src-sheet .src-reference-matrix thead .src-group-heading,
+.src-sheet .src-reference-matrix thead .src-maximum-group,
+.src-sheet .src-reference-matrix thead .src-overall-group {
+  background: #111 !important;
+  color: #fff !important;
+}
+.src-sheet .src-title-sub,
+.src-sheet .src-info,
+.src-sheet .src-table tbody tr:nth-child(even),
+.src-sheet .src-table tfoot td,
+.src-sheet .src-comments,
+.src-sheet .src-reference-matrix thead th,
+.src-sheet .src-reference-matrix thead .src-multi-term-subhead th,
+.src-sheet .src-reference-matrix thead .src-multi-term-weight th,
+.src-sheet .src-reference-matrix .src-subtotal-heading,
+.src-sheet .src-reference-matrix .src-term-total,
+.src-sheet .src-reference-matrix .src-all-subjects-row td,
+.src-sheet .src-reference-matrix tfoot td {
+  background: #eee !important;
+  color: #111 !important;
+}
+.src-sheet .src-reference-matrix tbody tr:not(.src-all-subjects-row) td {
+  background: #fff !important;
+}
+.src-sheet .src-reference-matrix tbody tr:nth-child(even):not(.src-all-subjects-row) td {
+  background: #f5f5f5 !important;
+}
+.src-sheet .src-reference-matrix tfoot,
+.src-sheet .src-multi-term-table tfoot {
+  border-top-color: #fff !important;
+}
+.src-sheet .src-sig [style*="color:"] { color: #111 !important; }
+
+/* Keep every report-card edge legible on screen and on paper. */
+.src-sheet .src-info,
+.src-sheet .src-title-sub,
+.src-sheet .src-term-section,
+.src-sheet .src-panel,
+.src-sheet .src-chart-box,
+.src-sheet .src-comments,
+.src-sheet .src-signatures,
+.src-sheet .src-badge,
+.src-sheet .src-head-rule,
+.src-sheet .src-footer {
+  border-color: #111 !important;
+}
+.src-sheet .src-info-col + .src-info-col,
+.src-sheet .src-comment + .src-comment,
+.src-sheet .src-sig + .src-sig,
+.src-sheet .src-sig .sig-line,
+.src-sheet .src-term-title,
+.src-sheet .src-kv {
+  border-color: #111 !important;
+}
+.src-sheet .src-table,
+.src-sheet .src-reference-matrix {
+  border: 1.5px solid #111 !important;
+  border-collapse: collapse !important;
+}
+.src-sheet .src-table th,
+.src-sheet .src-table td,
+.src-sheet .src-reference-matrix th,
+.src-sheet .src-reference-matrix td,
+.src-sheet .src-multi-term-table.src-reference-matrix th,
+.src-sheet .src-multi-term-table.src-reference-matrix td {
+  border: 1px solid #111 !important;
+}
+.src-sheet .src-reference-matrix tr > :first-child,
+.src-sheet .src-reference-matrix tr > :last-child {
+  border-color: #111 !important;
+}
+.src-sheet .src-reference-matrix thead tr:first-child > *,
+.src-sheet .src-reference-matrix tbody tr:last-child > *,
+.src-sheet .src-reference-matrix tfoot tr:first-child > * {
+  border-color: #111 !important;
+}
+.src-sheet .src-reference-matrix .src-term-start,
+.src-sheet .src-reference-matrix .src-total-row td {
+  border-color: #111 !important;
+}
+.src-sheet .src-reference-matrix tbody > tr:last-child:not(.src-all-subjects-row) > *,
+.src-sheet .src-reference-matrix tfoot > tr:last-child > * {
+  border-bottom: 1.5px solid #111 !important;
+}

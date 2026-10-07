@@ -1036,6 +1036,10 @@ const ImportSystem = (() => {
         status = 'draft';
         if (v.status.trim()) rec.errors.push({ field: 'status', message: 'Invalid status.', fix: 'Use draft, submitted or locked.' });
       }
+      const maximum = assessment ? Number(assessment.maximum_mark) : 0;
+      if (assessment && (!Number.isFinite(maximum) || maximum <= 0)) {
+        rec.errors.push({ field: 'maximum_mark', message: 'Assessment maximum mark must be greater than zero.', fix: 'Correct the assessment maximum mark before importing scores.' });
+      }
       const existsKey = assessment && learner ? assessment.id + '|' + learner.id : null;
       let statusLabel = rec.errors.length ? 'error' : 'ready';
       const existing = existsKey ? ctx.marksKey[existsKey] : null;
@@ -1051,12 +1055,12 @@ const ImportSystem = (() => {
       if (statusLabel === 'ready' || statusLabel === 'exists') {
         const max = assessment ? Number(assessment.maximum_mark) : 0;
         let percentage = null, grade = null, remark = null;
-        if (assessment && max > 0) {
-          percentage = Math.round((mark / max) * 10000) / 100;
+        if (assessment && maximum > 0) {
+          percentage = Utils.normalizedMark(mark, max);
           const g = resolveGrade(percentage, ctx);
           grade = g.grade; remark = g.remark;
         }
-        rec.dbRow = { assessment_id: assessment.id, learner_id: learner.id, mark: mark, percentage: percentage, grade: grade, remark: remark, status: status };
+        rec.dbRow = { assessment_id: assessment.id, learner_id: learner.id, mark: mark, normalized_mark: percentage, percentage: percentage, grade: grade, remark: remark, status: status };
       }
     }
   }
@@ -1409,7 +1413,15 @@ const ImportSystem = (() => {
     const insert = [];
     const update = [];
     STATE.records.forEach(rec => {
-      if (rec.status === 'ready' && rec.dbRow) insert.push(rec.dbRow);
+      if (rec.status === 'ready' && rec.dbRow) {
+        const row = { ...rec.dbRow };
+        if (def.table === 'marks') {
+          const assessment = (STATE.ctx.assessments || []).find(a => String(a.id) === String(row.assessment_id));
+          row.original_mark = row.mark;
+          row.original_maximum = Number(assessment && assessment.maximum_mark);
+        }
+        insert.push(row);
+      }
       else if (rec.status === 'exists' && mode === 'update' && rec.dbRow && rec.existingId && def.allowUpdate) {
         update.push({ id: rec.existingId, update: rec.dbRow });
       }

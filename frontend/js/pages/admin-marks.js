@@ -54,15 +54,16 @@ async function renderAdminMarks() {
     const a = assessments.find(a => a.id === m.assessment_id);
     const l = learnerMap.get(m.learner_id) || null;
     const cls = classMap.get(l?.class_id) || null;
-    const pct = m.percentage || (m.mark != null ? Utils.pct(m.mark, a?.maximum_mark || 30) : 0);
-    const grade = m.grade || Utils.grade(pct, scale);
-    const pf = Utils.passFail(pct);
+    const pct = m.normalized_mark ?? m.percentage
+      ?? (m.mark != null && a ? Utils.normalizedMark(m.mark, a.maximum_mark) : null);
+    const grade = m.grade || (pct == null ? '' : Utils.grade(pct, scale));
+    const pf = pct == null ? '' : Utils.passFail(pct);
     rows += `<tr>
       <td>${Utils.escapeHtml(cls?.name || '-')}</td>
       <td class="col-name">${Utils.escapeHtml(Utils.buildAssessmentDisplayName(a, types))}<div class="text-xs text-muted">${Utils.escapeHtml(assessmentTypeName(types, a?.assessment_type_id, 'End-of-Unit Assessment'))}${a?.period_label ? ' - ' + Utils.escapeHtml(a.period_label) : (a?.unit ? ' - ' + Utils.escapeHtml(a.unit) : '')}</div></td>
       <td>${Utils.escapeHtml(l?.full_name||'-')}</td>
-      <td>${m.mark != null ? m.mark + '/' + (a?.maximum_mark||30) : '-'}</td>
-      <td class="font-semibold">${pct}%</td>
+      <td>${m.mark != null ? m.mark + '/' + (a?.maximum_mark ?? '-') : '-'}</td>
+      <td class="font-semibold">${pct == null ? '-' : pct + '%'}</td>
       <td><span class="badge badge-info">${grade}</span></td>
       <td><span class="badge ${pf==='PASS'?'badge-success':'badge-danger'}">${pf}</span></td>
       <td>${Utils.escapeHtml(m.remark||'-')}</td></tr>`;

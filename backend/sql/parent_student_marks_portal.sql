@@ -237,18 +237,21 @@ BEGIN
     SELECT subject.id, subject.name, subject.code
     FROM public.subjects AS subject
     WHERE subject.status = 'active'
-      AND CASE
-        WHEN upper(coalesce(nullif(subject.level, ''), 'Both')) = 'BOTH'
-             AND upper(coalesce(nullif(subject.education_level, ''), 'Both')) <> 'BOTH'
-          THEN CASE
-            WHEN v_category = 'Primary' THEN upper(subject.education_level) LIKE '%PRIMARY%'
-            ELSE upper(subject.education_level) LIKE '%SECONDARY%'
-          END
-        WHEN upper(coalesce(nullif(subject.level, ''), 'Both')) = 'BOTH'
-          THEN TRUE
-        WHEN v_category = 'Primary' THEN upper(subject.level) LIKE '%PRIMARY%'
-        ELSE upper(subject.level) LIKE '%SECONDARY%'
-      END
+      AND public.rms_subject_matches_class(subject.id, p_class_id)
+      AND (
+        v_category = 'Primary'
+        OR NOT EXISTS (
+          SELECT 1
+          FROM public.class_subjects AS assigned
+          WHERE assigned.class_id = p_class_id
+        )
+        OR EXISTS (
+          SELECT 1
+          FROM public.class_subjects AS assigned
+          WHERE assigned.class_id = p_class_id
+            AND assigned.subject_id = subject.id
+        )
+      )
   ) AS s
   LEFT JOIN LATERAL (
     SELECT
@@ -282,7 +285,7 @@ BEGIN
       AND a.subject_id = s.id
       AND a.academic_year_id = p_academic_year_id
       AND (p_term_id IS NULL OR a.term_id = p_term_id)
-      AND a.status IN ('submitted', 'approved', 'locked')
+      AND a.status IN ('approved', 'locked')
       AND NOT (
         coalesce(a.description, '') LIKE 'Combined marks conversion:%'
         OR (
@@ -368,6 +371,7 @@ BEGIN
         'assessment_date', a.assessment_date,
         'maximum_mark', a.maximum_mark,
         'effective_weight', coalesce(a.weight, atype.weight),
+        'status', a.status,
         'mark', mark.mark,
         'percentage', CASE
           WHEN mark.mark IS NOT NULL AND a.maximum_mark > 0
@@ -407,7 +411,7 @@ BEGIN
   WHERE a.class_id = p_class_id
     AND a.academic_year_id = p_academic_year_id
     AND (p_term_id IS NULL OR a.term_id = p_term_id)
-    AND a.status IN ('submitted', 'approved', 'locked')
+    AND a.status IN ('approved', 'locked')
     AND NOT (
       coalesce(a.description, '') LIKE 'Combined marks conversion:%'
       OR (
@@ -415,13 +419,7 @@ BEGIN
         AND coalesce(a.period_label, '') LIKE 'Combined Conversion%'
       )
     )
-    AND NOT (
-      coalesce(a.description, '') LIKE 'Combined marks conversion:%'
-      OR (
-        coalesce(a.period_type, '') = 'other'
-        AND coalesce(a.period_label, '') LIKE 'Combined Conversion%'
-      )
-    )
+    AND public.rms_subject_matches_class(a.subject_id, a.class_id)
     AND EXISTS (
       SELECT 1
       FROM jsonb_array_elements(v_subjects) AS portal_subject(value)
@@ -438,21 +436,8 @@ BEGIN
   INTO v_position
   FROM (
     WITH scoped_subjects AS (
-      SELECT subject.id
-      FROM public.subjects AS subject
-      WHERE subject.status = 'active'
-        AND CASE
-          WHEN upper(coalesce(nullif(subject.level, ''), 'Both')) = 'BOTH'
-               AND upper(coalesce(nullif(subject.education_level, ''), 'Both')) <> 'BOTH'
-            THEN CASE
-              WHEN v_category = 'Primary' THEN upper(subject.education_level) LIKE '%PRIMARY%'
-              ELSE upper(subject.education_level) LIKE '%SECONDARY%'
-            END
-          WHEN upper(coalesce(nullif(subject.level, ''), 'Both')) = 'BOTH'
-            THEN TRUE
-          WHEN v_category = 'Primary' THEN upper(subject.level) LIKE '%PRIMARY%'
-          ELSE upper(subject.level) LIKE '%SECONDARY%'
-        END
+      SELECT (subject.value ->> 'id')::uuid AS id
+      FROM jsonb_array_elements(v_subjects) AS subject(value)
     ),
     roster AS (
       SELECT learner.id
@@ -464,10 +449,25 @@ BEGIN
       SELECT
         roster.id AS learner_id,
         subject.id AS subject_id,
-        count(mark.mark)::integer AS marks_count,
-        coalesce(sum(mark.mark), 0)::numeric AS obtained,
-        coalesce(sum(assessment.maximum_mark)
-          FILTER (WHERE mark.mark IS NOT NULL), 0)::numeric AS maximum
+        CASE
+          WHEN count(mark.mark) = 0 THEN NULL
+          WHEN bool_and(coalesce(coalesce(assessment.weight, assessment_type.weight) > 0, FALSE))
+               FILTER (WHERE mark.mark IS NOT NULL)
+            THEN round(
+              sum(
+                mark.mark / nullif(assessment.maximum_mark, 0) * 100
+                * coalesce(assessment.weight, assessment_type.weight)
+              ) FILTER (WHERE mark.mark IS NOT NULL)
+              / nullif(sum(coalesce(assessment.weight, assessment_type.weight))
+                FILTER (WHERE mark.mark IS NOT NULL), 0),
+              2
+            )
+          ELSE round(
+            sum(mark.mark) FILTER (WHERE mark.mark IS NOT NULL)
+            / nullif(sum(assessment.maximum_mark) FILTER (WHERE mark.mark IS NOT NULL), 0) * 100,
+            2
+          )
+        END AS percentage
       FROM roster
       CROSS JOIN scoped_subjects AS subject
       LEFT JOIN public.assessments AS assessment
@@ -475,7 +475,7 @@ BEGIN
        AND assessment.subject_id = subject.id
        AND assessment.academic_year_id = p_academic_year_id
        AND (p_term_id IS NULL OR assessment.term_id = p_term_id)
-       AND assessment.status IN ('submitted', 'approved', 'locked')
+       AND assessment.status IN ('approved', 'locked')
        AND NOT (
          coalesce(assessment.description, '') LIKE 'Combined marks conversion:%'
          OR (
@@ -483,6 +483,8 @@ BEGIN
            AND coalesce(assessment.period_label, '') LIKE 'Combined Conversion%'
          )
        )
+      LEFT JOIN public.assessment_types AS assessment_type
+        ON assessment_type.id = assessment.assessment_type_id
       LEFT JOIN public.marks AS mark
         ON mark.assessment_id = assessment.id
        AND mark.learner_id = roster.id
@@ -491,11 +493,10 @@ BEGIN
     learner_totals AS (
       SELECT
         learner_id,
-        round(sum(obtained) / nullif(sum(maximum), 0) * 100, 2) AS percentage
+        round(avg(percentage) FILTER (WHERE percentage IS NOT NULL), 2) AS percentage
       FROM learner_subject_scores
-      WHERE marks_count > 0
       GROUP BY learner_id
-      HAVING sum(maximum) > 0
+      HAVING count(percentage) > 0
     ),
     ranked AS (
       SELECT
@@ -522,7 +523,7 @@ BEGIN
       WHERE a.class_id = p_class_id
         AND a.academic_year_id = p_academic_year_id
         AND (p_term_id IS NULL OR a.term_id = p_term_id)
-        AND a.status IN ('submitted', 'approved', 'locked')
+        AND a.status IN ('approved', 'locked')
       GROUP BY teacher.id, teacher.full_name
       ORDER BY count(*) DESC, teacher.full_name
       LIMIT 1

@@ -735,9 +735,7 @@ const ReportWizard = {
   selectAll(key, ids){ this.state[key]=[...ids]; this.reRender(); },
   selectAllAssessments(){
     const assessments = this.state.cache.assessments || [];
-    const eligible = ['student-card', 'student-performance'].includes(this.state.reportType)
-      ? assessments.filter(assessment => ['submitted', 'approved', 'locked'].includes(assessment.status))
-      : assessments;
+    const eligible = assessments;
     this.state.assessmentIds = eligible.map(assessment => assessment.id);
     this.reRender();
   },
@@ -759,8 +757,6 @@ const ReportWizard = {
   toggleAssessmentType(typeId){
     const key = String(typeId);
     const ids = (this.state.cache.assessments || [])
-      .filter(assessment => !['student-card', 'student-performance'].includes(this.state.reportType)
-        || ['submitted', 'approved', 'locked'].includes(assessment.status))
       .filter(assessment => String(assessment.assessment_type_id || 'none') === key)
       .map(assessment => String(assessment.id));
     if (!ids.length) return;
@@ -811,20 +807,22 @@ const ReportWizard = {
 
   async renderSubjects(){
     const s=this.state;
-    // need classes to filter; if no class, show all scoped but explain dependency
-    let subjects=[];
-    // Try class_subjects first if single class, else broad
-    if (s.classIds.length===1){
-      try { subjects = await ReportUtils.getClassSubjects(s.classIds[0]); } catch(e){ subjects=[]; }
-      if (!subjects.length){
-        try { subjects = await DB.get('subjects')||[]; } catch(e){ subjects=[]; }
+    // Class-subject assignments can be incomplete; use the catalogue and filter by class level.
+    let subjects = await DB.get('subjects');
+    // scope + level filter
+    const selectedClasses = (s.cache.classes || []).filter(cls =>
+      s.classIds.some(id => String(id) === String(cls.id))
+    );
+    if (selectedClasses.length) {
+      subjects = subjects.filter(subject => selectedClasses.some(cls =>
+        EducationLevels.subjectMatchesClass(subject, cls)
+      ));
+      if (typeof Scope !== 'undefined' && Scope.isScoped()) {
+        subjects = Scope.filterSubjects(subjects);
       }
     } else {
-      try { subjects = await DB.get('subjects')||[]; } catch(e){ subjects=[]; }
+      subjects = this._scopedSubjects(subjects);
     }
-    // scope + level filter
-    const sampleCls = s.cache.classes.find(c=> String(c.id)===String(s.classIds[0]));
-    subjects = this._scopedSubjects(subjects, sampleCls);
     subjects = subjects.filter(x=> !x.status || x.status==='active');
     // Teacher reports must only expose subjects assigned to the logged-in teacher.
     const teacherId = typeof Auth !== 'undefined' && typeof Auth.getTeacherId === 'function' ? Auth.getTeacherId() : null;
@@ -894,8 +892,8 @@ const ReportWizard = {
       /* Bulk-combine conversion helpers are never report sources. */
       if (Utils.isConversionHelper && Utils.isConversionHelper(a)) return false;
       const subj = allSubj.find(x=> String(x.id)===String(a.subject_id));
-      if (subj && typeof Scope!=='undefined' && Scope.isScoped() && !Scope.matchesSubject(subj)) return false;
-      return true;
+      const cls = (s.cache.classes || []).find(item => String(item.id) === String(a.class_id));
+      return !!subj && subjectMatchesReportScope(subj, cls);
     });
     // also need to ensure term filter when multiple terms: allow multiple termIds
     if (s.termIds.length>1) assessments = assessments.filter(a=> !a.term_id || s.termIds.some(t=> String(t)===String(a.term_id)));
@@ -925,9 +923,7 @@ const ReportWizard = {
       <div class="rw-card-bd">
         <p class="rw-help" style="margin-bottom:8px">Filtered by class ${s.classIds.length? s.classIds.join(','):''}${s.subjectIds.length?' + subjects':''}. Selected assessments alone are included; if none are selected, all assessments in this scope are used.</p>
         <div class="rw-assessment-type-selection"><strong>Select assessment types</strong><div class="rw-assessment-type-options">${[...assessmentTypeGroups.entries()].map(([key, grouped])=>{
-          const selectable = ['student-card', 'student-performance'].includes(s.reportType)
-            ? grouped.filter(assessment => ['submitted', 'approved', 'locked'].includes(assessment.status))
-            : grouped;
+          const selectable = grouped;
           const selectedCount = selectable.filter(assessment => s.assessmentIds.some(id => String(id) === String(assessment.id))).length;
           const label = typeMap.get(key) || grouped[0]?.type || grouped[0]?.name || 'Assessment';
           return `<label class="rw-assessment-type-option"><input type="checkbox" ${selectable.length && selectedCount === selectable.length ? 'checked' : ''} ${selectable.length ? '' : 'disabled'} onchange="ReportWizard.toggleAssessmentType('${Utils.escapeHtml(key)}')"><span>${Utils.escapeHtml(label)}</span><small>${selectedCount}/${selectable.length}</small></label>`;
@@ -938,7 +934,7 @@ const ReportWizard = {
         <div class="rw-list">
           ${list.length? list.map(a=>{
             const sel=s.assessmentIds.some(id=> String(id)===String(a.id));
-            const disabled=['student-card', 'student-performance'].includes(s.reportType) && !['submitted', 'approved', 'locked'].includes(a.status);
+            const disabled=false;
             const tName = typeMap.get(String(a.assessment_type_id))||'Assessment';
             return `<label class="rw-opt"><input type="checkbox" ${sel?'checked':''} ${disabled?'disabled':''} onchange="ReportWizard.toggleArray('assessmentIds','${a.id}')"><span><span class="rw-opt-title">${Utils.escapeHtml(a.display_name || a.name)}${a.period_label ? ' — ' + Utils.escapeHtml(a.period_label) : (a.unit ? ' — ' + Utils.escapeHtml(a.unit) : '')}</span> <span class="rw-opt-sub">${Utils.escapeHtml(tName)} · ${Utils.escapeHtml(a.status)} · Max ${a.maximum_mark||'-'}</span></span></label>`;
           }).join('') : `<div class="rw-empty">No assessments for selected scope. Check class/subject/term filters.</div>`}
@@ -1147,46 +1143,67 @@ const ReportWizard = {
       const isStudentCard = ['student-card', 'student-performance'].includes(cfg.reportType);
       const mode = this.state.options.cardMode || 'individual';
       let bodyHtml='';
+      let studentReportCount = null;
+      let expectedStudentReportCount = null;
       let orientation=this.state.options.orientation;
-      const renderStudentCard = data => typeof ReportStudent !== 'undefined' && typeof ReportStudent.renderCardInner === 'function'
-        ? ReportStudent.renderCardInner(data)
-        : ReportTemplates.studentCard(data);
-      const resolveCardOrientation = cards => {
-        if (orientation && orientation !== 'auto') return orientation;
-        return (cards || []).some(card => (card.periodReports || []).length > 1)
-          ? 'landscape'
-          : 'portrait';
+      const renderStudentCard = data => {
+        const html = typeof ReportStudent !== 'undefined' && typeof ReportStudent.renderCardInner === 'function'
+          ? ReportStudent.renderCardInner(data)
+          : ReportTemplates.studentCard(data);
+        return typeof ReportHeader !== 'undefined' && typeof ReportHeader.injectReportStatus === 'function'
+          ? ReportHeader.injectReportStatus(html, data.approval || data)
+          : html;
       };
+      const renderStudentCardPage = data => ReportStudent.fitA4Markup(
+        ReportHeader.getA4Container(
+          renderStudentCard(data),
+          'portrait',
+          false,
+          'rms-student-card-page'
+        )
+      );
+      const resolveCardOrientation = () => 'portrait';
       if (isStudentCard && (mode==='whole' || !cfg.studentIds || cfg.studentIds.length===0 || cfg.studentIds.length>1)){
         // Determine target student ids: whole class -> all in classIds, individual -> selected list
         let targetIds = cfg.studentIds;
-        if (mode==='whole' || !targetIds || !targetIds.length){
+        const classCardBatch = cfg.reportType === 'student-card' && mode === 'whole';
+        if (!classCardBatch && (mode==='whole' || !targetIds || !targetIds.length)){
           if (!this.state.cache.students.length && this.state.classIds.length){
-            try { const l = await DB.query('learners','id',{ class_id: this.state.classIds, status:'active' }); this.state.cache.students = l||[]; } catch(e){}
+            const l = await DB.query('learners','id',{ class_id: this.state.classIds, status:'active' });
+            this.state.cache.students = l || [];
           }
           targetIds = (this.state.cache.students||[]).map(s=>s.id);
           if (!targetIds.length) throw new Error('No active learners found in the selected class(es).');
         }
-        if (cfg.reportType === 'student-card' && (mode==='whole' || !cfg.studentIds || !cfg.studentIds.length)){
+        if (cfg.reportType === 'student-card' && (classCardBatch || !cfg.studentIds || !cfg.studentIds.length)){
           // Batched whole-class: one heavy fetch pass per class via ReportStudent.fetchClassCards
           if (typeof ReportStudent==='undefined' || typeof ReportStudent.fetchClassCards!=='function') throw new Error('Student card engine not loaded.');
           const yearId=cfg.academicYear, termId=cfg.term, termIds=cfg.termIds;
           const subjectIds=cfg.subjectIds, assessmentIds=cfg.assessmentIds, assessmentTypeId=cfg.assessmentTypeId;
           const teacherComment=cfg.teacherComment||'', dosComment=cfg.dosComment||'', decisionOverride=cfg.decisionOverride||'';
           let cards=[];
+          let expectedLearnerCount = 0;
           const classIds = (mode==='whole' ? (this.state.classIds||[]) : [].concat(this.state.classIds||[]).concat(cfg.classId).filter(Boolean));
           for (const cid of classIds){
             if (!cid) continue;
             const res = await ReportStudent.fetchClassCards({ classId: cid, yearId, termId, termIds, subjectIds, assessmentIds, assessmentTypeId, teacherComment, dosComment, decisionOverride });
-            cards = cards.concat(res.cards||[]);
-            if (!this.state.cache.students.length) this.state.cache.students = (res.cards||[]).map(c=>c.learner);
+            const classCards = Array.isArray(res.cards) ? res.cards : [];
+            if (!res.meta || res.meta.count !== classCards.length || res.meta.activeLearnerCount !== classCards.length) {
+              throw new Error(`Report generation returned ${classCards.length} cards for ${res.meta?.activeLearnerCount ?? 'an unknown number of'} active learners.`);
+            }
+            expectedLearnerCount += res.meta.activeLearnerCount;
+            cards = cards.concat(classCards);
+            if (!this.state.cache.students.length) this.state.cache.students = classCards.map(c=>c.learner);
           }
           if (!cards.length) throw new Error('No active learners found in the selected class(es).');
+          if (cards.length !== expectedLearnerCount) {
+            throw new Error(`Report generation produced ${cards.length} cards for ${expectedLearnerCount} active learners.`);
+          }
+          studentReportCount = cards.length;
+          expectedStudentReportCount = expectedLearnerCount;
           cards.sort((a,b)=> (a.position||9999)-(b.position||9999));
           orientation = resolveCardOrientation(cards);
-          bodyHtml = cards.map(card =>
-            ReportHeader.getA4Container(renderStudentCard(card), orientation, false, 'rms-student-card-page')
-          ).join('');
+          bodyHtml = cards.map(renderStudentCardPage).join(ReportHeader.getPageBreak());
         } else if (cfg.reportType === 'student-card') {
           // Specific student selection (1+): per-student via engine + rich card layout
           const cards=[];
@@ -1194,10 +1211,13 @@ const ReportWizard = {
             const one = await ReportEngine.generate({...cfg, studentId:sid, studentIds:[sid]});
             cards.push(one);
           }
+          studentReportCount = cards.length;
+          expectedStudentReportCount = targetIds.length;
+          if (studentReportCount !== expectedStudentReportCount) {
+            throw new Error(`Report generation produced ${studentReportCount} cards for ${expectedStudentReportCount} selected learners.`);
+          }
           orientation = resolveCardOrientation(cards);
-          bodyHtml = cards.map(card =>
-            ReportHeader.getA4Container(renderStudentCard(card), orientation, false, 'rms-student-card-page')
-          ).join(ReportHeader.getPageBreak());
+          bodyHtml = cards.map(renderStudentCardPage).join(ReportHeader.getPageBreak());
         } else {
           // student-performance batch: one top-half-template section per student
           const fnMap={ 'student-performance':'studentPerformance', 'teacher-student-performance':'teacherStudentPerformance', 'exam-class-summary':'examClassSummary', 'subject-performance':'subjectPerformance', 'class-performance':'classPerformance', 'missing-marks':'missingMarks', 'school-performance':'schoolPerformance', 'teacher-performance':'teacherPerformance', 'teacher-assessment-class':'teacherAssessmentClass', 'grade-distribution':'gradeDistribution'};
@@ -1205,7 +1225,12 @@ const ReportWizard = {
           for (const sid of targetIds){
             const one = await ReportEngine.generate({...cfg, studentId:sid, studentIds:[sid]});
             const tfn=ReportTemplates[fnMap[one.type] || 'studentPerformance'];
-            if (tfn) parts.push(ReportHeader.getA4Container(tfn(one), 'portrait'));
+            if (tfn) parts.push(ReportHeader.getA4Container(ReportHeader.injectReportStatus(tfn(one), one), 'portrait'));
+          }
+          studentReportCount = parts.length;
+          expectedStudentReportCount = targetIds.length;
+          if (studentReportCount !== expectedStudentReportCount) {
+            throw new Error(`Report generation produced ${studentReportCount} reports for ${expectedStudentReportCount} selected learners.`);
           }
           bodyHtml = parts.join(ReportHeader.getPageBreak());
           orientation = (orientation==='auto' || !orientation) ? 'portrait' : orientation;
@@ -1218,12 +1243,24 @@ const ReportWizard = {
           const fnMap={ 'student-card':'studentCard', 'student-performance':'studentPerformance', 'teacher-student-performance':'teacherStudentPerformance', 'exam-class-summary':'examClassSummary', 'subject-performance':'subjectPerformance', 'class-performance':'classPerformance', 'missing-marks':'missingMarks', 'school-performance':'schoolPerformance', 'teacher-performance':'teacherPerformance', 'teacher-assessment-class':'teacherAssessmentClass', 'grade-distribution':'gradeDistribution',
             'student-marks':'studentMarks', 'class-marks-sheet':'marksSheet', 'subject-marks-sheet':'marksSheet', 'class-ranking':'classPerformance', 'subject-grade-distribution':'gradeDistribution', 'subject-assessment-comparison':'subjectAssessmentComparison', 'assessment-summary':'assessmentSummary', 'assessment-completion':'assessmentCompletion', 'teacher-assessment-submission':'teacherAssessmentSubmission', 'term-performance-summary':'schoolPerformance', 'academic-year-performance':'schoolPerformance'};
           const tfn=ReportTemplates[fnMap[data.type]];
-          _bodyHtml = cfg.reportType === 'student-card' ? renderStudentCard(data) : (tfn ? tfn(data) : '<p>Template not found</p>');
+          _bodyHtml = cfg.reportType === 'student-card'
+            ? renderStudentCardPage(data)
+            : (tfn ? ReportHeader.injectReportStatus(tfn(data), data) : '<p>Template not found</p>');
           _orientation = cfg.reportType === 'student-card'
             ? resolveCardOrientation([data])
             : orientation==='auto' ? ReportHeader.getOrientation(data.type) : orientation;
           bodyHtml = _bodyHtml;
           orientation = _orientation;
+          if (isStudentCard) {
+            studentReportCount = 1;
+            expectedStudentReportCount = 1;
+          }
+        }
+      }
+      if (studentReportCount != null) {
+        const renderedReportCount = (bodyHtml.match(/class="rms-a4-container(?:\s[^"]*)?"/g) || []).length;
+        if (renderedReportCount !== expectedStudentReportCount || renderedReportCount !== studentReportCount) {
+          throw new Error(`Preview contains ${renderedReportCount} report pages for ${expectedStudentReportCount} expected student reports.`);
         }
       }
       const a4 = bodyHtml.includes('rms-a4-container')
@@ -1256,7 +1293,7 @@ const ReportWizard = {
       if (stepPreview){
         stepPreview.innerHTML = `
           <div class="report-preview-toolbar-flex no-print" style="margin-bottom:12px;display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap">
-            <div><h3 style="font-size:16px;font-weight:700">A4 Preview — ${orientation==='landscape'?'Landscape':'Portrait'} (${orientation==='landscape'?'297×210':'210×297'} mm)</h3><p class="text-sm text-muted">Live preview · matches print/PDF.</p></div>
+            <div><h3 style="font-size:16px;font-weight:700">A4 Preview — ${orientation==='landscape'?'Landscape':'Portrait'} (${orientation==='landscape'?'297×210':'210×297'} mm)</h3><p class="text-sm text-muted">Live preview · matches print/PDF.${studentReportCount == null ? '' : ` Generated ${studentReportCount} of ${expectedStudentReportCount} student reports.`}</p></div>
             <div class="flex gap-2" style="flex-wrap:wrap">
               <button class="btn btn-outline btn-sm" onclick="ReportWizard.back()"><i data-lucide="arrow-left"></i> Back</button>
               <button class="btn btn-outline btn-sm" onclick="ReportWizard.closePreview()"><i data-lucide="x"></i> Close Preview</button>

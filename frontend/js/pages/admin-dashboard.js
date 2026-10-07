@@ -1,15 +1,42 @@
 let adminDashboardEduLevel = 'all';
 
+async function loadAdminDashboardData(resource, load) {
+  try {
+    return await load();
+  } catch (error) {
+    const errorMessage = error?.message;
+    const details = {
+      resource,
+      status: error?.status || error?.error?.status,
+      code: error?.code || error?.error?.code,
+      message: typeof errorMessage === 'string' && errorMessage
+        ? errorMessage
+        : JSON.stringify(errorMessage || error),
+      details: error?.details || error?.error?.details,
+      hint: error?.hint || error?.error?.hint
+    };
+    console.error('Admin dashboard request failed:', JSON.stringify(details));
+
+    const dashboardError = new Error(`${resource}: ${details.message}`);
+    dashboardError.cause = error;
+    dashboardError.resource = resource;
+    throw dashboardError;
+  }
+}
+
 async function renderAdminDashboard() {
   setHeader('Dashboard', `Welcome back, ${Auth.currentUser?.full_name}`);
   setContent(`<div class="grid-4"><div class="card card-in"><div class="spinner" style="margin:0 auto;width:28px;height:28px"></div></div><div class="card card-in"></div><div class="card card-in"></div><div class="card card-in"></div></div>`);
 
   try {
     const [allTeachers, allClasses, allAssessments, assignments] = await Promise.all([
-      DB.get('teachers'),
-      DB.get('classes'),
-      DB.get('assessments', {}, { select: 'id,class_id,subject_id,teacher_id,status,created_at,description,period_label,period_type' }),
-      DB.get('teacher_assignments', {}, { select: 'teacher_id,class_id' })
+      loadAdminDashboardData('teachers', () => DB.get('teachers')),
+      loadAdminDashboardData('classes', () => DB.get('classes')),
+      loadAdminDashboardData('assessments', () => DB.get('assessments', {}, {
+        select: 'id,class_id,subject_id,teacher_id,status,created_at,description,period_label,period_type'
+      })),
+      loadAdminDashboardData('teacher assignments', () =>
+        DB.get('teacher_assignments', {}, { select: 'teacher_id,class_id' }))
     ]);
 
     // Apply Education Level Filter (scoped DOS is locked to its level)
@@ -39,9 +66,30 @@ async function renderAdminDashboard() {
     });
 
     // Learner count only, never load full table
-    const learners = (!scoped && adminDashboardEduLevel === 'all')
-      ? await DB.count('learners')
-      : classIds.length ? await DB.count('learners', { class_id: classIds }) : 0;
+    let learners = 0;
+    if (!scoped && adminDashboardEduLevel === 'all') {
+      try {
+        learners = await loadAdminDashboardData('learner count', () => DB.count('learners'));
+      } catch {
+        learners = null;
+      }
+    } else if (classIds.length) {
+      try {
+        learners = await loadAdminDashboardData('learner count', async () => {
+          const { data, error } = await sbClient.rpc('rms_dashboard_scoped_learner_count', {
+            p_class_ids: classIds
+          });
+          if (error) throw error;
+          const count = Number(data);
+          if (!Number.isSafeInteger(count) || count < 0) {
+            throw new Error('The learner-count RPC returned an invalid count.');
+          }
+          return count;
+        });
+      } catch {
+        learners = null;
+      }
+    }
 
     const completed = assessments.filter(a => ['submitted','approved','locked'].includes(a.status)).length;
     const pending = assessments.filter(a => a.status === 'draft').length;
@@ -52,8 +100,12 @@ async function renderAdminDashboard() {
     const recentSubjectIds = [...new Set(recent.map(a => a.subject_id).filter(Boolean))];
     const recentTeacherIds = [...new Set(recent.map(a => a.teacher_id).filter(Boolean))];
     const [subjects, teachersList] = await Promise.all([
-      recentSubjectIds.length ? DB.get('subjects', { id: recentSubjectIds }, { select: 'id,name' }) : [],
-      recentTeacherIds.length ? DB.get('teachers', { id: recentTeacherIds }, { select: 'id,full_name' }) : []
+      recentSubjectIds.length
+        ? loadAdminDashboardData('recent subjects', () => DB.get('subjects', { id: recentSubjectIds }, { select: 'id,name' }))
+        : [],
+      recentTeacherIds.length
+        ? loadAdminDashboardData('recent teachers', () => DB.get('teachers', { id: recentTeacherIds }, { select: 'id,full_name' }))
+        : []
     ]);
     const subjMap = new Map(subjects.map(s => [s.id, s]));
     const teachMap = new Map(teachersList.map(t => [t.id, t]));
@@ -121,9 +173,9 @@ async function renderAdminDashboard() {
       <div class="grid-4 card-in-stagger mb-6">
         <div class="stat-card">
           <div class="stat-icon" style="background:var(--blue-50);color:var(--blue-600)"><i data-lucide="users"></i></div>
-          <div class="stat-value">${learners}</div>
+          <div class="stat-value">${learners === null ? 'Unavailable' : learners}</div>
           <div class="stat-label">Total Learners</div>
-          <div class="stat-desc"><i data-lucide="users"></i> Enrolled across filtered classes</div>
+          <div class="stat-desc"><i data-lucide="users"></i> ${learners === null ? 'Could not retrieve the count; see console details' : 'Enrolled across filtered classes'}</div>
         </div>
         <div class="stat-card">
           <div class="stat-icon" style="background:var(--green-50);color:var(--green-600)"><i data-lucide="user-check"></i></div>
@@ -195,7 +247,7 @@ async function renderAdminDashboard() {
       </div>`);
     if (typeof lucide !== 'undefined') lucide.createIcons();
   } catch (err) {
-    console.error('Admin dashboard error:', err);
+    console.error('Admin dashboard error:', err?.message || err, err?.cause || '');
     setContent(`
       <div class="error-card">
         <div class="error-icon"><i data-lucide="alert-triangle"></i></div>

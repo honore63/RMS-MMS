@@ -185,9 +185,11 @@ rms-eua/
    data for that match only. The Parent / Student Marks button on the staff
    sign-in page opens the standalone `frontend/parent-marks.html` page, keeping
    the student lookup and results separate from staff sign-in. Its Student
-   Report tab uses the same official report-card renderer as the staff reports.
-   Re-run the idempotent SQL file after updating it to expose the extra report
-   metadata needed for the shared report layout.
+   Report tab uses the shared official report-card builder and renderer as the
+   admin and class-teacher reports, with parent visibility limited to approved
+   and locked assessments. Re-run the idempotent SQL file after updating it so
+   the portal returns the published assessment data required by that shared
+   report path.
 
    **Privacy note:** learner codes are identifiers, not passwords. Keep codes
    confidential and enable request throttling at the Supabase/API gateway

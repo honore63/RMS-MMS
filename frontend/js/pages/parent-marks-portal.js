@@ -1,6 +1,8 @@
 const ParentMarksPortal = {
   options: null,
   result: null,
+  reportCard: null,
+  reportError: '',
   tab: 'overview',
   isOpen: false,
   lookupGeneration: 0,
@@ -222,6 +224,8 @@ const ParentMarksPortal = {
         return;
       }
       this.result = data;
+      this.reportCard = null;
+      this.reportError = '';
       this.tab = 'overview';
       if (window.location.hash !== '#parent-marks/results') {
         window.location.hash = 'parent-marks/results';
@@ -259,6 +263,8 @@ const ParentMarksPortal = {
   clearLookup(updateHash = true) {
     this.lookupGeneration += 1;
     this.result = null;
+    this.reportCard = null;
+    this.reportError = '';
     this.tab = 'overview';
     if (typeof ReportWizard !== 'undefined' && ReportWizard.state) {
       ReportWizard.state.previewHtml = '';
@@ -271,9 +277,23 @@ const ParentMarksPortal = {
     if (this.isOpen) this.renderSearch();
   },
 
-  setTab(tab) {
+  async setTab(tab) {
     if (!this.result) return;
     this.tab = tab;
+    this.reportCard = null;
+    this.reportError = '';
+    this.renderDashboard();
+    if (tab !== 'report') return;
+
+    const result = this.result;
+    try {
+      const card = await ReportStudent.buildPortalCard(result);
+      if (this.result !== result || this.tab !== 'report') return;
+      this.reportCard = card;
+    } catch (error) {
+      if (this.result !== result || this.tab !== 'report') return;
+      this.reportError = error.message || 'Unable to build the student report.';
+    }
     this.renderDashboard();
   },
 
@@ -484,205 +504,19 @@ const ParentMarksPortal = {
     }).join('')}</section>`;
   },
 
-  buildReportCard() {
-    const data = this.result;
-    const assessments = data.assessments || [];
-    const subjects = data.subjects || [];
-    const typeMap = new Map();
-    assessments.forEach(item => {
-      const typeId = item.type_id || item.type || 'Assessment';
-      if (!typeMap.has(String(typeId))) {
-        const name = item.type || 'Assessment';
-        typeMap.set(String(typeId), {
-          key: String(typeId),
-          typeId: item.type_id || null,
-          name,
-          code: item.type_code || name.split(/\s+/).map(part => part[0]).join('').slice(0, 6).toUpperCase()
-        });
-      }
-    });
-    const columns = [...typeMap.values()];
-    const isWeighted = assessments.length > 0 && assessments.every(item =>
-      item.effective_weight != null && Number(item.effective_weight) > 0);
-    const totalWeight = isWeighted
-      ? assessments.reduce((sum, item) => sum + Number(item.effective_weight), 0)
-      : 0;
-    const columnMeta = columns.map(column => {
-      const related = assessments.filter(item =>
-        String(item.type_id || item.type || 'Assessment') === column.key);
-      const max = related.reduce((sum, item) => sum + Number(item.maximum_mark || 0), 0);
-      const weight = isWeighted
-        ? related.reduce((sum, item) => sum + Number(item.effective_weight), 0)
-        : 0;
-      return {
-        ...column,
-        max,
-        sub: isWeighted && totalWeight > 0
-          ? `(${Math.round(weight / totalWeight * 100)}%)`
-          : (max ? `(${max})` : '')
-      };
-    });
-    const subjRows = subjects.map(subject => {
-      const related = assessments.filter(item =>
-        subject.code ? item.subject_code === subject.code : item.subject === subject.name);
-      const valid = related.filter(item => item.mark != null);
-      const components = columnMeta.map(column => {
-        const columnAssessments = related.filter(item =>
-          String(item.type_id || item.type || 'Assessment') === column.key);
-        const entries = columnAssessments.filter(item => item.mark != null);
-        return entries.length ? {
-          obtained: entries.reduce((sum, item) => sum + Number(item.mark), 0),
-          max: columnAssessments.reduce((sum, item) => sum + Number(item.maximum_mark || 0), 0)
-        } : null;
-      });
-      const hasMarks = valid.length > 0 && subject.percentage != null;
-      const obtained = hasMarks
-        ? valid.reduce((sum, item) => sum + Number(item.mark), 0)
-        : null;
-      const scoredMaximum = hasMarks
-        ? valid.reduce((sum, item) => sum + Number(item.maximum_mark || 0), 0)
-        : related.reduce((sum, item) => sum + Number(item.maximum_mark || 0), 0);
-      return {
-        subject: { name: subject.name },
-        components,
-        obtained,
-        maxMark: scoredMaximum,
-        pct: subject.percentage == null ? null : Number(subject.percentage),
-        grade: subject.grade || '—',
-        status: subject.status || 'Missing',
-        remark: subject.remark || '',
-        hasMarks
-      };
-    });
-    const reportSubjects = subjects.map(subject => ({
-      ...subject,
-      id: subject.code || subject.name
-    }));
-    const reportAssessments = assessments.map(item => ({
-      ...item,
-      id: item.assessment_id,
-      subject_id: item.subject_id || item.subject_code,
-      assessment_type_id: item.type_id,
-      weight: item.effective_weight,
-      period_type: item.period_hint
-    }));
-    const reportTypes = [...new Map(reportAssessments.map(item => [
-      String(item.assessment_type_id || item.type),
-      {
-        id: item.assessment_type_id,
-        name: item.type,
-        code: item.type_code,
-        display_order: item.type_order,
-        weight: item.effective_weight,
-        period_hint: item.period_hint
-      }
-    ])).values()];
-    const reportTerms = [...new Map(reportAssessments.map(item => [
-      String(item.term_id || item.term),
-      { id: item.term_id || item.term, name: item.term, term_no: item.term_no }
-    ])).values()];
-    const periodReports = ReportStudent.buildPeriodReports({
-      subjects: reportSubjects,
-      assessments: reportAssessments,
-      marks: reportAssessments.map(item => ({
-        assessment_id: item.id,
-        mark: item.mark
-      })),
-      types: reportTypes,
-      terms: reportTerms,
-      scale: data.grading_scale || []
-    });
-    const typeColumns = ReportStudent.typeColumns(reportAssessments, reportTypes);
-    const maximumWeightByType = new Map(typeColumns.map(column => [column.key, 0]));
-    const validWeights = reportAssessments.length > 0 && reportAssessments.every(item =>
-      item.weight != null && Number(item.weight) > 0);
-    const totalMaximumWeight = validWeights
-      ? reportAssessments.reduce((sum, item) => sum + Number(item.weight), 0)
-      : 0;
-    if (validWeights) reportAssessments.forEach(item => {
-      const column = typeColumns.find(typeColumn => ReportStudent.colMatches(typeColumn, item));
-      if (column) {
-        maximumWeightByType.set(
-          column.key,
-          maximumWeightByType.get(column.key) + Number(item.weight)
-        );
-      }
-    });
-    const maximumWeights = totalMaximumWeight > 0
-      ? Object.fromEntries(typeColumns.map(column => [
-        column.key,
-        Math.round(maximumWeightByType.get(column.key) / totalMaximumWeight * 100)
-      ]))
-      : null;
-    const columnTotals = columns.map((column, index) => {
-      const values = subjRows.map(row => row.components[index]).filter(Boolean);
-      return {
-        obtained: values.reduce((sum, value) => sum + Number(value.obtained || 0), 0),
-        max: column.max,
-        has: values.length > 0
-      };
-    });
-    const summary = data.summary || {};
-    const position = data.position || {};
-    const grades = subjRows.filter(row => row.hasMarks).map(row => row.grade);
-    const gradeDist = typeof ReportUtils !== 'undefined'
-      ? ReportUtils.getGradeDistribution(grades, data.grading_scale || [])
-      : [];
-    return {
-      type: 'student-card',
-      title: 'STUDENT REPORT CARD',
-      settings: data.settings || {},
-      learner: { full_name: data.student.name, learner_code: data.student.code },
-      cls: { name: data.student.class_name, stream: data.student.stream },
-      year: data.academic_year || {},
-      term: data.term || {},
-      level: { label: String(data.student.education_level || 'school').toUpperCase() + ' LEVEL' },
-      subjRows,
-      columns: columnMeta,
-      columnMeta,
-      columnTotals,
-      periodReports,
-      maximumWeights,
-      totalSubjects: Number(summary.total_subjects || 0),
-      withMarks: Number(summary.subjects_with_marks || 0),
-      passed: Number(summary.passed_subjects || 0),
-      failed: Number(summary.failed_subjects || 0),
-      totalObtained: Number(summary.marks_obtained || 0),
-      totalMax: Number(summary.maximum_marks || 0),
-      overallPct: summary.average_percentage == null ? null : Number(summary.average_percentage),
-      overallGrade: { grade: this.overallGrade(summary.average_percentage, data.grading_scale) },
-      avg: summary.average_percentage == null ? null : Number(summary.average_percentage),
-      gradeDist,
-      teacherName: data.student.teacher_name || '',
-      teacherComment: data.report_comment || '',
-      dosComment: data.report_comment || '',
-      decision: summary.pass_status || 'INCOMPLETE',
-      scale: data.grading_scale || [],
-      passMark: Number(data.settings?.pass_mark || 50),
-      position: position.position ?? null,
-      positionOutOf: position.out_of ?? null
-    };
-  },
-
-  overallGrade(percentage, scale) {
-    if (percentage == null) return '—';
-    const sorted = (scale || []).slice().sort((a, b) => Number(b.minimum_percentage) - Number(a.minimum_percentage));
-    const match = sorted.find(item => Number(percentage) >= Number(item.minimum_percentage)) || sorted[sorted.length - 1];
-    return match?.grade || '—';
-  },
-
   renderReport() {
     if (typeof ReportStudent === 'undefined' || typeof ReportWizard === 'undefined') {
       return this.empty('The student report is unavailable. Please contact the school.');
     }
-    const card = this.buildReportCard();
-    const html = ReportStudent.renderCard(card);
-    const orientation = (card.periodReports || []).length > 1 ? 'landscape' : 'portrait';
+    if (this.reportError) return this.empty(`The student report could not be generated: ${this.reportError}`);
+    if (!this.reportCard) return '<div class="pmp-message" role="status"><span class="spinner" aria-hidden="true"></span><span>Preparing the official report card...</span></div>';
+    const html = ReportStudent.renderCard(this.reportCard);
+    const orientation = 'portrait';
     ReportWizard.state.previewHtml = html;
     ReportWizard.state.previewOrientation = orientation;
     ReportWizard.state.previewConfig = '';
     const safePart = value => String(value || '').replace(/[^a-z0-9_-]/gi, '_');
-    ReportWizard.state.previewFilename = `RMS-MIS_Student_Report_${safePart(this.result.student.code || 'RMS')}_${safePart(this.result.academic_year?.name || '')}.pdf`;
+    ReportWizard.state.previewFilename = `RMS-MIS_Student_Report_${safePart(this.result.student.code || 'RMS')}_${safePart(this.result.academic_year?.name || '')}_${safePart(this.result.term?.name || 'All_Terms')}.pdf`;
     return `<section class="pmp-section pmp-report-section">
       <div class="pmp-section-heading"><div><h3>Official Student Report</h3><p>Single-student report card for ${this.safe(this.result.student.name)}.</p></div>
       <div class="pmp-report-actions">
@@ -690,7 +524,7 @@ const ParentMarksPortal = {
         <button type="button" class="btn btn-outline" onclick="ReportWizard.print()"><i data-lucide="printer"></i> Print</button>
         <button type="button" class="btn btn-primary" onclick="ReportWizard.downloadPDF()"><i data-lucide="file-down"></i> Download PDF</button>
       </div></div>
-      <div class="pmp-report-preview">${html}</div>
+      <div class="pmp-report-preview rms-full-report-preview">${html}</div>
     </section>`;
   },
 
