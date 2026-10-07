@@ -10,6 +10,7 @@ let listFilter = 'all';
 let markSettings = { pass_mark: 50, decimal_marks_enabled: false };
 let casTypes = [];
 let casTerms = [];
+let casClasses = [];
 let convertState = null;
 
 async function renderEnterMarks() {
@@ -41,8 +42,15 @@ async function loadTeacherContext() {
     DB.get('terms')
   ]);
   teacherAssignments = assignments;
-  activeYear = years.find(y => y.status === 'active') || null;
-  activeTerm = terms.find(t => activeYear && t.academic_year_id === activeYear.id) || null;
+  const currentYearId = typeof getActiveYearId === 'function' ? getActiveYearId(years) : null;
+  activeYear = years.find(year => year.is_current)
+    || years.find(year => year.status === 'active')
+    || years.find(year => String(year.id) === String(currentYearId))
+    || years[0]
+    || null;
+  const yearTerms = terms.filter(term => activeYear
+    && String(term.academic_year_id) === String(activeYear.id));
+  activeTerm = yearTerms.find(term => term.is_active) || yearTerms[0] || null;
   return true;
 }
 
@@ -205,11 +213,33 @@ async function openCreateAssessment() {
   if (!ok) return Utils.toast('No teacher profile found', 'error');
   if (!teacherAssignments.length) return Utils.toast('You have no class/subject assignments. Contact the DOS.', 'error');
   if (!activeYear) return Utils.toast('No active academic year set. Contact the DOS.', 'error');
-  const [classes, subjects, types, years, terms] = await Promise.all([DB.get('classes'), DB.get('subjects'), getAssessmentTypes(), DB.get('academic_years'), DB.get('terms')]);
+  let classes, subjects, types, years, terms;
+  try {
+    [classes, subjects, types, years, terms] = await Promise.all([
+      DB.get('classes'),
+      DB.get('subjects'),
+      getAssessmentTypes(),
+      DB.get('academic_years'),
+      DB.get('terms')
+    ]);
+  } catch (error) {
+    console.error('[TeacherAssessments] Failed to load assessment form data:', error);
+    return Utils.toast('Could not load the assessment form. Please reload and try again.', 'error');
+  }
   casTypes = types.filter(t => t.status === 'active');
+  const yearAssignments = teacherAssignments.filter(assignment =>
+    !assignment.academic_year_id
+      || String(assignment.academic_year_id) === String(activeYear.id));
+  casClasses = classes;
   casTerms = terms.filter(t => String(t.academic_year_id) === String(activeYear.id));
-  const assignedSubjectIds = [...new Set(teacherAssignments.map(a => a.subject_id))];
-  const subjectOptions = subjects.filter(s => assignedSubjectIds.includes(s.id));
+  const assignedSubjectIds = new Set(yearAssignments.map(assignment => String(assignment.subject_id)));
+  const subjectOptions = subjects.filter(subject => assignedSubjectIds.has(String(subject.id)));
+  if (!casTypes.length) {
+    return Utils.toast('No active assessment types are available. Contact the DOS.', 'error');
+  }
+  if (!casTerms.length) {
+    return Utils.toast('No terms are configured for the current academic year. Contact the DOS.', 'error');
+  }
   const dateStr = new Date().toISOString().split('T')[0];
   const selectedTerm = activeTerm || casTerms.find(t => t.is_active) || casTerms[0];
 
@@ -249,14 +279,22 @@ async function openCreateAssessment() {
 }
 
 function casSubjectChanged() {
-  const subjectId = document.getElementById('cas-subject').value;
+  const subjectId = document.getElementById('cas-subject')?.value || '';
   const classSelect = document.getElementById('cas-class');
-  const myClassIds = teacherAssignments.filter(a => a.subject_id === subjectId).map(a => a.class_id);
-  classSelect.innerHTML = '<option value="">Select class</option>';
-  DB.get('classes').then(classes => {
-    const opts = classes.filter(c => myClassIds.includes(c.id));
-    classSelect.innerHTML = '<option value="">Select class</option>' + opts.map(c => `<option value="${c.id}">${c.name}</option>`).join('');
-  });
+  if (!classSelect) return;
+  const myClassIds = new Set(teacherAssignments
+    .filter(assignment => String(assignment.subject_id) === String(subjectId)
+      && assignment.class_id
+      && (!assignment.academic_year_id
+        || String(assignment.academic_year_id) === String(activeYear?.id)))
+    .map(assignment => String(assignment.class_id)));
+  const opts = casClasses.filter(cls => myClassIds.has(String(cls.id)));
+  classSelect.innerHTML = '<option value="">Select class</option>' + opts.map(cls =>
+    `<option value="${cls.id}">${Utils.escapeHtml(cls.name)}</option>`
+  ).join('');
+  if (subjectId && !opts.length) {
+    classSelect.innerHTML = '<option value="">No assigned classes for this subject and academic year</option>';
+  }
 }
 
 function casTypeChanged() {
@@ -429,7 +467,11 @@ async function casSave(mode, btn) {
   if (!date) return fail('Select the assessment date');
   if (!maximumMark || maximumMark <= 0) return fail('Enter a valid maximum mark (greater than 0)');
 
-  const allowed = teacherAssignments.some(a => a.subject_id === subjectId && a.class_id === classId);
+  const allowed = teacherAssignments.some(assignment =>
+    String(assignment.subject_id) === String(subjectId)
+      && String(assignment.class_id) === String(classId)
+      && (!assignment.academic_year_id
+        || String(assignment.academic_year_id) === String(activeYear?.id)));
   if (!allowed) return fail('You are not authorized for this class/subject combination');
 
   try {
@@ -472,7 +514,9 @@ async function casSave(mode, btn) {
   };
 
   try {
-    const { data: inserted, error } = await sbClient.from('assessments').insert(data).select().single();
+    const assessmentId = window.crypto?.randomUUID?.();
+    if (!assessmentId) return fail('Secure assessment ID generation is unavailable. Please use a supported browser over HTTPS.');
+    const { error } = await sbClient.from('assessments').insert({ ...data, id: assessmentId });
     if (error) throw error;
     DB.invalidate('assessments');
     if (typeof AnalyticsEngine !== 'undefined') AnalyticsEngine.resetContext();
@@ -480,7 +524,7 @@ async function casSave(mode, btn) {
     Utils.toast('Assessment created — synced', 'success');
     Modal.close();
     if (mode === 'enter') {
-      Router.go('teacher/enter-marks?assessment=' + inserted.id);
+      Router.go('teacher/enter-marks?assessment=' + assessmentId);
     } else {
       renderEnterMarks();
     }
