@@ -24,7 +24,7 @@ async function renderTeacherDashboard() {
 
     const pending = assessments.filter(a => a.status === 'draft').length;
     const submitted = assessments.filter(a => a.status === 'submitted').length;
-    const approved = assessments.filter(a => ['submitted', 'approved', 'locked'].includes(a.status)).length;
+    const submittedOrFinalized = assessments.filter(a => ['submitted', 'approved', 'locked'].includes(a.status)).length;
     const rejected = assessments.filter(a => a.status === 'rejected').length;
 
     const assessRows = assessments.slice(0, 10).map(a => {
@@ -85,9 +85,9 @@ async function renderTeacherDashboard() {
         </div>
         <div class="stat-card">
           <div class="stat-icon" style="background:var(--green-50);color:var(--green-600)"><i data-lucide="check-circle-2"></i></div>
-          <div class="stat-value" style="color:var(--green-600)">${approved}</div>
-          <div class="stat-label">Approved</div>
-          <div class="stat-desc"><i data-lucide="check-circle-2"></i> Approved &amp; locked results</div>
+          <div class="stat-value" style="color:var(--green-600)">${submittedOrFinalized}</div>
+          <div class="stat-label">Submitted / Finalized</div>
+          <div class="stat-desc"><i data-lucide="check-circle-2"></i> Visible in reports; editable until locked</div>
         </div>
         <div class="stat-card">
           <div class="stat-icon" style="background:${rejected > 0 ? 'var(--red-50)' : 'var(--gray-100)'};color:${rejected > 0 ? 'var(--red-500)' : 'var(--gray-500)'}"><i data-lucide="alert-circle"></i></div>

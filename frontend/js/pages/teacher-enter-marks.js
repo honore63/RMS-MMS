@@ -11,6 +11,7 @@ let markSettings = { pass_mark: 50, decimal_marks_enabled: false };
 let casTypes = [];
 let casTerms = [];
 let casClasses = [];
+let casEditingAssessment = null;
 let convertState = null;
 
 async function renderEnterMarks() {
@@ -127,10 +128,14 @@ async function renderAssessmentList() {
     const entered = progressMap[a.id] || 0;
     let label = 'Enter Marks';
     let icon = 'pencil-line';
-    if (['submitted', 'approved', 'locked'].includes(a.status)) { label = 'View'; icon = 'eye'; }
+    if (a.status === 'locked') { label = 'View'; icon = 'eye'; }
+    if (a.status === 'submitted') { label = 'Edit Submitted Marks'; icon = 'pencil-line'; }
     if (a.status === 'rejected') { label = 'Edit & Correct'; icon = 'alert-circle'; }
     if (a.status === 'draft' && entered > 0) { label = 'Continue'; icon = 'arrow-right'; }
-    return `<button class="btn btn-sm ${a.status === 'rejected' ? 'btn-warning' : a.status === 'submitted' ? 'btn-outline' : a.status === 'approved' || a.status === 'locked' ? 'btn-outline' : 'btn-primary'}" onclick="Router.go('teacher/enter-marks?assessment=${a.id}')"><i data-lucide="${icon}"></i> ${label}</button>`;
+    const editButton = a.status !== 'locked'
+      ? `<button class="btn btn-sm btn-outline" onclick="openEditAssessment('${a.id}')"><i data-lucide="edit-3"></i> Edit Assessment</button>`
+      : '';
+    return `${editButton}<button class="btn btn-sm ${a.status === 'rejected' ? 'btn-warning' : a.status === 'locked' ? 'btn-outline' : 'btn-primary'}" onclick="Router.go('teacher/enter-marks?assessment=${a.id}')"><i data-lucide="${icon}"></i> ${label}</button>`;
   }
 
   function progressCell(a) {
@@ -208,11 +213,37 @@ async function getLearnerCountForAssessments(assessments) {
   return counts;
 }
 
-async function openCreateAssessment() {
+async function openCreateAssessment(editAssessmentId = null) {
   const ok = await loadTeacherContext();
   if (!ok) return Utils.toast('No teacher profile found', 'error');
   if (!teacherAssignments.length) return Utils.toast('You have no class/subject assignments. Contact the DOS.', 'error');
   if (!activeYear) return Utils.toast('No active academic year set. Contact the DOS.', 'error');
+  casEditingAssessment = null;
+  if (editAssessmentId) {
+    let assessment;
+    try {
+      [assessment] = await DB.getRelated('assessments', '*', { id: editAssessmentId });
+    } catch (error) {
+      console.error('[TeacherAssessments] Failed to load assessment for editing:', error);
+      return Utils.toast('Could not load this assessment for editing. Please try again.', 'error');
+    }
+    if (!assessment || String(assessment.teacher_id) !== String(Auth.getTeacherId())) {
+      return Utils.toast('You can only edit assessments assigned to your teacher account.', 'error');
+    }
+    if (assessment.status === 'locked') {
+      return Utils.toast('This assessment is locked and cannot be edited.', 'error');
+    }
+    const assigned = teacherAssignments.some(assignment =>
+      String(assignment.class_id) === String(assessment.class_id)
+      && String(assignment.subject_id) === String(assessment.subject_id)
+      && (!assignment.academic_year_id || String(assignment.academic_year_id) === String(assessment.academic_year_id))
+    );
+    if (!assigned) return Utils.toast('You are no longer assigned to this assessment’s class and subject.', 'error');
+    if (String(assessment.academic_year_id) !== String(activeYear.id)) {
+      return Utils.toast('Only assessments in the active academic year can be edited here.', 'error');
+    }
+    casEditingAssessment = assessment;
+  }
   let classes, subjects, types, years, terms;
   try {
     [classes, subjects, types, years, terms] = await Promise.all([
@@ -227,6 +258,10 @@ async function openCreateAssessment() {
     return Utils.toast('Could not load the assessment form. Please reload and try again.', 'error');
   }
   casTypes = types.filter(t => t.status === 'active');
+  if (casEditingAssessment && !casTypes.some(type => String(type.id) === String(casEditingAssessment.assessment_type_id))) {
+    const existingType = types.find(type => String(type.id) === String(casEditingAssessment.assessment_type_id));
+    if (existingType) casTypes.push(existingType);
+  }
   const yearAssignments = teacherAssignments.filter(assignment =>
     !assignment.academic_year_id
       || String(assignment.academic_year_id) === String(activeYear.id));
@@ -241,9 +276,10 @@ async function openCreateAssessment() {
     return Utils.toast('No terms are configured for the current academic year. Contact the DOS.', 'error');
   }
   const dateStr = new Date().toISOString().split('T')[0];
-  const selectedTerm = activeTerm || casTerms.find(t => t.is_active) || casTerms[0];
+  const selectedTerm = (casEditingAssessment && casTerms.find(t => String(t.id) === String(casEditingAssessment.term_id)))
+    || activeTerm || casTerms.find(t => t.is_active) || casTerms[0];
 
-  Modal.show('Create Assessment — All Steps on One Page', `
+  Modal.show(casEditingAssessment ? 'Edit Assessment' : 'Create Assessment — All Steps on One Page', `
     <style>
       .cas-section { background:#f8fafc; border:1px solid #e2e8f0; border-radius:12px; padding:14px; margin-bottom:14px; }
       .cas-section-title { font-size:11px; font-weight:800; text-transform:uppercase; letter-spacing:.08em; color:#475569; margin-bottom:10px; display:flex; align-items:center; gap:8px; }
@@ -254,27 +290,35 @@ async function openCreateAssessment() {
     </style>
     <div class="cas-section">
       <div class="cas-section-title"><i data-lucide="file-text" style="width:14px;height:14px"></i> 1 — What is the assessment?</div>
-      <div class="form-group"><label>Assessment Type <span class="required">*</span></label><select id="cas-type" class="select-field" onchange="casTypeChanged()">${casTypes.map((t, i) => `<option value="${t.id || ''}" data-name="${encodeURIComponent(t.name)}" data-default-max="${t.default_maximum_mark ?? ''}" ${i === 0 ? 'selected' : ''}>${Utils.escapeHtml(t.name)}${t.weight != null ? ' (w=' + t.weight + ')' : ''}</option>`).join('')}</select></div>
+      <div class="form-group"><label>Assessment Type <span class="required">*</span></label><select id="cas-type" class="select-field" onchange="casTypeChanged()">${casTypes.map((t, i) => `<option value="${t.id || ''}" data-name="${encodeURIComponent(t.name)}" data-default-max="${t.default_maximum_mark ?? ''}" ${(casEditingAssessment ? String(t.id) === String(casEditingAssessment.assessment_type_id) : i === 0) ? 'selected' : ''}>${Utils.escapeHtml(t.name)}${t.weight != null ? ' (w=' + t.weight + ')' : ''}</option>`).join('')}</select></div>
       <div id="cas-period-fields"></div>
       <div class="cas-preview"><i data-lucide="eye" style="width:13px;height:13px;vertical-align:middle;margin-right:4px"></i>Will display as: <strong id="cas-display-preview"></strong></div>
     </div>
     <div class="cas-section">
       <div class="cas-section-title"><i data-lucide="users" style="width:14px;height:14px"></i> 2 — Where is it taught?</div>
-      <div class="form-group"><label>Subject <span class="required">*</span></label><select id="cas-subject" class="select-field" onchange="casSubjectChanged()"><option value="">Select subject</option>${subjectOptions.map(s => `<option value="${s.id}">${Utils.escapeHtml(s.name)}</option>`).join('')}</select><p class="form-hint">Only subjects assigned to you.</p></div>
-      <div class="form-group"><label>Class <span class="required">*</span></label><select id="cas-class" class="select-field"><option value="">Select class first</option></select><p class="form-hint">Only classes for the chosen subject.</p></div>
+      <div class="form-group"><label>Subject <span class="required">*</span></label><select id="cas-subject" class="select-field" onchange="casSubjectChanged()" ${casEditingAssessment ? 'disabled' : ''}><option value="">Select subject</option>${subjectOptions.map(s => `<option value="${s.id}" ${casEditingAssessment && String(s.id) === String(casEditingAssessment.subject_id) ? 'selected' : ''}>${Utils.escapeHtml(s.name)}</option>`).join('')}</select><p class="form-hint">Only subjects assigned to you.</p></div>
+      <div class="form-group"><label>Class <span class="required">*</span></label><select id="cas-class" class="select-field" ${casEditingAssessment ? 'disabled' : ''}><option value="">Select class first</option></select><p class="form-hint">Only classes for the chosen subject.</p></div>
     </div>
     <div class="cas-section">
       <div class="cas-section-title"><i data-lucide="calendar" style="width:14px;height:14px"></i> 3 — When & how much?</div>
       <div class="form-row"><div class="form-group"><label>Academic Year</label><input class="input-field" value="${Utils.escapeHtml(years.find(y => String(y.id) === String(activeYear.id))?.name || activeYear.name || '')}" disabled></div><div class="form-group"><label>Term <span class="required">*</span></label><select id="cas-term" class="select-field">${casTerms.map(t => `<option value="${t.id}" ${selectedTerm && String(t.id) === String(selectedTerm.id) ? 'selected' : ''}>${Utils.escapeHtml(t.name)}</option>`).join('')}</select></div></div>
-      <div class="form-row"><div class="form-group"><label>Assessment Date <span class="required">*</span></label><input id="cas-date" type="date" class="input-field" value="${dateStr}"></div><div class="form-group"><label>Maximum Marks <span class="required">*</span></label><input id="cas-max" type="number" inputmode="decimal" step="any" min="1" class="input-field" value="${casTypes[0]?.default_maximum_mark ?? 30}"><p class="form-hint">Any value above 0; marks entered are capped at this. Percentages use it, never 100.</p></div></div>
-      <div class="form-group"><label>Weight <span class="text-muted">(optional, blank = type default)</span></label><input id="cas-weight" type="number" min="0" step="any" class="input-field" placeholder="e.g., 0.3"></div>
+      <div class="form-row"><div class="form-group"><label>Assessment Date <span class="required">*</span></label><input id="cas-date" type="date" class="input-field" value="${casEditingAssessment?.assessment_date || dateStr}"></div><div class="form-group"><label>Maximum Marks <span class="required">*</span></label><input id="cas-max" type="number" inputmode="decimal" step="any" min="1" class="input-field" value="${casEditingAssessment?.maximum_mark ?? casTypes[0]?.default_maximum_mark ?? 30}"><p class="form-hint">Any value above 0; marks entered are capped at this. Percentages use it, never 100.</p></div></div>
+      <div class="form-group"><label>Weight <span class="text-muted">(optional, blank = type default)</span></label><input id="cas-weight" type="number" min="0" step="any" class="input-field" placeholder="e.g., 0.3" value="${casEditingAssessment?.weight ?? ''}"></div>
     </div>
     <div class="cas-section" style="margin-bottom:0">
       <div class="cas-section-title"><i data-lucide="align-left" style="width:14px;height:14px"></i> 4 — Notes (optional)</div>
-      <div class="form-group"><textarea id="cas-desc" class="textarea-field" rows="3" placeholder="Optional notes about this assessment"></textarea></div>
+      <div class="form-group"><textarea id="cas-desc" class="textarea-field" rows="3" placeholder="Optional notes about this assessment">${Utils.escapeHtml(casEditingAssessment?.description || '')}</textarea></div>
     </div>
-  `, `<button class="btn btn-secondary" onclick="Modal.close()">Cancel</button><button class="btn btn-secondary" onclick="casSave('draft', this)"><i data-lucide="save"></i> Save Draft</button><button class="btn btn-primary" onclick="casSave('enter', this)"><i data-lucide="arrow-right"></i> Create & Enter Marks</button>`, true);
+  `, `<button class="btn btn-secondary" onclick="Modal.close()">Cancel</button>${casEditingAssessment ? `<button class="btn btn-primary" onclick="casSave('update', this)"><i data-lucide="save"></i> Save Assessment</button>` : `<button class="btn btn-secondary" onclick="casSave('draft', this)"><i data-lucide="save"></i> Save Draft</button><button class="btn btn-primary" onclick="casSave('enter', this)"><i data-lucide="arrow-right"></i> Create & Enter Marks</button>`}`, true);
   casTypeChanged();
+  if (casEditingAssessment) {
+    casSubjectChanged();
+    document.getElementById('cas-class').value = casEditingAssessment.class_id;
+    document.getElementById('cas-term').value = casEditingAssessment.term_id || '';
+    casPopulatePeriodFields(casEditingAssessment);
+    document.getElementById('cas-max').value = casEditingAssessment.maximum_mark;
+    casUpdatePreview();
+  }
   if (typeof lucide !== 'undefined') lucide.createIcons();
 }
 
@@ -332,6 +376,40 @@ function casUnitNumberChanged() {
   const wrap = document.getElementById('cas-unit-custom-wrap');
   if (wrap) wrap.style.display = (sel && sel.value === 'custom') ? '' : 'none';
   casUpdatePreview();
+}
+
+function casPopulatePeriodFields(assessment) {
+  const hint = Utils.getTypePeriodHint(casSelectedType());
+  if (hint === 'week' && assessment.period_value != null) {
+    const field = document.getElementById('cas-week');
+    if (field) field.value = assessment.period_value;
+  } else if (hint === 'month' && assessment.period_value != null) {
+    const field = document.getElementById('cas-month');
+    if (field) field.value = assessment.period_value;
+  } else if (hint === 'unit') {
+    const unitNumber = Number(assessment.unit_number || assessment.period_value);
+    const numberField = document.getElementById('cas-unit-number');
+    if (numberField) {
+      numberField.value = unitNumber > 15 ? 'custom' : String(unitNumber || '');
+      casUnitNumberChanged();
+    }
+    if (unitNumber > 15) {
+      const customField = document.getElementById('cas-unit-custom');
+      if (customField) customField.value = unitNumber;
+    }
+    const nameField = document.getElementById('cas-unit-name');
+    if (nameField) nameField.value = assessment.unit_name || '';
+  } else if (hint === 'other') {
+    const field = document.getElementById('cas-other-name');
+    if (field) field.value = assessment.name || assessment.display_name || '';
+  } else if (!['term', 'week', 'month', 'unit', 'other'].includes(hint)) {
+    const field = document.getElementById('cas-label');
+    if (field) {
+      const typeName = casSelectedType()?.name || '';
+      const fullName = assessment.display_name || assessment.name || '';
+      field.value = fullName.startsWith(typeName + ' — ') ? fullName.slice(typeName.length + 3) : '';
+    }
+  }
 }
 
 function casRenderPeriodFields() {
@@ -486,10 +564,12 @@ async function casSave(mode, btn) {
   const teacherId = Auth.getTeacherId();
   if (!teacherId) return fail('Your account is not linked to a teacher profile. Contact the DOS.');
 
-  try {
-    const { count: _learnerCount } = await sbClient.from('learners').select('id', { count: 'exact', head: true }).eq('class_id', classId).eq('status', 'active');
-    if (!_learnerCount) return fail('There is no student in this class — register learners in this class first before creating an assessment.');
-  } catch (e) { /* ignore count error */ }
+  if (!casEditingAssessment) {
+    try {
+      const { count: _learnerCount } = await sbClient.from('learners').select('id', { count: 'exact', head: true }).eq('class_id', classId).eq('status', 'active');
+      if (!_learnerCount) return fail('There is no student in this class — register learners in this class first before creating an assessment.');
+    } catch (e) { /* ignore count error */ }
+  }
 
   const data = {
     name: label,
@@ -510,10 +590,31 @@ async function casSave(mode, btn) {
     weight: weightRaw === '' ? null : parseFloat(weightRaw),
     assessment_date: date,
     description: desc || null,
-    status: 'draft'
+    status: casEditingAssessment ? casEditingAssessment.status : 'draft'
   };
 
   try {
+    if (casEditingAssessment) {
+      if (casEditingAssessment.status === 'locked') {
+        return fail('This assessment has been locked and cannot be edited.');
+      }
+      const { data: updated, error } = await sbClient.from('assessments')
+        .update(data)
+        .eq('id', casEditingAssessment.id)
+        .eq('teacher_id', teacherId)
+        .select('id')
+        .single();
+      if (error) throw error;
+      if (!updated) throw new Error('Assessment was not updated.');
+      DB.invalidate('assessments');
+      if (typeof AnalyticsEngine !== 'undefined') AnalyticsEngine.resetContext();
+      if (typeof ReportUtils !== 'undefined') ReportUtils.invalidate();
+      casEditingAssessment = null;
+      Utils.toast('Assessment updated — submitted status and saved marks were preserved.', 'success');
+      Modal.close();
+      renderEnterMarks();
+      return;
+    }
     const assessmentId = window.crypto?.randomUUID?.();
     if (!assessmentId) return fail('Secure assessment ID generation is unavailable. Please use a supported browser over HTTPS.');
     const { error } = await sbClient.from('assessments').insert({ ...data, id: assessmentId });
@@ -800,8 +901,8 @@ async function renderMarksEntry(assessId) {
     };
   });
 
-  const isLocked = ['locked', 'approved'].includes(markAssessment.status);
-  const isSubmitted = markAssessment.status === 'submitted';
+  const isLocked = markAssessment.status === 'locked';
+  const isSubmitted = ['submitted', 'approved'].includes(markAssessment.status);
   const isRejected = markAssessment.status === 'rejected';
   const entered = markEntries.filter(e => e.mark !== '' && e.mark != null).length;
   const total = markEntries.length;
@@ -818,9 +919,10 @@ async function renderMarksEntry(assessId) {
       <div class="flex gap-2" style="flex-wrap:wrap">
         <button class="btn btn-secondary" onclick="renderEnterMarks()"><i data-lucide="refresh-cw"></i> Refresh</button>
         <button class="btn btn-outline" onclick="downloadMarksTemplateForCurrentAssessment()" title="Download marks template"><i data-lucide="download"></i> Download</button>
-        ${!isLocked && !isSubmitted ? `<button class="btn btn-outline" onclick="openConvertMarks()" title="Proportionally convert marks to a new maximum"><i data-lucide="arrow-left-right"></i> Convert Marks</button>` : ''}
-        ${!isLocked && !isSubmitted ? `<button class="btn btn-primary" onclick="MarksImport.open({ assessmentId: '${markAssessment.id}' })"><i data-lucide="file-up"></i> Import</button>` : ''}
-        ${!isLocked && !isSubmitted ? `<button class="btn btn-secondary" onclick="saveMarks()"><i data-lucide="save"></i> Save Draft</button>` : ''}
+        ${!isLocked ? `<button class="btn btn-outline" onclick="openEditAssessment('${markAssessment.id}')"><i data-lucide="edit-3"></i> Edit Assessment</button>` : ''}
+        ${!isLocked && !isSubmitted && markAssessment.status !== 'approved' ? `<button class="btn btn-outline" onclick="openConvertMarks()" title="Proportionally convert marks to a new maximum"><i data-lucide="arrow-left-right"></i> Convert Marks</button>` : ''}
+        ${!isLocked && !isSubmitted && markAssessment.status !== 'approved' ? `<button class="btn btn-primary" onclick="MarksImport.open({ assessmentId: '${markAssessment.id}' })"><i data-lucide="file-up"></i> Import</button>` : ''}
+        ${!isLocked ? `<button class="btn btn-secondary" onclick="saveMarks()"><i data-lucide="save"></i> ${isSubmitted ? 'Save Changes' : 'Save Draft'}</button>` : ''}
       </div>
     </div>
 
@@ -918,9 +1020,8 @@ function entryStatusBadge(entered, total) {
 }
 
 function markRowsHTMLCurrent() {
-  const isLocked = ['locked', 'approved'].includes(markAssessment.status);
-  const isSubmitted = markAssessment.status === 'submitted';
-  const inputDisabled = isLocked || isSubmitted;
+  const isLocked = markAssessment.status === 'locked';
+  const inputDisabled = isLocked;
   const maxM = markAssessment.maximum_mark;
   const settingStr = '0.5';
 
@@ -940,19 +1041,22 @@ function markRowsHTMLCurrent() {
 }
 
 function marksFooterHTMLCurrent() {
-  const isLocked = ['locked', 'approved'].includes(markAssessment.status);
-  const isSubmitted = markAssessment.status === 'submitted';
+  const isLocked = markAssessment.status === 'locked';
+  const isSubmitted = ['submitted', 'approved'].includes(markAssessment.status);
   if (isLocked) {
     return '<div class="text-center text-sm text-muted"><i data-lucide="lock" style="width:14px;height:14px;vertical-align:middle;margin-right:4px"></i>Assessment is locked. Contact DOS to unlock.</div>';
   }
   if (isSubmitted) {
-    return '<div class="text-center"><p class="text-sm font-semibold" style="color:var(--blue-600)"><i data-lucide="send" style="width:14px;height:14px;vertical-align:middle;margin-right:4px"></i>Marks submitted. Waiting for DOS approval.</p></div>';
+    return `<div class="flex justify-between items-center" style="flex-wrap:wrap;gap:12px">
+      <p class="text-sm text-muted"><i data-lucide="info" style="width:14px;height:14px;vertical-align:middle;margin-right:4px"></i>Submitted marks are visible in reports and can be corrected until the DOS locks this assessment. Changes save automatically.</p>
+      <button class="btn btn-secondary" onclick="saveMarks()"><i data-lucide="save"></i> Save Changes</button>
+    </div>`;
   }
   return `<div class="flex justify-between items-center" style="flex-wrap:wrap;gap:12px">
     <p class="text-sm text-muted"><i data-lucide="info" style="width:14px;height:14px;vertical-align:middle;margin-right:4px"></i>Changes are saved automatically. You can also save manually.</p>
     <div class="flex gap-2">
       <button class="btn btn-secondary" onclick="saveMarks()"><i data-lucide="save"></i> Save Draft</button>
-      <button class="btn btn-primary" onclick="openSubmitConfirm()"><i data-lucide="send"></i> Submit Marks for Approval</button>
+      <button class="btn btn-primary" onclick="openSubmitConfirm()"><i data-lucide="send"></i> Submit Marks</button>
     </div>
   </div>`;
 }
@@ -1087,7 +1191,11 @@ async function saveMarks(isAuto = false) {
         percentage: e.pct,
         grade: e.grade,
         remark: e.remark,
-        status: markAssessment.status === 'draft' ? 'draft' : e.existingStatus === 'submitted' ? 'submitted' : 'draft'
+        status: ['submitted', 'approved'].includes(markAssessment.status)
+          ? 'submitted'
+          : markAssessment.status === 'draft'
+            ? 'draft'
+            : e.existingStatus === 'submitted' ? 'submitted' : 'draft'
       };
       if (e.markId) {
         const { error } = await sbClient.from('marks').update(data).eq('id', e.markId);
@@ -1135,8 +1243,8 @@ async function openSubmitConfirm() {
     ? `<div class="alert alert-warning" style="margin-bottom:0"><i data-lucide="alert-triangle"></i><div><strong>${missing} learner${missing > 1 ? 's' : ''} do not have marks entered.</strong><br>You can still submit, but the DOS will see missing marks.</div></div>`
     : `<div class="alert alert-success" style="margin-bottom:0"><i data-lucide="check-circle-2"></i> All ${total} learners have marks entered.</div>`;
 
-  Modal.show('Submit Marks for Approval?', `
-    <p class="text-sm text-muted mb-4">You are about to submit the marks for this assessment to the DOS for review. After submission, you will not be able to edit the marks unless the DOS reopens the assessment.</p>
+  Modal.show('Submit Marks?', `
+    <p class="text-sm text-muted mb-4">Submitted marks become available immediately in DOS reports and parent portals. You can continue correcting them until the DOS locks the assessment.</p>
     <div style="background:var(--gray-50);border:1px solid var(--gray-200);border-radius:var(--radius);padding:16px;margin-bottom:16px">
       <div class="flex justify-between mb-2"><span class="text-sm text-muted">Class</span><span class="text-sm font-semibold">${Utils.escapeHtml(cls?.name || '-')}</span></div>
       <div class="flex justify-between mb-2"><span class="text-sm text-muted">Subject</span><span class="text-sm font-semibold">${Utils.escapeHtml(sub?.name || '-')}</span></div>
@@ -1147,7 +1255,7 @@ async function openSubmitConfirm() {
     </div>
     ${missingWarn}`,
     `<button class="btn btn-secondary" onclick="Modal.close()">Cancel</button>
-     <button class="btn btn-primary" onclick="submitMarks()"><i data-lucide="send"></i> Submit for Approval</button>`);
+     <button class="btn btn-primary" onclick="submitMarks()"><i data-lucide="send"></i> Submit Marks</button>`);
 }
 
 async function submitMarks() {
@@ -1160,7 +1268,7 @@ async function submitMarks() {
       .select('status').eq('id', markAssessment.id).single();
     if (freshErr) throw freshErr;
     if (fresh && fresh.status !== 'draft' && fresh.status !== 'rejected') {
-      Utils.toast('Assessment was already ' + fresh.status + ' by the DOS. Refreshing...', 'error');
+      Utils.toast('Assessment status changed to ' + fresh.status + '. Refreshing...', 'error');
       renderEnterMarks();
       return;
     }

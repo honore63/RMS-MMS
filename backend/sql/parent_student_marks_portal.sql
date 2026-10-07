@@ -285,7 +285,7 @@ BEGIN
       AND a.subject_id = s.id
       AND a.academic_year_id = p_academic_year_id
       AND (p_term_id IS NULL OR a.term_id = p_term_id)
-      AND a.status IN ('approved', 'locked')
+      AND a.status IN ('submitted', 'approved', 'locked')
       AND NOT (
         coalesce(a.description, '') LIKE 'Combined marks conversion:%'
         OR (
@@ -411,7 +411,7 @@ BEGIN
   WHERE a.class_id = p_class_id
     AND a.academic_year_id = p_academic_year_id
     AND (p_term_id IS NULL OR a.term_id = p_term_id)
-    AND a.status IN ('approved', 'locked')
+    AND a.status IN ('submitted', 'approved', 'locked')
     AND NOT (
       coalesce(a.description, '') LIKE 'Combined marks conversion:%'
       OR (
@@ -475,7 +475,7 @@ BEGIN
        AND assessment.subject_id = subject.id
        AND assessment.academic_year_id = p_academic_year_id
        AND (p_term_id IS NULL OR assessment.term_id = p_term_id)
-       AND assessment.status IN ('approved', 'locked')
+       AND assessment.status IN ('submitted', 'approved', 'locked')
        AND NOT (
          coalesce(assessment.description, '') LIKE 'Combined marks conversion:%'
          OR (
@@ -523,7 +523,7 @@ BEGIN
       WHERE a.class_id = p_class_id
         AND a.academic_year_id = p_academic_year_id
         AND (p_term_id IS NULL OR a.term_id = p_term_id)
-        AND a.status IN ('approved', 'locked')
+        AND a.status IN ('submitted', 'approved', 'locked')
       GROUP BY teacher.id, teacher.full_name
       ORDER BY count(*) DESC, teacher.full_name
       LIMIT 1

@@ -27,7 +27,7 @@ function asfDefaultMaxMark() {
 }
 
 async function renderAssessments() {
-  setHeader('Assessment Approval', 'Review, approve, or reject teacher-submitted assessments');
+  setHeader('Assessment Management', 'View submitted marks and manage assessments');
   setContent(Utils.loading());
   const [assessments, teachers, classes, subjects, years, terms, types] = await Promise.all([
     DB.query('assessments', '*', {}, { column: 'created_at', asc: false }),
@@ -57,12 +57,10 @@ async function renderAssessments() {
     const s = subjects.find(s => s.id === a.subject_id);
     const cat = EducationLevels.getCategory(c);
     let marksInfo = '—';
-    let canApprove = false;
     if (a.status === 'submitted') {
       const { count } = await sbClient.from('marks').select('*', { count: 'exact', head: true }).eq('assessment_id', a.id).neq('mark', null);
       const { count: total } = await sbClient.from('learners').select('*', { count: 'exact', head: true }).eq('class_id', a.class_id).eq('status', 'active');
       marksInfo = `${count || 0}/${total || 0}`;
-      canApprove = true;
     }
     return `<tr>
       <td class="col-name">${Utils.escapeHtml(Utils.buildAssessmentDisplayName(a, types))}</td>
@@ -75,8 +73,7 @@ async function renderAssessments() {
       <td><span class="badge ${Utils.statusColor(a.status)}"><i data-lucide="${Utils.statusIcon(a.status)}"></i> ${a.status}</span></td>
       <td class="col-actions">
         <button class="btn btn-sm btn-outline" onclick="assessView('${a.id}')"><i data-lucide="eye"></i> View</button>
-        ${canApprove ? `<button class="btn btn-sm btn-success" onclick="assessApprove('${a.id}')"><i data-lucide="check"></i> Approve</button><button class="btn btn-sm btn-danger" onclick="assessReject('${a.id}')"><i data-lucide="x"></i> Reject</button>` : ''}
-        ${a.status === 'approved' ? `<button class="btn btn-sm btn-warning" onclick="assessLock('${a.id}')"><i data-lucide="lock"></i> Lock</button>` : ''}
+        ${['submitted', 'approved'].includes(a.status) ? `<button class="btn btn-sm btn-warning" onclick="assessLock('${a.id}')"><i data-lucide="lock"></i> Lock</button>` : ''}
         ${(a.status === 'locked' || a.status === 'rejected') ? `<button class="btn btn-sm btn-outline" onclick="assessReopen('${a.id}')"><i data-lucide="unlock"></i> Reopen</button>` : ''}
         <button class="btn btn-sm btn-danger" onclick="assessDelete('${a.id}')" title="Delete assessment"><i data-lucide="trash-2"></i></button>
       </td></tr>`;
@@ -89,8 +86,8 @@ async function renderAssessments() {
         <button class="tab-btn ${assessFilter === 'all' ? 'active' : ''}" onclick="assessFilter='all';renderAssessments()">All</button>
         <button class="tab-btn ${assessFilter === 'draft' ? 'active' : ''}" onclick="assessFilter='draft';renderAssessments()">Draft</button>
         <button class="tab-btn ${assessFilter === 'submitted' ? 'active' : ''}" onclick="assessFilter='submitted';renderAssessments()">Submitted</button>
-        <button class="tab-btn ${assessFilter === 'approved' ? 'active' : ''}" onclick="assessFilter='approved';renderAssessments()">Approved</button>
-        <button class="tab-btn ${assessFilter === 'rejected' ? 'active' : ''}" onclick="assessFilter='rejected';renderAssessments()">Rejected</button>
+        <button class="tab-btn ${assessFilter === 'approved' ? 'active' : ''}" onclick="assessFilter='approved';renderAssessments()">Previously Approved</button>
+        <button class="tab-btn ${assessFilter === 'rejected' ? 'active' : ''}" onclick="assessFilter='rejected';renderAssessments()">Previously Rejected</button>
         <button class="tab-btn ${assessFilter === 'locked' ? 'active' : ''}" onclick="assessFilter='locked';renderAssessments()">Locked</button>
       </div>
       <button class="btn btn-primary" onclick="assessForm()"><i data-lucide="plus"></i> New Assessment</button>
@@ -166,9 +163,8 @@ async function assessView(id) {
     <div class="table-container" style="max-height:380px;overflow-y:auto"><table class="data-table">
       <thead><tr><th>No.</th><th>Learner</th><th>Mark</th><th>%</th><th>Grade</th><th>Status</th><th>Remark</th></tr></thead>
       <tbody>${rows || `<tr><td colspan="7">${Utils.empty('No learners in this class', 'users')}</td></tr>`}</tbody></table></div>`,
-    `<button class="btn btn-secondary" onclick="Modal.close()">Close</button>
-     ${assessment.status === 'submitted' ? `<button class="btn btn-success" onclick="assessApprove('${assessment.id}')"><i data-lucide="check"></i> Approve</button><button class="btn btn-danger" onclick="assessReject('${assessment.id}')"><i data-lucide="x"></i> Reject</button>` : ''}
-     ${assessment.status === 'approved' ? `<button class="btn btn-warning" onclick="assessLock('${assessment.id}')"><i data-lucide="lock"></i> Lock</button>` : ''}
+      `<button class="btn btn-secondary" onclick="Modal.close()">Close</button>
+       ${['submitted', 'approved'].includes(assessment.status) ? `<button class="btn btn-warning" onclick="assessLock('${assessment.id}')"><i data-lucide="lock"></i> Lock</button>` : ''}
      ${(assessment.status === 'locked' || assessment.status === 'rejected') ? `<button class="btn btn-outline" onclick="assessReopen('${assessment.id}')"><i data-lucide="unlock"></i> Reopen</button>` : ''}`,
     true);
 }
@@ -486,6 +482,9 @@ async function assessSave(btn) {
 }
 
 async function assessUpdateStatus(id, status, reason) {
+  if (!['draft', 'locked'].includes(status)) {
+    throw new Error('DOS can only lock or reopen assessments. Submissions do not require approval.');
+  }
   const updateData = { status };
   if (reason !== undefined) updateData.rejection_reason = reason;
   await DB.update('assessments', id, updateData);
@@ -497,36 +496,6 @@ async function assessUpdateStatus(id, status, reason) {
   Utils.toast('Status updated', 'success');
   Modal.close();
   renderAssessments();
-}
-
-function assessApprove(id) {
-  assessUpdateStatus(id, 'approved').then(async () => {
-    const [a] = await DB.getRelated('assessments', '*', { id });
-    const [cls] = await DB.getRelated('classes', '*', { id: a?.class_id });
-    const [sub] = await DB.getRelated('subjects', '*', { id: a?.subject_id });
-    notifyTeacher(id, 'Assessment Approved', `${a?.name || 'Assessment'} for ${cls?.name || 'your class'} in ${sub?.name || 'the subject'} was approved by the DOS.`, 'success');
-  });
-}
-
-function assessReject(id) {
-  DB.getRelated('assessments', '*', { id }).then(([a]) => {
-    Modal.show('Reject Assessment', `
-      <p class="text-sm text-muted mb-3">Provide a reason for rejection. The teacher will see this reason.</p>
-      <div class="form-group"><label>Reason for rejection <span class="required">*</span></label>
-        <textarea id="reject-reason" class="textarea-field" placeholder="e.g., Please check the marks for learners RMS014 and RMS027."></textarea></div>`,
-      `<button class="btn btn-secondary" onclick="Modal.close()">Cancel</button>
-       <button class="btn btn-danger" onclick="confirmReject('${id}')"><i data-lucide="x"></i> Reject Assessment</button>`);
-  });
-}
-
-async function confirmReject(id) {
-  const reason = document.getElementById('reject-reason').value.trim();
-  if (!reason) return Utils.toast('Please enter a rejection reason', 'error');
-  await assessUpdateStatus(id, 'rejected', reason);
-  const [a] = await DB.getRelated('assessments', '*', { id });
-  const [cls] = await DB.getRelated('classes', '*', { id: a?.class_id });
-  const [sub] = await DB.getRelated('subjects', '*', { id: a?.subject_id });
-  notifyTeacher(id, 'Assessment Rejected', `${a?.name || 'Assessment'} for ${cls?.name || 'your class'} in ${sub?.name || 'the subject'} was rejected by the DOS. Reason: ${reason}`, 'error');
 }
 
 function assessLock(id) { assessUpdateStatus(id, 'locked'); }
@@ -619,8 +588,8 @@ async function notifyDosOnTeacherSubmission(assessmentId, teacherName, assessmen
     const rows = dosUsers.map(dos => ({
       recipient_user_id: dos.user_id,
       sender_user_id: teacherId,
-      title: 'Marks Submitted for Approval',
-      message: `${teacherName || 'A teacher'} submitted ${assessmentName || 'marks'} for ${className || 'a class'} / ${subjectName || 'subject'} and it is awaiting your approval.`,
+      title: 'Marks Submitted',
+      message: `${teacherName || 'A teacher'} submitted ${assessmentName || 'marks'} for ${className || 'a class'} / ${subjectName || 'subject'}. The submitted marks are available in reports and can be corrected by the teacher.`,
       notification_type: 'MARKS_SUBMITTED',
       category: 'marks',
       priority: 'normal',

@@ -167,12 +167,12 @@ async function analyticsRenderPage(data, ctx, assessmentsList) {
   const learnerOpts = data.learners.map(l => ({ value: l.id, label: l.name + (l.className ? ' (' + l.className + ')' : '') }));
 
   const statusOpts = [
-    { value: 'official', label: 'Official (Approved + Locked)' },
+    { value: 'official', label: 'Submitted + Locked (includes legacy approvals)' },
     { value: 'all', label: 'All Assessments' },
-    { value: 'pending', label: 'Pending Approval' },
-    { value: 'approved', label: 'Approved' },
+    { value: 'draft', label: 'Draft / Not Submitted' },
+    { value: 'approved', label: 'Legacy Approved' },
     { value: 'locked', label: 'Locked' },
-    { value: 'rejected', label: 'Rejected' }
+    { value: 'rejected', label: 'Legacy Rejected' }
   ];
   const metricOpts = [
     { value: 'avg', label: 'Average %' },
@@ -327,22 +327,22 @@ function analyticsAggregateSections(data, ctx) {
   // Visual marks completion & teacher activity – always visible, real counts
   const completionPct = totalAssessments ? Math.round((approvedCnt/totalAssessments)*100) : 0;
   const missingPct = 100 - (totalAssessments ? Math.round((entered ? 100 : 0)) : 0);
-  const marksCompletionCard = `<div class="card mb-6"><div class="card-header"><h3>${AStrs.icon('list-checks')}Marks Completion</h3><span class="text-sm text-muted">Entered / Submitted / Approved</span></div><div class="card-body" style="padding:16px 20px">
+  const marksCompletionCard = `<div class="card mb-6"><div class="card-header"><h3>${AStrs.icon('list-checks')}Marks Completion</h3><span class="text-sm text-muted">Entered / Submitted / Locked</span></div><div class="card-body" style="padding:16px 20px">
     <div style="display:grid;grid-template-columns:repeat(2,1fr);gap:12px">
       <div><div class="text-xs text-muted">Entered</div><div class="progress-bar"><div class="progress-bar-fill green" style="width:${totalMarks?100:0}%"></div></div><div class="text-xs font-semibold">${entered} records</div></div>
       <div><div class="text-xs text-muted">Submitted</div><div class="progress-bar"><div class="progress-bar-fill blue" style="width:${totalAssessments? Math.round(submittedCnt/totalAssessments*100):0}%"></div></div><div class="text-xs font-semibold">${submittedCnt}/${totalAssessments}</div></div>
-      <div><div class="text-xs text-muted">Approved / Locked</div><div class="progress-bar"><div class="progress-bar-fill green" style="width:${completionPct}%"></div></div><div class="text-xs font-semibold">${approvedCnt}/${totalAssessments} (${completionPct}%)</div></div>
+      <div><div class="text-xs text-muted">Submitted / Locked (includes legacy approvals)</div><div class="progress-bar"><div class="progress-bar-fill green" style="width:${completionPct}%"></div></div><div class="text-xs font-semibold">${approvedCnt}/${totalAssessments} (${completionPct}%)</div></div>
       <div><div class="text-xs text-muted">Missing (draft)</div><div class="progress-bar"><div class="progress-bar-fill amber" style="width:${totalAssessments? Math.round(pendingCnt/totalAssessments*100):0}%"></div></div><div class="text-xs font-semibold">${pendingCnt} pending</div></div>
     </div>
   </div></div>`;
 
-  const activityCard = `<div class="card mb-6"><div class="card-header"><h3>${AStrs.icon('clipboard-check')}Teacher Assessment Activity</h3><span class="text-sm text-muted">Created / Submitted / Approved / Pending / Rejected / Locked</span></div><div class="card-body" style="padding:16px 20px">
+  const activityCard = `<div class="card mb-6"><div class="card-header"><h3>${AStrs.icon('clipboard-check')}Teacher Assessment Activity</h3><span class="text-sm text-muted">Created / Submitted / Pending / Locked (legacy states included)</span></div><div class="card-body" style="padding:16px 20px">
     <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:10px;text-align:center">
       <div><div class="stat-value" style="font-size:18px">${createdCnt}</div><div class="text-xs text-muted">Created</div></div>
       <div><div class="stat-value" style="font-size:18px;color:var(--blue-600)">${submittedCnt}</div><div class="text-xs text-muted">Submitted</div></div>
-      <div><div class="stat-value" style="font-size:18px;color:var(--green-600)">${approvedCnt}</div><div class="text-xs text-muted">Approved</div></div>
+      <div><div class="stat-value" style="font-size:18px;color:var(--green-600)">${approvedCnt}</div><div class="text-xs text-muted">Submitted / Finalized</div></div>
       <div><div class="stat-value" style="font-size:18px;color:var(--amber-600)">${pendingCnt}</div><div class="text-xs text-muted">Pending (draft)</div></div>
-      <div><div class="stat-value" style="font-size:18px;color:var(--red-500)">${rejectedCnt}</div><div class="text-xs text-muted">Rejected</div></div>
+      <div><div class="stat-value" style="font-size:18px;color:var(--red-500)">${rejectedCnt}</div><div class="text-xs text-muted">Legacy Rejected</div></div>
       <div><div class="stat-value" style="font-size:18px;color:var(--green-600)">${lockedCnt}</div><div class="text-xs text-muted">Locked</div></div>
     </div>
   </div></div>`;

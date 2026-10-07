@@ -785,6 +785,10 @@ async function teacherSave() {
         });
         if (restoreError) throw restoreError;
       }
+      const { data: verifiedSession } = await sbClient.auth.getSession();
+      if (verifiedSession?.session?.user?.id !== adminSession.user?.id) {
+        throw new Error('Could not restore the DOS session after creating the teacher login.');
+      }
     };
     const [{ data: existingCode }, { data: existingEmail }] = await Promise.all([
       sbClient.from('teachers').select('id').eq('teacher_code', code).maybeSingle(),
@@ -817,31 +821,34 @@ async function teacherSave() {
       await restoreAdminSession();
     }
 
-    const creatorId = (typeof Auth !== 'undefined' && Auth.currentUser?.id) ? Auth.currentUser.id : (adminSession?.user?.id || null);
-
+    await restoreAdminSession();
     // Snapshot the assignment queue built on this page ({ class_id, subject_ids[] }).
     const queuedAssignments = (typeof tfAssignmentQueue !== 'undefined' ? tfAssignmentQueue : [])
       .filter(item => item && item.class_id && (item.subject_ids || []).length)
       .map(item => ({ class_id: String(item.class_id), subject_ids: [...new Set((item.subject_ids || []).map(String))] }));
 
-    // Ignore an existing profile row: DOS cannot update it until the teacher
-    // row exists, and the following teacher upsert repairs partial registrations.
-    const { error: userUpsertErr } = await sbClient.from('users').upsert(
-      { id: teacherAuthId, email, full_name: name, role: 'teacher', status: 'active', phone, education_level: accountEducationLevel },
-      { onConflict: 'id', ignoreDuplicates: true }
-    );
-    if (userUpsertErr) throw userUpsertErr;
-    const { error: teacherUpsertErr } = await sbClient.from('teachers').upsert(
-      { user_id: teacherAuthId, teacher_code: code, full_name: name, email, phone, status: 'active', education_level: educationLevel, created_by: creatorId },
-      { onConflict: 'teacher_code' }
-    );
-    if (teacherUpsertErr) throw teacherUpsertErr;
+    const { data: newTeacherId, error: teacherRegistrationError } = await sbClient.rpc('rms_register_teacher', {
+      p_user_id: teacherAuthId,
+      p_teacher_code: code,
+      p_email: email,
+      p_full_name: name,
+      p_phone: phone,
+      p_user_education_level: accountEducationLevel,
+      p_teacher_education_level: educationLevel
+    });
+    if (teacherRegistrationError) {
+      if (/rms_register_teacher/i.test(teacherRegistrationError.message || '')
+        || teacherRegistrationError.code === 'PGRST202') {
+        throw new Error('Teacher registration setup is missing in Supabase. Run backend/sql/teacher_registration_users_rls.sql in the SQL Editor, then retry.');
+      }
+      throw teacherRegistrationError;
+    }
+    if (!newTeacherId) {
+      throw new Error('Supabase did not confirm creation of the teacher record.');
+    }
     DB.invalidate('teachers');
     DB.invalidate('users');
 
-    // Resolve the new teacher row and its display names for assignments + email
-    const { data: newTeacher } = await sbClient.from('teachers').select('id').eq('teacher_code', code).single();
-    const newTeacherId = newTeacher?.id || null;
     const classTeacherIds = Array.from(document.querySelectorAll('#tf-class-teacher-list input[name="tf-class-teacher"]:checked'))
       .map(input => input.value);
     if (classTeacherIds.length) {
@@ -887,6 +894,7 @@ async function teacherSave() {
     }
 
     // Create the queued assignments (same pairs as the Assignments page).
+    let assignmentWarning = null;
     if (newTeacherId && queuedAssignments.length) {
       try {
         const payload = [];
@@ -897,15 +905,11 @@ async function teacherSave() {
         });
         // Final no-double-booking check (a slot may have been taken since it was queued).
         let finalPayload = payload;
-        try {
-          const conflicts = await tfCheckConflicts(payload);
-          if (conflicts.length) {
-            const taken = new Set(conflicts.map(c => `${c.class_id}|${c.subject_id}`));
-            finalPayload = payload.filter(p => !taken.has(`${String(p.class_id)}|${String(p.subject_id)}`));
-            Utils.toast(tfConflictMessage(conflicts) + ' — skipped.', 'error');
-          }
-        } catch (checkErr) {
-          console.warn('[TEACHER ASSIGN] Final conflict check failed, proceeding:', checkErr);
+        const conflicts = await tfCheckConflicts(payload);
+        if (conflicts.length) {
+          const taken = new Set(conflicts.map(c => `${c.class_id}|${c.subject_id}`));
+          finalPayload = payload.filter(p => !taken.has(`${String(p.class_id)}|${String(p.subject_id)}`));
+          assignmentWarning = tfConflictMessage(conflicts) + ' Conflicting assignments were skipped.';
         }
         // Names in the welcome email must reflect only what was actually saved.
         const savedPairs = new Set(finalPayload.map(p => `${String(p.class_id)}|${String(p.subject_id)}`));
@@ -922,14 +926,21 @@ async function teacherSave() {
           });
         }
         if (finalPayload.length) {
-          const { error: assignErr } = await sbClient.from('teacher_assignments').insert(finalPayload);
+          const { data: savedAssignments, error: assignErr } = await sbClient.from('teacher_assignments')
+            .insert(finalPayload)
+            .select('id');
           if (assignErr) throw assignErr;
+          if ((savedAssignments || []).length !== finalPayload.length) {
+            throw new Error('The database did not confirm every selected class and subject assignment.');
+          }
           DB.invalidate('teacher_assignments');
         }
       } catch (assignErr) {
         console.error('[TEACHER ASSIGN] Failed:', assignErr);
-        Utils.toast('Teacher registered, but assignments could not be saved: ' + (assignErr.message || 'unknown error'), 'error');
+        assignmentWarning = 'Assignments could not be saved: ' + (assignErr.message || 'unknown error');
       }
+    } else if (queuedAssignments.length) {
+      assignmentWarning = 'Assignments could not be saved because the teacher profile could not be loaded.';
     }
 
     // Send welcome notifications
@@ -953,14 +964,22 @@ async function teacherSave() {
     }
 
     Modal.close();
-    Utils.toast('Teacher registered successfully! Welcome notifications sent.', 'success');
+    if (assignmentWarning) {
+      Utils.toast('Teacher registered, but ' + assignmentWarning + ' You can retry from Assignments.', 'error');
+    } else {
+      Utils.toast('Teacher registered successfully! Welcome notifications sent.', 'success');
+    }
     await renderTeachers();
 
     // Show success modal with delivery status
     showWelcomeResultModal(name, email, phone, code, welcomeResult);
 
   } catch (e) {
-    Utils.toast('Error: ' + e.message, 'error');
+    if (/row-level security policy.*users|users.*row-level security policy/i.test(e.message || '')) {
+      Utils.toast('Teacher account was not fully registered. Restore your DOS session and run backend/sql/teacher_registration_users_rls.sql in Supabase SQL Editor, then retry.', 'error');
+    } else {
+      Utils.toast('Error: ' + e.message, 'error');
+    }
   } finally {
     if (saveBtn) { saveBtn.disabled = false; saveBtn.innerHTML = '<i data-lucide="save"></i> Save & Send Welcome'; }
     if (typeof lucide !== 'undefined') lucide.createIcons();

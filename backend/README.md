@@ -16,7 +16,10 @@ backend/
     ├── database.sql              # MASTER SETUP: complete schema + RLS + triggers + seeds (run this)
     ├── assessment_normalization_upgrade.sql # Existing-project upgrade for normalized mark storage
     ├── user_id_fk_upgrade.sql    # Existing-project fix for auth/profile ID relinking
-    ├── teacher_registration_users_rls.sql # Existing-project DOS policy for teacher profile creation
+    ├── teacher_registration_users_rls.sql # Existing-project secured DOS RPC for teacher profile creation
+    ├── teacher_submitted_marks_edit.sql # Allow teacher corrections before approval/locking
+    ├── assessment_no_approval.sql # Make submitted results immediately reportable; remove approval/rejection transitions
+    ├── analytics_marks_rls_fix.sql # Prevent nested RLS from breaking DOS analytics reads
     ├── class_teacher_access.sql  # Class Teacher read access, DOS assignment RPC and audit trail
     ├── admin_dashboard_count_upgrade.sql # Scoped dashboard learner-count RPC
     ├── primary_subjects_catalog_upgrade.sql # Ensure all Primary curriculum subjects are available
@@ -40,13 +43,16 @@ backend/
 7. Start the frontend (open `frontend/index.html` or deploy to Vercel).
 
 > All SQL is pasted and run **manually** in the SQL Editor — there is no migration runner. Prefer paste-ready queries with no placeholders.
-> On an existing project where teacher registration fails with a `users` row-level security error, run `sql/teacher_registration_users_rls.sql` in the SQL Editor. It allows DOS teacher-profile inserts while preserving education-level scoping.
+> On an existing project where teacher registration fails with a row-level security error, run `sql/teacher_registration_users_rls.sql` in the SQL Editor. It installs the secured `rms_register_teacher` RPC, which verifies the DOS account and education-level scope and creates both the teacher login profile and teacher record without a direct browser table upsert.
+> On an existing project, run `sql/teacher_submitted_marks_edit.sql` in the SQL Editor to allow teachers to edit assessment details and marks, including on submitted or legacy-approved assessments. Locked assessments remain read-only. DOS no longer approves or rejects submissions; submitted marks are immediately available in reports and parent portals.
+> On an existing project, run `sql/assessment_no_approval.sql` in the SQL Editor to block new approved/rejected status transitions while preserving old records.
+> If analytics returns a 500 error while loading marks, run `sql/analytics_marks_rls_fix.sql` in the SQL Editor. It checks DOS visibility without recursively re-evaluating assessment RLS.
 > For an existing project, run `sql/assessment_normalization_upgrade.sql` to add and backfill the nullable `marks.normalized_mark` field. The original `marks.mark` value remains unchanged; `marks.percentage` remains supported as the same normalized percentage.
 > If a previous setup run failed while relinking profile IDs because notifications reference `public.users`, run `sql/user_id_fk_upgrade.sql` first, then rerun `sql/database.sql`.
 > For the dashboard's scoped learner total on an existing project, run `sql/admin_dashboard_count_upgrade.sql` in Supabase SQL Editor before publishing the frontend that calls it.
 > On an existing project, run `sql/primary_subjects_catalog_upgrade.sql` to ensure the four Primary-only subjects and four shared subjects are active in the catalogue with the correct education levels. Primary report cards include all eight even when `class_subjects` only lists a subset.
 > On an existing project, run `sql/secondary_subjects_catalog_upgrade.sql` to ensure the 21 Secondary-only subjects and four shared subjects are active in the catalogue with the correct education levels. Secondary reports show Secondary-compatible subjects and exclude Primary-only subjects, even when `class_subjects` only lists a subset.
-> `database.sql` assigns the seeded level-specific subjects to Primary or Secondary, filters subject choices and academic read permissions by the selected class, and rejects cross-level class/subject links in database triggers. On an existing project, rerun the updated `database.sql` and `sql/parent_student_marks_portal.sql` so existing RPCs and policies use the same checks. The parent portal exposes approved and locked assessments only, and its report card uses the same shared card builder as admin and class-teacher reports. Existing custom subjects should have `subjects.level` or `subjects.education_level` configured correctly; existing mismatched records are hidden from views but are not deleted.
+> `database.sql` assigns the seeded level-specific subjects to Primary or Secondary, filters subject choices and academic read permissions by the selected class, and rejects cross-level class/subject links in database triggers. On an existing project, rerun the updated `database.sql` and `sql/parent_student_marks_portal.sql` so existing RPCs and policies use the same checks. DOS reports and parent portals include submitted assessments without requiring approval or locking; the parent report card uses the same shared card builder as admin and class-teacher reports. Existing custom subjects should have `subjects.level` or `subjects.education_level` configured correctly; existing mismatched records are hidden from views but are not deleted.
 
 ## Authentication
 

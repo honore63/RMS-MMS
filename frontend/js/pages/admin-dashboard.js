@@ -94,7 +94,7 @@ async function renderAdminDashboard() {
     const completed = assessments.filter(a => ['submitted','approved','locked'].includes(a.status)).length;
     const pending = assessments.filter(a => a.status === 'draft').length;
     const submitted = assessments.filter(a => a.status === 'submitted').length;
-    const approved = assessments.filter(a => a.status === 'submitted' || a.status === 'approved' || a.status === 'locked').length;
+    const locked = assessments.filter(a => a.status === 'locked').length;
 
     const recent = [...assessments].sort((x, y) => String(y.created_at||'').localeCompare(String(x.created_at||''))).slice(0, 8);
     const recentSubjectIds = [...new Set(recent.map(a => a.subject_id).filter(Boolean))];
@@ -201,7 +201,7 @@ async function renderAdminDashboard() {
           <div class="stat-icon" style="background:var(--green-50);color:var(--green-600)"><i data-lucide="check-circle-2"></i></div>
           <div class="stat-value" style="color:var(--green-600)">${completed}</div>
           <div class="stat-label">Completed</div>
-          <div class="stat-desc"><i data-lucide="check-circle-2"></i> Approved &amp; locked</div>
+          <div class="stat-desc"><i data-lucide="check-circle-2"></i> Submitted, legacy-approved &amp; locked</div>
         </div>
         <div class="stat-card">
           <div class="stat-icon" style="background:var(--amber-50);color:var(--amber-600)"><i data-lucide="file-edit"></i></div>
@@ -213,13 +213,13 @@ async function renderAdminDashboard() {
           <div class="stat-icon" style="background:var(--blue-50);color:var(--blue-600)"><i data-lucide="send"></i></div>
           <div class="stat-value" style="color:var(--blue-600)">${submitted}</div>
           <div class="stat-label">Submitted</div>
-          <div class="stat-desc"><i data-lucide="send"></i> Awaiting your review</div>
+          <div class="stat-desc"><i data-lucide="send"></i> Visible in reports and parent portals</div>
         </div>
         <div class="stat-card">
           <div class="stat-icon" style="background:var(--green-50);color:var(--green-600)"><i data-lucide="shield-check"></i></div>
-          <div class="stat-value" style="color:var(--green-600)">${approved}</div>
-          <div class="stat-label">Approved</div>
-          <div class="stat-desc"><i data-lucide="shield-check"></i> Finalised results</div>
+          <div class="stat-value" style="color:var(--green-600)">${locked}</div>
+          <div class="stat-label">Locked</div>
+          <div class="stat-desc"><i data-lucide="lock"></i> No further teacher edits</div>
         </div>
       </div>
 

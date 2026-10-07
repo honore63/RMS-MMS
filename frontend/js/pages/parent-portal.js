@@ -300,7 +300,7 @@ const ParentReports = {
     return `
       <section class="card" style="padding:24px">
         <h3 style="margin:0 0 8px;font-size:18px;font-weight:700">Official Student Report Card</h3>
-        <p style="color:var(--gray-500);margin:0 0 20px">Generate the same official report card available to school administrators. Only approved and locked results are included.</p>
+        <p style="color:var(--gray-500);margin:0 0 20px">Generate the report card with all submitted results for this learner, including results that have not been approved or locked.</p>
         <div class="flex gap-4 items-end" style="flex-wrap:wrap">
           <div class="form-group" style="min-width:200px">
             <label for="parent-report-year">Academic Year</label>
@@ -370,10 +370,10 @@ const ParentReports = {
         yearId: state.yearId,
         termId: state.termId,
         termIds: [state.termId],
-        assessmentStatuses: ['approved', 'locked']
+        assessmentStatuses: ['submitted', 'approved', 'locked']
       });
       if (!card.withMarks) {
-        preview.innerHTML = '<p class="text-muted">No published results are available for this learner in the selected term.</p>';
+        preview.innerHTML = '<p class="text-muted">No submitted results are available for this learner in the selected term.</p>';
         return;
       }
       const html = ReportStudent.renderCard(card);

@@ -184,9 +184,12 @@ const AnalyticsEngine = {
     const ids = assessments.map(a => a.id);
     let marks = [];
     if (ids.length) {
-      const { data, error: me } = await sbClient.from('marks').select('*').in('assessment_id', ids);
-      if (me) throw me;
-      marks = data || [];
+      for (let i = 0; i < ids.length; i += 10) {
+        const { data, error: me } = await sbClient.from('marks').select('*')
+          .in('assessment_id', ids.slice(i, i + 10));
+        if (me) throw me;
+        marks.push(...(data || []));
+      }
     }
 
     if (filters.studentId && filters.studentId !== 'all') {

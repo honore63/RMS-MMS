@@ -97,17 +97,16 @@ const ReportHeader = {
   },
 
   /* ---------------------------------------------------------
-     Approval/status resolution.
-     Approval never BLOCKS report generation: it only shapes the
-     label printed near the report title (PRELIMINARY vs OFFICIAL).
+     Submission/status resolution. Status never blocks report generation.
      --------------------------------------------------------- */
   getReportStatus(dataOrApproval) {
-    if (dataOrApproval == null) return 'PENDING APPROVAL';
+    if (dataOrApproval == null) return 'PENDING SUBMISSION';
     if (typeof dataOrApproval === 'string') {
       const s = String(dataOrApproval).trim().toUpperCase();
-      if (s === 'APPROVED' || s === 'OFFICIAL') return 'APPROVED';
-      if (s === 'DRAFT' || s === 'DRAFT REPORT — MARKS PENDING APPROVAL') return 'DRAFT REPORT — MARKS PENDING APPROVAL';
-      return 'PENDING APPROVAL';
+      if (s === 'APPROVED') return 'LEGACY APPROVED';
+      if (s === 'OFFICIAL' || s === 'SUBMITTED') return 'SUBMITTED';
+      if (s === 'DRAFT' || s === 'DRAFT REPORT — MARKS NOT SUBMITTED') return 'DRAFT REPORT — MARKS NOT SUBMITTED';
+      return 'PENDING SUBMISSION';
     }
     const candidates = [];
     const push = items => (items || []).forEach(item => {
@@ -118,12 +117,14 @@ const ReportHeader = {
     push((dataOrApproval.rows || []).map(r => r && (r.assessment ? r.assessment : r)));
     push((dataOrApproval.blocks || []).flatMap(b => (b && b.assessments) || []));
     if (!candidates.length && dataOrApproval.approval) return this.getReportStatus(dataOrApproval.approval);
-    if (!candidates.length) return 'PENDING APPROVAL';
-    const hasApproved = candidates.some(s => s === 'approved' || s === 'locked');
-    const hasNotApproved = candidates.some(s => s !== 'approved' && s !== 'locked');
-    if (hasApproved && hasNotApproved) return 'MIXED — SOME ASSESSMENTS NOT APPROVED';
-    if (hasApproved) return 'APPROVED';
-    return 'PENDING APPROVAL';
+    if (!candidates.length) return 'PENDING SUBMISSION';
+    const submittedStatuses = new Set(['submitted', 'approved', 'locked']);
+    const hasSubmitted = candidates.some(status => submittedStatuses.has(status));
+    const hasDraft = candidates.some(status => !submittedStatuses.has(status));
+    if (hasSubmitted && hasDraft) return 'MIXED — SOME ASSESSMENTS NOT SUBMITTED';
+    if (!hasSubmitted) return 'DRAFT — MARKS NOT SUBMITTED';
+    if (candidates.every(status => status === 'locked')) return 'LOCKED';
+    return 'SUBMITTED';
   },
 
   statusBadge(status) {

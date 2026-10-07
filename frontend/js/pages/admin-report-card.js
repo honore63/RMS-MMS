@@ -212,11 +212,12 @@ async function rcFetchLearnerData({ learnerId, classId, yearId, termIds, allSubj
     .sort((a,b) => a.name.localeCompare(b.name));
   const activeSubjectIds = new Set(activeSubjects.map(subject => String(subject.id)));
 
-  const [approvedA, lockedA] = await Promise.all([
+  const [submittedA, approvedA, lockedA] = await Promise.all([
+    DB.query('assessments','*',{ class_id: classId, academic_year_id: yearId || undefined, status:'submitted' }),
     DB.query('assessments','*',{ class_id: classId, academic_year_id: yearId || undefined, status:'approved' }),
     DB.query('assessments','*',{ class_id: classId, academic_year_id: yearId || undefined, status:'locked' })
   ]);
-  const allAssessments = [...lockedA, ...approvedA]
+  const allAssessments = [...lockedA, ...approvedA, ...submittedA]
     .filter(a => !(Utils.isConversionHelper && Utils.isConversionHelper(a)))
     .filter(a => selectedTermIds.has(String(a.term_id)))
     .filter(a => activeSubjectIds.has(String(a.subject_id)));

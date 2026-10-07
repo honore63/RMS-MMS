@@ -186,10 +186,10 @@ rms-eua/
    sign-in page opens the standalone `frontend/parent-marks.html` page, keeping
    the student lookup and results separate from staff sign-in. Its Student
    Report tab uses the shared official report-card builder and renderer as the
-   admin and class-teacher reports, with parent visibility limited to approved
-   and locked assessments. Re-run the idempotent SQL file after updating it so
-   the portal returns the published assessment data required by that shared
-   report path.
+   admin and class-teacher reports. Submitted assessments are visible to
+   parents without requiring approval or locking. Re-run the idempotent SQL
+   file after updating it so the portal returns submitted results as well as
+   approved and locked results required by that shared report path.
 
    **Privacy note:** learner codes are identifiers, not passwords. Keep codes
    confidential and enable request throttling at the Supabase/API gateway

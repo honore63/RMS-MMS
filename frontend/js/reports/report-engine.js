@@ -23,37 +23,72 @@ function filterReportAssessments(assessments, subjects, cls = null) {
 }
 
 async function validateTeacherReportScope(config) {
-  if (typeof Auth === 'undefined' || !Auth.isTeacher || !Auth.isTeacher()) return;
+  if (typeof Auth === 'undefined' || !Auth.isTeacher || !Auth.isTeacher()) return config;
   const teacherId = Auth.getTeacherId();
   if (!teacherId) throw new Error('Teacher profile is not available.');
+  const schoolWideReports = new Set([
+    'school-performance',
+    'teacher-performance',
+    'teacher-assessment-submission'
+  ]);
+  if (schoolWideReports.has(config.reportType)) {
+    throw new Error('School-wide reports are available to DOS accounts only.');
+  }
   const assignments = await DB.query('teacher_assignments', '*', { teacher_id: teacherId });
-  const pairs = new Set((assignments || []).map(a => `${a.class_id}|${a.subject_id}`));
-  const classIds = config.classIds || [];
-  const subjectIds = config.subjectIds || [];
-  const classRows = classIds.length
-    ? await DB.query('classes', 'id,class_teacher_id', { id: classIds })
-    : [];
-  const classTeacherIds = new Set((classRows || [])
-    .filter(cls => String(cls.class_teacher_id) === String(teacherId))
-    .map(cls => String(cls.id)));
+  let yearId = config.academicYear || config.academicYearId || config.year?.id;
+  if (!yearId && typeof ReportUtils !== 'undefined' && ReportUtils.getActiveYear) {
+    const activeYear = await ReportUtils.getActiveYear();
+    yearId = activeYear?.id;
+  }
+  const eligibleAssignments = (assignments || []).filter(assignment =>
+    !assignment.academic_year_id || !yearId || String(assignment.academic_year_id) === String(yearId)
+  );
+  const pairs = new Set(eligibleAssignments.map(a => `${a.class_id}|${a.subject_id}`));
+  const classIds = (config.classIds || (config.classId ? [config.classId] : [])).map(String);
+  const requestedSubjects = (config.subjectIds || (config.subjectId ? [config.subjectId] : [])).map(String);
+  if (!classIds.length) {
+    throw new Error('Select at least one class assigned to you before generating a report.');
+  }
   for (const classId of classIds) {
-    const assigned = (assignments || []).some(a => String(a.class_id) === String(classId));
-    if (!assigned && !classTeacherIds.has(String(classId))) {
-      throw new Error('One or more selected classes are not assigned to you.');
+    if (!eligibleAssignments.some(a => String(a.class_id) === classId)) {
+      throw new Error('One or more selected classes have no subject assignments for you in this academic year.');
     }
   }
-  if (subjectIds.length && classIds.length && subjectIds.some(subjectId =>
-    !classIds.some(classId =>
-      classTeacherIds.has(String(classId)) || pairs.has(`${classId}|${subjectId}`)))) {
-    throw new Error('One or more selected subjects are not assigned to you for the selected class.');
+  const availableSubjectIds = [...new Set(eligibleAssignments
+    .filter(a => classIds.includes(String(a.class_id)))
+    .map(a => String(a.subject_id)))];
+  if (requestedSubjects.some(subjectId => !availableSubjectIds.includes(subjectId))) {
+    throw new Error('One or more selected subjects are not assigned to you in the selected classes.');
   }
-  if (config.assessmentIds && config.assessmentIds.length) {
-    const assessments = await DB.query('assessments', 'id,class_id,subject_id,teacher_id', { id: config.assessmentIds });
-    for (const a of assessments) {
-      const ok = String(a.teacher_id) === String(teacherId) || classTeacherIds.has(String(a.class_id));
-      if (!ok) throw new Error('One or more selected assessments are not authorized for you.');
+  const subjectIds = requestedSubjects.length ? requestedSubjects : availableSubjectIds;
+  if (classIds.some(classId => !eligibleAssignments.some(a =>
+    String(a.class_id) === classId && subjectIds.includes(String(a.subject_id))))) {
+    throw new Error('Every selected class must have at least one of your assigned subjects selected.');
+  }
+  const assessmentIds = config.assessmentIds || (config.assessmentId ? [config.assessmentId] : []);
+  if (assessmentIds.length) {
+    const assessments = await DB.query('assessments', 'id,class_id,subject_id,teacher_id', { id: assessmentIds });
+    if ((assessments || []).length !== assessmentIds.length
+      || assessments.some(a => !pairs.has(`${a.class_id}|${a.subject_id}`)
+        || !classIds.includes(String(a.class_id))
+        || !subjectIds.includes(String(a.subject_id)))) {
+      throw new Error('One or more selected assessments are outside your assigned subjects or classes.');
     }
   }
+  const studentIds = config.studentIds || (config.studentId ? [config.studentId] : []);
+  if (studentIds.length) {
+    const learners = await DB.query('learners', 'id,class_id', { id: studentIds });
+    if ((learners || []).length !== studentIds.length
+      || learners.some(learner => !classIds.includes(String(learner.class_id)))) {
+      throw new Error('One or more selected students are outside your assigned classes.');
+    }
+  }
+  return {
+    ...config,
+    classIds,
+    subjectIds,
+    teacherAssignmentPairs: [...pairs]
+  };
 }
 
 function reportMarkMaximum(mark, assessmentsById, fallback = 0) {
@@ -74,7 +109,12 @@ function matrixRowsFromBlocks(blocks) {
 const ReportEngine = {
   current: null,
 
+  async authorizeTeacherConfig(config) {
+    return validateTeacherReportScope(config);
+  },
+
   async generate(config) {
+    config = await validateTeacherReportScope(config);
     const { reportType, academicYear, term, classId, subjectId, subjectIds, teacherId, assessmentId, studentId } = config;
     // Normalize array selections (wizard uses arrays)
     const classIds = config.classIds || (classId ? [classId] : []);
@@ -99,7 +139,7 @@ const ReportEngine = {
     const ctx = { settings, scale, passMark, year, term: termObj, activeTerm, classId: classIds[0]||classId, classIds, subjectId, subjectIds: allSubjectIds, teacherId: teacherIds[0]||teacherId, teacherIds, assessmentId, assessmentIds, studentId, studentIds, termIds,
       assessmentTypeId: config.assessmentTypeId, teacherComment: config.teacherComment,
       dosComment: config.dosComment, decisionOverride: config.decisionOverride, options: config.options };
-    await validateTeacherReportScope(ctx);
+    ctx.teacherAssignmentPairs = config.teacherAssignmentPairs || [];
 
     switch (reportType) {
       case 'student-card': return this.generateStudentCard(ctx);
@@ -168,13 +208,25 @@ const ReportEngine = {
 
   async generateStudentCard(ctx) {
     // Single source of truth: delegate to the dynamic ReportStudent module.
-    if (typeof ReportStudent !== 'undefined' && ctx.studentId && ctx.classId) {
+    if (typeof ReportStudent !== 'undefined' && ctx.studentId) {
+      const learner = await DB.get('learners', { id: ctx.studentId }).then(r => r[0]);
+      if (!learner) throw new Error('Selected student was not found.');
+      const classId = learner.class_id || ctx.classId;
+      let subjectIds = (ctx.subjectIds && ctx.subjectIds.length) ? ctx.subjectIds : (ctx.subjectId ? [ctx.subjectId] : null);
+      if (typeof Auth !== 'undefined' && Auth.isTeacher && Auth.isTeacher()) {
+        subjectIds = (subjectIds || []).filter(subjectId =>
+          (ctx.teacherAssignmentPairs || []).includes(`${classId}|${subjectId}`)
+        );
+        if (!subjectIds.length) {
+          throw new Error('You have no assigned subjects for the selected student’s class.');
+        }
+      }
       const yearId = ctx.year && ctx.year.id ? ctx.year.id : ctx.year;
       const termId = ctx.term && ctx.term.id ? ctx.term.id : ctx.term;
       const termIds = ctx.termIds && ctx.termIds.length ? ctx.termIds : (termId ? [termId] : null);
       return ReportStudent.fetchCardData({
-        learnerId: ctx.studentId, classId: ctx.classId, yearId, termId: termIds && termIds.length===1 ? termIds[0] : termId, termIds,
-        subjectIds: (ctx.subjectIds && ctx.subjectIds.length) ? ctx.subjectIds : (ctx.subjectId ? [ctx.subjectId] : null),
+        learnerId: ctx.studentId, classId, yearId, termId: termIds && termIds.length===1 ? termIds[0] : termId, termIds,
+        subjectIds,
         assessmentIds: ctx.assessmentIds && ctx.assessmentIds.length ? ctx.assessmentIds : null,
         assessmentTypeId: ctx.assessmentTypeId || null,
         teacherComment: ctx.teacherComment || '', dosComment: ctx.dosComment || '',
@@ -241,25 +293,14 @@ const ReportEngine = {
   },
 
   async generateExamClassSummary(ctx) {
-    const { settings, scale, passMark, year, term, classId, assessmentId, assessmentIds, termIds } = ctx;
+    const { settings, scale, passMark, year, term, classId, subjectIds, assessmentId, assessmentIds, termIds } = ctx;
     const cls = await DB.get('classes', { id: classId }).then(r => r[0]);
     assertClassScope(cls);
     const learners = await ReportUtils.getLearners(classId);
-    let assessments;
-    if (assessmentIds && assessmentIds.length) {
-      assessments = await DB.query('assessments', '*', { id: assessmentIds, class_id: classId }, { column: 'assessment_date', asc: false });
-    } else if (assessmentId) {
-      assessments = await DB.get('assessments', { id: assessmentId }).then(r => r[0] ? [r[0]] : []);
-    } else {
-      const f={ class_id: classId, academic_year_id: year.id || undefined };
-      if (termIds && termIds.length) f.term_id = termIds;
-      else if (term && term.id) f.term_id = term.id;
-      assessments = await DB.query('assessments', '*', f, { column: 'assessment_date', asc: false });
-    }
-    if (termIds && termIds.length && !(assessmentIds && assessmentIds.length)) {
-      const tSet=new Set(termIds.map(String));
-      assessments = assessments.filter(a=> !a.term_id || tSet.has(String(a.term_id)));
-    }
+    const selectedAssessmentIds = assessmentIds && assessmentIds.length ? assessmentIds : (assessmentId ? [assessmentId] : null);
+    const assessments = await this._queryTermScopedAssessments({
+      classIds: [classId], subjectIds, assessmentIds: selectedAssessmentIds, termIds, year, term
+    });
     const subjects = await DB.get('subjects');
     const scopedAssessments = filterReportAssessments(assessments, subjects, cls);
 
@@ -492,17 +533,10 @@ const ReportEngine = {
     let subjects = await DB.get('subjects');
     if (subjectIds && subjectIds.length){ const sSet=new Set(subjectIds.map(String)); subjects=subjects.filter(s=> sSet.has(String(s.id))); }
     const teachers = await DB.get('teachers');
-    const qf={ academic_year_id: year.id || undefined };
-    if (termIds && termIds.length) qf.term_id = termIds;
-    else if (term && term.id) qf.term_id = term.id;
-    if (classIds && classIds.length) qf.class_id = classIds;
-    else if (classId) qf.class_id = classId;
-    if (assessmentIds && assessmentIds.length) qf.id = assessmentIds;
-    if (subjectIds && subjectIds.length) qf.subject_id = subjectIds;
-    let assessments = await DB.query('assessments', '*', qf, { column: 'created_at', asc: false });
-    assessments = (assessments || []).filter(a => !(Utils.isConversionHelper && Utils.isConversionHelper(a)));
-    if (termIds && termIds.length){ const tSet=new Set(termIds.map(String)); assessments=assessments.filter(a=> !a.term_id || tSet.has(String(a.term_id))); }
-    if (assessmentIds && assessmentIds.length){ const aSet=new Set(assessmentIds.map(String)); assessments=assessments.filter(a=> aSet.has(String(a.id))); }
+    const assessments = await this._queryTermScopedAssessments({
+      classIds: classIds && classIds.length ? classIds : (classId ? [classId] : null),
+      subjectIds, assessmentIds, termIds, year, term
+    });
 
     const rows = [];
     for (const cls of classes) {
@@ -545,16 +579,9 @@ const ReportEngine = {
     if (subjectIds && subjectIds.length){ const sSet=new Set(subjectIds.map(String)); subjects=subjects.filter(s=> sSet.has(String(s.id))); }
     const classIds = classes.map(cls => cls.id);
     const learners = classIds.length ? await DB.query('learners', '*', { class_id: classIds, status: 'active' }) : [];
-    const qf={ class_id: classIds.length? classIds: undefined, academic_year_id: year.id || undefined };
-    if (termIds && termIds.length) qf.term_id = termIds;
-    else if (term && term.id) qf.term_id = term.id;
-    if (assessmentIds && assessmentIds.length) qf.id = assessmentIds;
-    if (subjectIds && subjectIds.length) qf.subject_id = subjectIds;
-    if (!qf.class_id) delete qf.class_id;
-    let raw = qf.class_id || qf.term_id || qf.subject_id || qf.id ? await DB.query('assessments', '*', qf, { column: 'assessment_date', asc: false }) : await DB.query('assessments', '*', { academic_year_id: year.id||undefined }, {column:'assessment_date', asc:false});
-    if (termIds && termIds.length){ const tSet=new Set(termIds.map(String)); raw=raw.filter(a=> !a.term_id || tSet.has(String(a.term_id))); }
-    if (assessmentIds && assessmentIds.length){ const aSet=new Set(assessmentIds.map(String)); raw=raw.filter(a=> aSet.has(String(a.id))); }
-    if (cfgClassIds && cfgClassIds.length){ const cSet=new Set(cfgClassIds.map(String)); raw=raw.filter(a=> cSet.has(String(a.class_id))); }
+    const raw = await this._queryTermScopedAssessments({
+      classIds: classIds.length ? classIds : null, subjectIds, assessmentIds, termIds, year, term
+    });
     const assessments = filterReportAssessments(raw, subjects).filter(assessment => {
       const cls = classes.find(item => String(item.id) === String(assessment.class_id));
       return subjectMatchesReportScope(subjects.find(subject => String(subject.id) === String(assessment.subject_id)), cls);
@@ -755,6 +782,16 @@ const ReportEngine = {
       raw = [...unique.values()];
     } else {
       raw = await DB.query('assessments', '*', qf, { column: 'assessment_date', asc: false });
+    }
+    if (typeof Auth !== 'undefined' && Auth.isTeacher && Auth.isTeacher()) {
+      const teacherId = Auth.getTeacherId();
+      if (!teacherId) throw new Error('Teacher profile is not available.');
+      const assignments = await DB.query('teacher_assignments', '*', { teacher_id: teacherId });
+      const yearId = year && year.id;
+      const assignedPairs = new Set((assignments || [])
+        .filter(a => !a.academic_year_id || !yearId || String(a.academic_year_id) === String(yearId))
+        .map(a => `${a.class_id}|${a.subject_id}`));
+      raw = (raw || []).filter(a => assignedPairs.has(`${a.class_id}|${a.subject_id}`));
     }
     raw = (raw || []).sort((a, b) => String(b.assessment_date || '').localeCompare(String(a.assessment_date || '')));
     if (termIds && termIds.length) { const tSet = new Set(termIds.map(String)); raw = raw.filter(a => !a.term_id || tSet.has(String(a.term_id))); }

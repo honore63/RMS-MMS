@@ -648,6 +648,25 @@ BEGIN
 EXCEPTION WHEN others THEN NULL;
 END $do$;
 
+CREATE OR REPLACE FUNCTION public.rms_prevent_assessment_approval()
+RETURNS trigger LANGUAGE plpgsql AS $fn$
+BEGIN
+  IF TG_OP = 'INSERT' AND NEW.status IN ('approved', 'rejected') THEN
+    RAISE EXCEPTION 'Assessment approval and rejection are disabled; submitted marks are immediately available.';
+  END IF;
+  IF TG_OP = 'UPDATE' AND NEW.status IN ('approved', 'rejected')
+    AND NEW.status IS DISTINCT FROM OLD.status THEN
+    RAISE EXCEPTION 'Assessment approval and rejection are disabled; submitted marks are immediately available.';
+  END IF;
+  RETURN NEW;
+END;
+$fn$;
+
+DROP TRIGGER IF EXISTS rms_assessment_no_approval ON public.assessments;
+CREATE TRIGGER rms_assessment_no_approval
+  BEFORE INSERT OR UPDATE OF status ON public.assessments
+  FOR EACH ROW EXECUTE FUNCTION public.rms_prevent_assessment_approval();
+
 ALTER TABLE marks ADD COLUMN IF NOT EXISTS original_mark NUMERIC;
 ALTER TABLE marks ADD COLUMN IF NOT EXISTS original_maximum NUMERIC;
 ALTER TABLE marks ADD COLUMN IF NOT EXISTS normalized_mark NUMERIC;
@@ -908,8 +927,99 @@ RETURNS boolean LANGUAGE sql STABLE AS $fn$
   END;
 $fn$;
 
--- Audit helper: DOS accounts and whether they carry a valid education level.
-CREATE OR REPLACE FUNCTION public.rms_dos_level_audit()
+  CREATE OR REPLACE FUNCTION public.rms_create_teacher_user_profile(
+    p_user_id UUID, p_email TEXT, p_full_name TEXT, p_phone TEXT, p_education_level TEXT
+  ) RETURNS UUID
+  LANGUAGE plpgsql SECURITY DEFINER SET search_path = public, auth, pg_temp AS $fn$
+  BEGIN
+    IF NOT EXISTS (
+      SELECT 1 FROM public.users caller
+      WHERE caller.id = auth.uid() AND caller.role = 'dos' AND caller.status = 'active'
+    ) THEN
+      RAISE EXCEPTION 'Only an active DOS account can create a teacher profile.';
+    END IF;
+    IF p_user_id IS NULL OR p_email IS NULL OR btrim(p_email) = ''
+      OR p_full_name IS NULL OR btrim(p_full_name) = ''
+      OR p_education_level IS NULL
+      OR p_education_level NOT IN ('primary', 'secondary', 'all')
+      OR NOT public.rms_dos_can_teacher_level(p_education_level) THEN
+      RAISE EXCEPTION 'Teacher profile details are invalid or outside the DOS education-level scope.';
+    END IF;
+    IF NOT EXISTS (
+      SELECT 1 FROM auth.users target
+      WHERE target.id = p_user_id AND lower(target.email) = lower(p_email)
+    ) THEN
+      RAISE EXCEPTION 'The teacher authentication account could not be verified.';
+    END IF;
+
+    INSERT INTO public.users (id, email, full_name, role, status, phone, education_level)
+    VALUES (p_user_id, lower(btrim(p_email)), btrim(p_full_name), 'teacher', 'active',
+      NULLIF(btrim(p_phone), ''), p_education_level)
+    ON CONFLICT (id) DO NOTHING;
+    RETURN p_user_id;
+  END;
+  $fn$;
+
+CREATE OR REPLACE FUNCTION public.rms_register_teacher(
+  p_user_id UUID,
+  p_teacher_code TEXT,
+  p_email TEXT,
+  p_full_name TEXT,
+  p_phone TEXT,
+  p_user_education_level TEXT,
+  p_teacher_education_level TEXT
+) RETURNS UUID
+LANGUAGE plpgsql SECURITY DEFINER SET search_path = public, auth, pg_temp AS $fn$
+DECLARE
+  v_teacher_id UUID;
+BEGIN
+  IF p_teacher_code IS NULL OR btrim(p_teacher_code) = ''
+    OR p_user_education_level IS NULL
+    OR p_teacher_education_level IS NULL
+    OR p_teacher_education_level NOT IN ('PRIMARY', 'SECONDARY', 'BOTH')
+    OR NOT public.rms_dos_can_teacher_level(p_teacher_education_level)
+    OR (p_user_education_level = 'primary' AND p_teacher_education_level <> 'PRIMARY')
+    OR (p_user_education_level = 'secondary' AND p_teacher_education_level <> 'SECONDARY')
+    OR (p_user_education_level = 'all' AND p_teacher_education_level <> 'BOTH') THEN
+    RAISE EXCEPTION 'Teacher details are invalid or outside the DOS education-level scope.'
+      USING ERRCODE = '42501';
+  END IF;
+
+  PERFORM public.rms_create_teacher_user_profile(
+    p_user_id, p_email, p_full_name, p_phone, p_user_education_level
+  );
+
+  PERFORM pg_advisory_xact_lock(hashtextextended(p_user_id::TEXT, 0));
+  SELECT id INTO v_teacher_id
+  FROM public.teachers
+  WHERE user_id = p_user_id;
+
+  IF v_teacher_id IS NOT NULL THEN
+    IF NOT EXISTS (
+      SELECT 1 FROM public.teachers
+      WHERE id = v_teacher_id AND teacher_code = btrim(p_teacher_code)
+    ) THEN
+      RAISE EXCEPTION 'This account is already linked to a different teacher record.'
+        USING ERRCODE = '23505';
+    END IF;
+    RETURN v_teacher_id;
+  END IF;
+
+  INSERT INTO public.teachers (
+    user_id, teacher_code, full_name, email, phone, status, education_level, created_by
+  )
+  VALUES (
+    p_user_id, btrim(p_teacher_code), btrim(p_full_name), lower(btrim(p_email)),
+    NULLIF(btrim(p_phone), ''), 'active', p_teacher_education_level, auth.uid()
+  )
+  RETURNING id INTO v_teacher_id;
+
+  RETURN v_teacher_id;
+END;
+$fn$;
+
+  -- Audit helper: DOS accounts and whether they carry a valid education level.
+  CREATE OR REPLACE FUNCTION public.rms_dos_level_audit()
 RETURNS TABLE(full_name TEXT, email TEXT, education_level TEXT, scope_status TEXT)
 LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public, pg_temp AS $fn$
   SELECT u.full_name, u.email, u.education_level,
@@ -985,7 +1095,7 @@ RETURNS boolean LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public, p
 $fn$;
 
 CREATE OR REPLACE FUNCTION public.rms_dos_can_marks(p_assessment_id UUID)
-RETURNS boolean LANGUAGE sql STABLE AS $fn$
+RETURNS boolean LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public, pg_temp AS $fn$
   SELECT public.rms_dos_can_level(
     (SELECT c.education_level FROM public.assessments a JOIN public.classes c ON c.id = a.class_id WHERE a.id = p_assessment_id));
 $fn$;
@@ -1946,7 +2056,8 @@ DROP POLICY IF EXISTS rms_assessments_update ON public.assessments;
 CREATE POLICY rms_assessments_update ON public.assessments FOR UPDATE
   USING ((public.rms_is_dos() AND public.rms_dos_can_level(
       (SELECT c.education_level FROM public.classes c WHERE c.id = assessments.class_id)))
-    OR EXISTS (SELECT 1 FROM public.teachers t WHERE t.user_id = auth.uid() AND t.id = assessments.teacher_id))
+    OR (assessments.status <> 'locked' AND EXISTS (
+      SELECT 1 FROM public.teachers t WHERE t.user_id = auth.uid() AND t.id = assessments.teacher_id)))
   WITH CHECK ((public.rms_is_dos() AND public.rms_dos_can_level(
       (SELECT c.education_level FROM public.classes c WHERE c.id = class_id)))
     OR (teacher_id = assessments.teacher_id AND public.rms_teacher_can_assessment_row(teacher_id, class_id, subject_id, academic_year_id)));
@@ -1984,11 +2095,23 @@ CREATE POLICY rms_marks_select ON public.marks FOR SELECT
     OR public.rms_class_teacher_can_assessment(marks.assessment_id));
 DROP POLICY IF EXISTS rms_marks_insert ON public.marks;
 CREATE POLICY rms_marks_insert ON public.marks FOR INSERT
-  WITH CHECK (public.rms_dos_can_marks(assessment_id) OR public.rms_teacher_can_assessment(assessment_id));
+  WITH CHECK (public.rms_dos_can_marks(assessment_id)
+    OR (public.rms_teacher_can_assessment(assessment_id) AND EXISTS (
+      SELECT 1 FROM public.assessments a
+      WHERE a.id = assessment_id AND a.status IN ('draft', 'rejected', 'submitted', 'approved')
+    )));
 DROP POLICY IF EXISTS rms_marks_update ON public.marks;
 CREATE POLICY rms_marks_update ON public.marks FOR UPDATE
-  USING (public.rms_dos_can_marks(marks.assessment_id) OR public.rms_teacher_can_assessment(marks.assessment_id))
-  WITH CHECK (public.rms_dos_can_marks(assessment_id) OR public.rms_teacher_can_assessment(assessment_id));
+  USING (public.rms_dos_can_marks(marks.assessment_id)
+    OR (public.rms_teacher_can_assessment(marks.assessment_id) AND EXISTS (
+      SELECT 1 FROM public.assessments a
+      WHERE a.id = marks.assessment_id AND a.status IN ('draft', 'rejected', 'submitted', 'approved')
+    )))
+  WITH CHECK (public.rms_dos_can_marks(assessment_id)
+    OR (public.rms_teacher_can_assessment(assessment_id) AND EXISTS (
+      SELECT 1 FROM public.assessments a
+      WHERE a.id = assessment_id AND a.status IN ('draft', 'rejected', 'submitted', 'approved')
+    )));
 DROP POLICY IF EXISTS rms_marks_delete ON public.marks;
 CREATE POLICY rms_marks_delete ON public.marks FOR DELETE
   USING (public.rms_is_dos() AND public.rms_dos_can_marks(marks.assessment_id));
@@ -2608,6 +2731,9 @@ REVOKE ALL ON FUNCTION public.rms_account_can_assignment(UUID, UUID, UUID) FROM 
 REVOKE ALL ON FUNCTION public.rms_account_can_document(UUID) FROM PUBLIC, anon;
 REVOKE ALL ON FUNCTION public.rms_account_can_send_notification(UUID, TEXT, UUID) FROM PUBLIC, anon;
 REVOKE ALL ON FUNCTION public.rms_dos_notification_recipients(UUID) FROM PUBLIC, anon;
+REVOKE ALL ON FUNCTION public.rms_dos_can_marks(UUID) FROM PUBLIC, anon;
+REVOKE ALL ON FUNCTION public.rms_create_teacher_user_profile(UUID, TEXT, TEXT, TEXT, TEXT) FROM PUBLIC, anon;
+REVOKE ALL ON FUNCTION public.rms_register_teacher(UUID, TEXT, TEXT, TEXT, TEXT, TEXT, TEXT) FROM PUBLIC, anon;
 GRANT EXECUTE ON FUNCTION public.rms_account_role() TO authenticated;
 GRANT EXECUTE ON FUNCTION public.rms_account_teacher_id() TO authenticated;
 GRANT EXECUTE ON FUNCTION public.rms_account_can_access_user(UUID) TO authenticated;
@@ -2625,6 +2751,9 @@ GRANT EXECUTE ON FUNCTION public.rms_account_can_assignment(UUID, UUID, UUID) TO
 GRANT EXECUTE ON FUNCTION public.rms_account_can_document(UUID) TO authenticated;
 GRANT EXECUTE ON FUNCTION public.rms_account_can_send_notification(UUID, TEXT, UUID) TO authenticated;
 GRANT EXECUTE ON FUNCTION public.rms_dos_notification_recipients(UUID) TO authenticated;
+GRANT EXECUTE ON FUNCTION public.rms_dos_can_marks(UUID) TO authenticated;
+GRANT EXECUTE ON FUNCTION public.rms_create_teacher_user_profile(UUID, TEXT, TEXT, TEXT, TEXT) TO authenticated;
+GRANT EXECUTE ON FUNCTION public.rms_register_teacher(UUID, TEXT, TEXT, TEXT, TEXT, TEXT, TEXT) TO authenticated;
 GRANT EXECUTE ON FUNCTION public.rms_report_teacher_has_class(UUID) TO authenticated;
 GRANT EXECUTE ON FUNCTION public.rms_report_teacher_has_subject(UUID) TO authenticated;
 GRANT EXECUTE ON FUNCTION public.rms_report_teacher_has_learner(UUID) TO authenticated;

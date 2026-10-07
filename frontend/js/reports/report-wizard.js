@@ -200,6 +200,11 @@ const ReportWizard = {
 
   async open(reportType, options = {}){
     const valid = Object.keys(this.DEFS);
+    const schoolWideReports = ['school-performance', 'teacher-performance', 'teacher-assessment-submission'];
+    if (typeof Auth !== 'undefined' && Auth.isTeacher && Auth.isTeacher() && schoolWideReports.includes(reportType)) {
+      Utils.toast('School-wide reports are available to DOS accounts only.', 'error');
+      return;
+    }
     this.state.reportType = valid.includes(reportType)? reportType : 'student-card';
     this.state.stepIndex = 0;
     const previousLockedClassId = this.state.lockedClassId;
@@ -284,8 +289,11 @@ const ReportWizard = {
         if (teacherId){
           try{
             const assigns = await DB.query('teacher_assignments','*',{teacher_id: teacherId});
-            const allowed = new Set((assigns||[]).map(a=> String(a.class_id)));
-            scoped = scoped.filter(c=> allowed.has(String(c.id)) || String(c.class_teacher_id) === String(teacherId));
+            const eligible = (assigns||[]).filter(a =>
+              !a.academic_year_id || !s.academicYearId || String(a.academic_year_id) === String(s.academicYearId)
+            );
+            const allowed = new Set(eligible.map(a=> String(a.class_id)));
+            scoped = scoped.filter(c=> allowed.has(String(c.id)));
           }catch(e){
             if (s.lockedClassId) throw new Error('Could not verify your class assignment. Please try again.');
             scoped=[];
@@ -570,6 +578,15 @@ const ReportWizard = {
   setYear(id){
     this.state.academicYearId=id;
     this.state.termIds=[];
+    if (typeof Auth !== 'undefined' && Auth.isTeacher && Auth.isTeacher()) {
+      this.state.classIds=[];
+      this.state.studentIds=[];
+      this.state.subjectIds=[];
+      this.state.assessmentIds=[];
+      this.state.cache._classesLoaded=false;
+      this.state.cache.authorizedClasses=[];
+      this.state.cache.teacherAssignmentPairs=[];
+    }
     // reload terms for that year
     const all = this.state.cache.allTerms||[];
     this.state.cache.terms = id ? all.filter(t=> !t.academic_year_id || String(t.academic_year_id)===String(id)) : all;
@@ -829,18 +846,11 @@ const ReportWizard = {
     if (teacherId){
       const assigns = await DB.query('teacher_assignments','*',{teacher_id: teacherId});
       const selectedClassIds = new Set(s.classIds.map(String));
-      const allowed = new Set((assigns || [])
-        .filter(a => !selectedClassIds.size || selectedClassIds.has(String(a.class_id)))
-        .map(a => String(a.subject_id)));
-      const classTeacherClasses = (s.cache.classes || [])
-        .filter(cls => selectedClassIds.has(String(cls.id)) && String(cls.class_teacher_id) === String(teacherId));
-      for (const cls of classTeacherClasses) {
-        const classSubjects = await ReportUtils.getClassSubjects(cls.id);
-        classSubjects.forEach(subject => {
-          allowed.add(String(subject.id));
-          if (!subjects.some(existing => String(existing.id) === String(subject.id))) subjects.push(subject);
-        });
-      }
+      const eligible = (assigns || [])
+        .filter(a => (!a.academic_year_id || !s.academicYearId || String(a.academic_year_id) === String(s.academicYearId))
+          && (!selectedClassIds.size || selectedClassIds.has(String(a.class_id))));
+      const allowed = new Set(eligible.map(a => String(a.subject_id)));
+      s.cache.teacherAssignmentPairs = eligible.map(a => `${a.class_id}|${a.subject_id}`);
       subjects = subjects.filter(subject => allowed.has(String(subject.id)));
     }
     subjects.sort((a,b)=> String(a.name).localeCompare(String(b.name)));
@@ -856,7 +866,7 @@ const ReportWizard = {
         </div>
       </div>
       <div class="rw-card-bd">
-        <p class="rw-help" style="margin-bottom:8px">Only subjects for your education level and selected class appear. Empty = all scoped subjects.</p>
+        <p class="rw-help" style="margin-bottom:8px">Only subjects assigned to you for the selected class and academic year appear. Empty = all your assigned subjects.</p>
         <div class="rw-search"><i data-lucide="search"></i><input id="rw-subj-q" placeholder="Search subjects..." oninput="ReportWizard.refreshStep()"></div>
         ${this.chipsFor('subjectIds', s.cache.subjects, x=> x.name)}
         <div class="rw-list">
@@ -893,6 +903,8 @@ const ReportWizard = {
       if (Utils.isConversionHelper && Utils.isConversionHelper(a)) return false;
       const subj = allSubj.find(x=> String(x.id)===String(a.subject_id));
       const cls = (s.cache.classes || []).find(item => String(item.id) === String(a.class_id));
+      if (typeof Auth !== 'undefined' && Auth.isTeacher && Auth.isTeacher()
+        && !(s.cache.teacherAssignmentPairs || []).includes(`${a.class_id}|${a.subject_id}`)) return false;
       return !!subj && subjectMatchesReportScope(subj, cls);
     });
     // also need to ensure term filter when multiple terms: allow multiple termIds
@@ -1133,7 +1145,7 @@ const ReportWizard = {
         this.state.classIds = [this.state.lockedClassId];
       }
       this.validateAll();
-      const cfg = this.buildEngineConfig();
+      const cfg = await ReportEngine.authorizeTeacherConfig(this.buildEngineConfig());
       // Student-card batch path: use rcState-compatible path for richer layout, but also support generic engine
       if (cfg.reportType==='student-card' && cfg.studentIds && cfg.studentIds.length===0) {
         // if no students selected, engine will load students of class(s) – we pass classIds
@@ -1186,7 +1198,10 @@ const ReportWizard = {
           const classIds = (mode==='whole' ? (this.state.classIds||[]) : [].concat(this.state.classIds||[]).concat(cfg.classId).filter(Boolean));
           for (const cid of classIds){
             if (!cid) continue;
-            const res = await ReportStudent.fetchClassCards({ classId: cid, yearId, termId, termIds, subjectIds, assessmentIds, assessmentTypeId, teacherComment, dosComment, decisionOverride });
+            const classSubjectIds = cfg.teacherAssignmentPairs?.length
+              ? subjectIds.filter(subjectId => cfg.teacherAssignmentPairs.includes(`${cid}|${subjectId}`))
+              : subjectIds;
+            const res = await ReportStudent.fetchClassCards({ classId: cid, yearId, termId, termIds, subjectIds: classSubjectIds, assessmentIds, assessmentTypeId, teacherComment, dosComment, decisionOverride });
             const classCards = Array.isArray(res.cards) ? res.cards : [];
             if (!res.meta || res.meta.count !== classCards.length || res.meta.activeLearnerCount !== classCards.length) {
               throw new Error(`Report generation returned ${classCards.length} cards for ${res.meta?.activeLearnerCount ?? 'an unknown number of'} active learners.`);
