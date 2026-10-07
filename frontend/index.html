@@ -14,13 +14,14 @@
   <meta name="apple-mobile-web-app-status-bar-style" content="default">
   <meta name="apple-mobile-web-app-title" content="RMS-MIS">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
-  <meta http-equiv="Content-Security-Policy" content="default-src 'self' blob: data:; script-src 'self' 'unsafe-eval' 'unsafe-inline' blob: https://unpkg.com https://cdn.jsdelivr.net https://cdn.emailjs.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com https://cdn.jsdelivr.net; font-src 'self' https://fonts.gstatic.com; img-src 'self' blob: data: https:; connect-src 'self' https://*.supabase.co wss://*.supabase.co https://*.vercel.app https://unpkg.com https://api.emailjs.com https://*.emailjs.com; manifest-src 'self' blob: data:; worker-src 'self' blob:;">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self' blob: data:; script-src 'self' 'unsafe-eval' 'unsafe-inline' blob: https://unpkg.com https://cdn.jsdelivr.net https://cdn.emailjs.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com https://cdn.jsdelivr.net; font-src 'self' https://fonts.gstatic.com; img-src 'self' blob: data: https:; connect-src 'self' https://*.supabase.co wss://*.supabase.co https://*.vercel.app https://unpkg.com https://api.emailjs.com https://*.emailjs.com; frame-src 'self' blob: https://ztlfidglxfwjpxkqfviy.supabase.co; manifest-src 'self' blob: data:; worker-src 'self' blob:;">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Poppins:ital,wght@0,400;0,500;0,600;0,700;0,800;1,600&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="css/styles.css?v=20261004-9">
+  <link rel="stylesheet" href="css/styles.css?v=20261008-10">
   <link rel="stylesheet" href="css/report-card.css?v=20261008-10">
   <link rel="stylesheet" href="css/student-report-card.css?v=20261008-10">
+  <link rel="stylesheet" href="css/digital-library.css?v=20261008-22">
   <link rel="stylesheet" href="css/report-wizard.css?v=20261006-2">
   <link rel="stylesheet" href="css/communication-center.css?v=20260928-1">
   <script>
@@ -29,19 +30,19 @@
         name: 'RMS-MIS – Rukara Model School Marks Information System',
         short_name: 'RMS-MIS',
         description: 'Rukara Model School Marks Information System — Manage assessments, marks, grades, and reports.',
-        start_url: '/',
+        start_url: new URL('.', document.baseURI).href,
         display: 'standalone',
         background_color: '#0d2f6b',
         theme_color: '#0d2f6b',
         orientation: 'any',
-        scope: '/',
+        scope: new URL('.', document.baseURI).href,
         lang: 'en',
         categories: ['education', 'productivity'],
         icons: [
-          { src: '/public/icon-192.svg', sizes: '192x192', type: 'image/svg+xml', purpose: 'any' },
-          { src: '/public/icon-512.svg', sizes: '512x512', type: 'image/svg+xml', purpose: 'any' },
-          { src: '/public/logo.webp', sizes: '192x192', type: 'image/webp', purpose: 'any' },
-          { src: '/public/logo.webp', sizes: '512x512', type: 'image/webp', purpose: 'any' }
+          { src: new URL('public/icon-192.svg', document.baseURI).href, sizes: '192x192', type: 'image/svg+xml', purpose: 'any' },
+          { src: new URL('public/icon-512.svg', document.baseURI).href, sizes: '512x512', type: 'image/svg+xml', purpose: 'any' },
+          { src: new URL('public/logo.webp', document.baseURI).href, sizes: '192x192', type: 'image/webp', purpose: 'any' },
+          { src: new URL('public/logo.webp', document.baseURI).href, sizes: '512x512', type: 'image/webp', purpose: 'any' }
         ]
       };
       var blob = new Blob([JSON.stringify(manifest)], { type: 'application/manifest+json' });
@@ -96,6 +97,7 @@
 </div>
           </div>
           <div class="login-brand-bottom">
+              <a href="digital-library.html" title="Open the public Digital Library" style="display:inline-flex;align-items:center;gap:8px;margin-top:12px;text-decoration:none;color:rgba(255,255,255,.85);font-size:13px;font-weight:600"><span style="display:inline-flex;align-items:center;justify-content:center;width:32px;height:32px;border-radius:50%;background:#fff;color:var(--blue-700);flex:none"><i data-lucide="library-big" style="width:17px;height:17px"></i></span>Open Digital Library</a>
               <a href="https://rukaramodelschool.com/" target="_blank" rel="noopener" title="Visit Rukara Model School website" aria-label="Visit public website of Rukara Model School" style="display:inline-flex;align-items:center;gap:8px;margin-top:12px;text-decoration:none;color:rgba(255,255,255,.85);font-size:13px;font-weight:600"><span style="display:inline-flex;align-items:center;justify-content:center;width:32px;height:32px;border-radius:50%;background:#fff;color:var(--blue-700);flex:none"><i data-lucide="globe" style="width:17px;height:17px"></i></span>Visit public website</a>
             </div>
         </div>
@@ -302,6 +304,7 @@
   <script src="js/pages/admin-settings.js?v=20260924-4"></script>
   <script src="js/pages/principal-dashboard.js?v=20261007-11"></script>
   <script src="js/pages/parent-portal.js?v=20261008-11"></script>
+  <script src="js/pages/digital-library.js?v=20261008-17"></script>
   <script src="js/reports/report-header.js?v=20261004-2"></script>
   <script src="js/reports/report-utils.js?v=20261008-7"></script>
   <script src="js/reports/report-comments.js?v=20250924-8"></script>
@@ -316,7 +319,7 @@
   <script src="js/pages/teacher-pages.js?v=20261004-2"></script>
   <script src="js/pages/teacher-account.js?v=20260924-9"></script>
   <script src="js/pages/teacher-enter-marks.js?v=20261008-1"></script>
-  <script src="js/pages/teacher-convert-marks.js?v=20261006-2"></script>
+  <script src="js/pages/teacher-convert-marks.js?v=20261008-2"></script>
   <script src="js/marks-import.js?v=20261008-1"></script>
   <script src="js/import-system.js?v=20261008-1"></script>
   <script src="js/sync-registry.js?v=20261007-9"></script>
@@ -327,7 +330,7 @@
   <div id="pwa-install-banner" style="display:none;position:fixed;bottom:0;left:0;right:0;z-index:9999;background:linear-gradient(135deg,#0d2f6b,#2563eb);color:#fff;padding:14px 20px;box-shadow:0 -4px 20px rgba(0,0,0,.2);font-family:'Poppins',sans-serif;transform:translateY(100%);transition:transform .4s ease;">
     <div style="display:flex;align-items:center;justify-content:space-between;gap:16px;flex-wrap:wrap">
       <div style="display:flex;align-items:center;gap:12px">
-        <img src="/public/logo.webp" style="width:40px;height:40px;border-radius:8px" alt="RMS-MIS">
+        <img src="public/logo.webp" style="width:40px;height:40px;border-radius:8px" alt="RMS-MIS">
         <div>
           <div style="font-weight:700;font-size:14px">Install RMS-MIS</div>
           <div style="font-size:11px;opacity:.8">Quick access on your device</div>

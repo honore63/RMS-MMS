@@ -469,8 +469,10 @@ function registerRoutes() {
   Router.register('admin/audit-logs', renderAuditLogs);
   Router.register('admin/notifications', renderNotifications);
   Router.register('admin/settings', (typeof renderSettings !== 'undefined' ? renderSettings : () => { setHeader('School Settings', 'Configure school settings'); setContent('<div class="card"><div class="card-body"><p>Settings module under development.</p></div></div>'); }));
+  Router.register('admin/digital-library', () => DigitalLibrary.renderDos());
 
   Router.register('teacher/dashboard', renderTeacherDashboard);
+  Router.register('teacher/library', () => DigitalLibrary.renderTeacher());
   Router.register('teacher/my-classes', renderMyClasses);
   Router.register('teacher/my-subjects', renderMySubjects);
   Router.register('teacher/enter-marks', renderEnterMarks);

@@ -152,6 +152,8 @@ const Sidebar = {
       </div>
       <div class="sidebar-section">
         <div class="sidebar-section-title">System Insights</div>
+        <a class="nav-link" data-route="admin/digital-library" onclick="Router.go('admin/digital-library')">
+          <i data-lucide="library-big"></i> Digital Library</a>
         <a class="nav-link" data-route="admin/analytics" onclick="Router.go('admin/analytics')">
           <i data-lucide="trending-up"></i> Analytics</a>
         <a class="nav-link" data-route="admin/audit-logs" onclick="Router.go('admin/audit-logs')">
@@ -171,6 +173,8 @@ const Sidebar = {
         <i data-lucide="clipboard-list"></i> Marks Recording</a>
       <a class="nav-link" data-route="teacher/import-marks" onclick="Router.go('teacher/import-marks')">
         <i data-lucide="file-up"></i> Import Marks</a>
+      <a class="nav-link" data-route="teacher/library" onclick="Router.go('teacher/library')">
+        <i data-lucide="library-big"></i> Digital Library</a>
       <a class="nav-link" data-route="teacher/convert-marks" onclick="Router.go('teacher/convert-marks')">
         <i data-lucide="arrow-left-right"></i> Convert Marks</a>
       <div class="sidebar-section">

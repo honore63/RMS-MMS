@@ -1,0 +1,7 @@
+project_id = "ztlfidglxfwjpxkqfviy"
+
+[functions.digital-library-ai]
+verify_jwt = true
+
+[functions.digital-library-index]
+verify_jwt = true

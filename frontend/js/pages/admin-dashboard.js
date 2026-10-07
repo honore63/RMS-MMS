@@ -129,10 +129,11 @@ async function renderAdminDashboard() {
       { icon: 'clipboard-plus', bg: 'var(--amber-50)', color: 'var(--amber-600)', title: 'Create Assessment', desc: 'Start a new assessment (quiz, EOU, etc.)', route: 'admin/assessments' },
       { icon: 'calculator', bg: 'var(--blue-50)', color: 'var(--blue-600)', title: 'Enter Marks', desc: 'Record marks for a class', route: 'admin/marks' },
       { icon: 'graduation-cap', bg: 'var(--green-50)', color: 'var(--green-600)', title: 'Manage Teachers', desc: 'Add and manage teaching staff', route: 'admin/teachers' },
-{ icon: 'school', bg: 'var(--amber-50)', color: 'var(--amber-600)', title: 'Manage Classes', desc: 'Set up classes and subjects', route: 'admin/academic' },
+       { icon: 'school', bg: 'var(--amber-50)', color: 'var(--amber-600)', title: 'Manage Classes', desc: 'Set up classes and subjects', route: 'admin/academic' },
        { icon: 'file-bar-chart', bg: 'var(--blue-50)', color: 'var(--blue-600)', title: 'Report Center', desc: 'Generate academic reports', route: 'admin/reports' },
   { icon: 'school', bg: 'var(--green-50)', color: 'var(--green-600)', title: 'Class Performance', desc: 'View marks grouped by class', route: 'admin/reports/class' },
   { icon: 'trophy', bg: 'var(--amber-50)', color: 'var(--amber-600)', title: 'Top Performance', desc: 'View top learners and class ranking', route: 'admin/reports/class-ranking' },
+       { icon: 'sparkles', bg: 'var(--purple-50)', color: 'var(--purple-600)', title: 'RMS AI Assistant', desc: 'Manage AI access, view usage stats, and control library resources', route: 'admin/digital-library' },
        { icon: 'settings', bg: 'var(--gray-100)', color: 'var(--gray-600)', title: 'School Settings', desc: 'Configure school information', route: 'admin/settings' }
     ];
     const actionCards = actions.map(a => `

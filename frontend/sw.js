@@ -1,12 +1,15 @@
 /* ============================================================
-  RMS-MIS — Service Worker v9
+  RMS-MIS — Service Worker v12
    Production-ready: caching, offline, push, background sync
    ============================================================ */
 
-const CACHE_NAME = 'rms-mis-v9';
+const CACHE_NAME = 'rms-mis-v23';
+const APP_BASE = new URL('.', self.location.href);
+const APP_BASE_PATH = APP_BASE.pathname;
 const APP_SHELL = [
   '/',
   '/index.html',
+  '/digital-library.html',
   '/public/logo.webp',
   '/public/icon-192.svg',
   '/public/icon-512.svg',
@@ -16,6 +19,7 @@ const APP_SHELL = [
   '/css/student-report-card.css',
   '/css/report-wizard.css',
   '/css/communication-center.css',
+  '/css/digital-library.css',
   '/js/config.js',
   '/js/auth.js',
   '/js/db.js',
@@ -41,6 +45,7 @@ const APP_SHELL = [
   '/js/pages/admin-settings.js',
   '/js/pages/principal-dashboard.js',
   '/js/pages/parent-portal.js',
+  '/js/pages/digital-library.js',
   '/js/reports/report-header.js',
   '/js/reports/report-utils.js',
   '/js/reports/report-comments.js',
@@ -63,9 +68,9 @@ const APP_SHELL = [
   '/js/sync-registry.js',
   '/manifest.webmanifest',
   '/manifest.json'
-];
+].map((asset) => new URL(asset.replace(/^\/+/, ''), APP_BASE).pathname);
 
-const OFFLINE_URL = '/index.html';
+const OFFLINE_URL = new URL('index.html', APP_BASE).pathname;
 
 /* ---------- Install ---------- */
 self.addEventListener('install', (event) => {
@@ -117,13 +122,13 @@ self.addEventListener('fetch', (event) => {
 
   /* Keep HTML and JavaScript current while retaining cached offline fallbacks. */
   if (APP_SHELL.some((p) => url.pathname === p || url.pathname.startsWith(p + '?'))) {
-    const freshnessCritical = url.pathname === '/' || url.pathname === '/index.html' || url.pathname.endsWith('.js');
+    const freshnessCritical = url.pathname === APP_BASE_PATH || url.pathname === OFFLINE_URL || url.pathname.endsWith('.js');
     event.respondWith(freshnessCritical ? networkFirst(request) : cacheFirst(request));
     return;
   }
 
   /* Public assets — cache-first */
-  if (url.pathname.startsWith('/public/')) {
+  if (url.pathname.startsWith(`${APP_BASE_PATH}public/`)) {
     event.respondWith(cacheFirst(request));
     return;
   }
@@ -178,8 +183,8 @@ self.addEventListener('push', (event) => {
   const title = data.title || 'RMS-MIS';
   const options = {
     body: data.message || 'You have a new notification',
-    icon: '/public/icon-192.svg',
-    badge: '/public/icon-192.svg',
+    icon: new URL('public/icon-192.svg', APP_BASE).pathname,
+    badge: new URL('public/icon-192.svg', APP_BASE).pathname,
     vibrate: [100, 50, 100],
     data: {
       url: data.url || '/',
@@ -245,4 +250,4 @@ self.addEventListener('message', (event) => {
   }
 });
 
-console.log('[RMS-MIS SW v8] Service worker loaded');
+console.log('[RMS-MIS SW v12] Service worker loaded');

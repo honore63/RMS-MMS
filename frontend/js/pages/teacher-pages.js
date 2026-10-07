@@ -43,7 +43,8 @@ async function renderTeacherDashboard() {
     const actions = [
       { icon: 'school', bg: 'var(--blue-50)', color: 'var(--blue-600)', title: 'My Classes', desc: 'View your class rosters', route: 'teacher/my-classes' },
       { icon: 'book-open', bg: 'var(--green-50)', color: 'var(--green-600)', title: 'My Subjects', desc: 'Subjects you are assigned to teach', route: 'teacher/my-subjects' },
-{ icon: 'calculator', bg: 'var(--amber-50)', color: 'var(--amber-600)', title: 'Enter Marks', desc: 'Record and submit your marks', route: 'teacher/enter-marks' }
+      { icon: 'calculator', bg: 'var(--amber-50)', color: 'var(--amber-600)', title: 'Enter Marks', desc: 'Record and submit your marks', route: 'teacher/enter-marks' },
+      { icon: 'library-big', bg: 'var(--blue-50)', color: 'var(--blue-600)', title: 'Digital Library', desc: 'Upload assessments, notes, and resources', route: 'teacher/library' }
     ];
     const actionCards = actions.map(a => `
       <button class="action-card" onclick="Router.go('${a.route}')" aria-label="${a.title}">

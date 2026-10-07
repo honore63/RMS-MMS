@@ -194,7 +194,6 @@ function bulkRenderPage() {
         <div><label class="form-label">Term <span class="required">*</span></label>
           <select class="input-field" onchange="bulkPageSet('selTermId', this.value)">${termsOpts}</select></div>
       </div>
-    </div>
       <div class="flex items-center gap-12" style="margin-top:14px;flex-wrap:wrap">
         <label class="checkbox-label" style="margin:0"><input type="checkbox" ${bc.missingZero ? 'checked' : ''} onchange="bulkToggleMissingZero(this.checked)"><span>Count missing marks as zero</span></label>
         <div class="text-xs text-muted">On: a student missing a mark scores 0 for that assessment and is included in the calculation. Off: missing marks are excluded.</div>
@@ -226,7 +225,7 @@ function bulkRenderPage() {
     <div class="card" id="bulk-sec-convert" style="margin-bottom:16px;scroll-margin-top:12px"><div class="card-body">
       <h2 class="page-title" style="font-size:16px">Step 2 · Convert — Target & Review</h2>
       <p class="text-sm text-muted" style="margin-bottom:12px">Set the target maximum and where to record the marks. Each student's percentage is preserved by proportional re-scaling — the review below recalculates instantly. ${bc.missingZero ? 'Missing marks are counted as zero.' : 'Missing marks are excluded — never treated as zero.'}</p>
-      <label class="form-label">Target Maximum Mark <span class="required">*</span></label>
+      <label class="form-label" for="bulk-target">Target Maximum Mark <span class="required">*</span></label>
       <div class="bulk-target-row">
         <input id="bulk-target" type="number" min="1" step="any" class="input-field" style="max-width:160px;font-size:18px;font-weight:700" value="${bc.target}" oninput="bulkTargetLiveInput()">
         <div class="bulk-chips">${chips.map(m => `<button type="button" class="btn btn-sm ${m === bc.target ? 'btn-primary' : 'btn-outline'}" onclick="bulkSetTargetChip(${m})">${m}</button>`).join('')}</div>
@@ -249,6 +248,7 @@ function bulkRenderPage() {
         <button class="btn btn-sm btn-outline" onclick="bulkDownloadExcel()"><i data-lucide="file-spreadsheet"></i> Excel</button>
         <button class="btn btn-sm btn-outline" onclick="bulkDownloadWord()"><i data-lucide="file-text"></i> Word</button>
       </div>
+      <div class="bulk-swipe-hint"><i data-lucide="move-horizontal"></i> Swipe the report preview sideways to view the full page</div>
       <div class="bulk-preview-wrap"><div id="bulk-report-preview" style="min-width:1180px;background:var(--gray-100);border-radius:var(--radius-lg)">${Utils.loading()}</div></div>
       <hr style="margin:16px 0;border:none;border-top:1px solid var(--gray-200)">
       <h3 class="page-title" style="font-size:14px">Confirm & save</h3>
@@ -585,6 +585,7 @@ function bulkReviewHtml() {
       <label class="checkbox-label" style="margin:0"><input type="checkbox" ${bulkOnlyMissing ? 'checked' : ''} onchange="bulkOnlyMissingToggle(this.checked)"><span>Show only students with missing marks (${c.missingCount})</span></label>
       <div class="text-sm text-muted">Showing ${viewRows.length} of ${c.rows.length} students</div>
     </div>
+    <div class="bulk-swipe-hint"><i data-lucide="move-horizontal"></i> Swipe the student table sideways to see all marks and results</div>
     ${bulkReviewView === 'sheet' ? bulkConvertedSheetHtml(viewRows) : `<div class="table-container" style="overflow-x:auto;max-height:560px;overflow-y:auto"><table class="data-table" style="width:100%;min-width:${640 + c.selected.length * 90}px">
       <thead><tr>${thead}</tr></thead>
       <tbody>${tbody || `<tr><td colspan="${12 + c.selected.length}">${Utils.empty('No students in this class', 'users')}</td></tr>`}</tbody>

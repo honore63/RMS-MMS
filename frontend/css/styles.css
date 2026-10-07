@@ -1329,6 +1329,12 @@ body[data-page="parent-marks"] {
   .bulk-toolbar.bulk-review-toolbar { align-items: center; }
   .bulk-toolbar.bulk-review-toolbar .bulk-tabs { width: auto; }
   .bulk-sel { margin-left: 0; }
+  .bulk-stats { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+  .bulk-stats .stat-card { padding: 9px; gap: 7px; }
+  .bulk-stats .stat-card .stat-icon { width: 28px; height: 28px; min-width: 28px; }
+  .bulk-stats .stat-card .stat-label { font-size: 9px; }
+  .bulk-preview-wrap { max-height: 65vh; }
+  .bulk-export-actions .btn { min-height: 38px; }
 }
 
 @media (max-width: 480px) {
@@ -1336,6 +1342,8 @@ body[data-page="parent-marks"] {
   .bulk-target-row #bulk-target { width: 100%; max-width: 100% !important; }
   .bulk-chips .btn { flex: 1 1 auto; }
   .bulk-export-actions .btn { flex: 1 1 auto; justify-content: center; }
+  .bulk-steps { margin-right: -4px; }
+  .bulk-steps > .btn { min-height: 38px; }
 }
 
 /* ============================================================
