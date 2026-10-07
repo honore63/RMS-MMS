@@ -1,15 +1,60 @@
 const Router = {
   current: '',
   routes: {},
+  prefetchers: {},
+  _prefetched: new Set(),
+  _initialized: false,
+  _pendingHash: null,
+  _lastHash: '',
+  beforeNavigate: null,
 
   register(path, handler) {
     this.routes[path] = handler;
   },
 
-  go(path) {
+  registerPrefetch(path, loader) {
+    this.prefetchers[path] = loader;
+  },
+
+  clearPrefetch() {
+    this._prefetched.clear();
+  },
+
+  async go(path) {
+    const destination = String(path || '').split('?')[0];
+    const current = this.current || window.location.hash.slice(1).split('?')[0];
+    const currentHash = this._lastHash || window.location.hash.slice(1);
+    if (current && (current !== destination || currentHash !== String(path)) && this.beforeNavigate) {
+      const allowed = await this.beforeNavigate(current, path);
+      if (allowed === false) return false;
+    }
     this.current = path;
+    if (window.location.hash.slice(1) !== path) this._pendingHash = path;
     window.location.hash = path;
-    this.render();
+    return this.render();
+  },
+
+  prefetch(path) {
+    const route = String(path || '').split('?')[0];
+    const loader = this.prefetchers[route];
+    const userId = typeof Auth !== 'undefined' ? Auth.currentUser?.id : null;
+    const key = `${userId || 'anon'}:${route}`;
+    if (!loader || !userId || this._prefetched.has(key)) return;
+    this._prefetched.add(key);
+    const schedule = () => {
+      if (typeof Auth === 'undefined' || Auth.currentUser?.id !== userId) {
+        this._prefetched.delete(key);
+        return;
+      }
+      Promise.resolve().then(loader).catch(error => {
+        this._prefetched.delete(key);
+        if (typeof DB !== 'undefined' && DB.debug) {
+          console.warn(`[Router prefetch failed] ${route}:`, error);
+        }
+      });
+    };
+    if (typeof requestIdleCallback === 'function') requestIdleCallback(schedule, { timeout: 1200 });
+    else setTimeout(schedule, 0);
   },
 
   async render() {
@@ -17,6 +62,7 @@ const Router = {
     const route = fullRoute.split('?')[0];
     if (!route) return;
     this.current = route;
+    this._lastHash = fullRoute;
     if (!['admin/notifications', 'teacher/notifications'].includes(route)
         && typeof NotificationCenter !== 'undefined') {
       NotificationCenter.hideCenter();
@@ -67,10 +113,42 @@ const Router = {
   },
 
   init() {
-    window.addEventListener('hashchange', () => this.render());
+    if (!this._initialized) {
+      window.addEventListener('hashchange', async () => {
+        const target = window.location.hash.slice(1);
+        if (this._pendingHash === target) {
+          this._pendingHash = null;
+          return;
+        }
+        const destination = target.split('?')[0];
+        const current = this.current.split('?')[0];
+        const previousHash = this._lastHash || current;
+        if (current && destination && previousHash !== target && this.beforeNavigate) {
+          const allowed = await this.beforeNavigate(previousHash, target);
+          if (allowed === false) {
+            this._pendingHash = previousHash || this.current;
+            window.location.hash = this._pendingHash;
+            return;
+          }
+        }
+        this.current = target;
+        this._lastHash = target;
+        this.render();
+      });
+      document.addEventListener('pointerover', event => {
+        const link = event.target.closest?.('[data-route]');
+        if (link) this.prefetch(link.dataset.route);
+      }, { passive: true });
+      document.addEventListener('focusin', event => {
+        const link = event.target.closest?.('[data-route]');
+        if (link) this.prefetch(link.dataset.route);
+      });
+      this._initialized = true;
+    }
     const route = window.location.hash.slice(1);
     if (route) {
       this.current = route;
+      this._lastHash = route;
     }
   }
 };

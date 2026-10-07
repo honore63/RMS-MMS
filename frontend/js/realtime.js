@@ -14,6 +14,7 @@ const Realtime = {
   _handlers: {},       /* table -> Set<fn(payload)> */
   _routes: {},         /* baseRoute -> { tables:Set, guard:fn|null } */
   _pending: new Set(),
+  _eventBatches: new Map(),
   _pollTimer: null,
 
   /* Every shared table that drives the UI (spec: learners, teachers,
@@ -84,6 +85,8 @@ const Realtime = {
     }
     this.inited = false;
     this._pending.clear();
+    this._eventBatches.forEach(batch => clearTimeout(batch.timer));
+    this._eventBatches.clear();
   },
 
   /* Register a handler for a specific table's changes. */
@@ -114,18 +117,31 @@ const Realtime = {
   },
 
   _fire(table, payload) {
-    /* Targeted cache invalidation — only the affected table, never the whole app. */
-    try {
-      if (typeof DB !== 'undefined' && typeof DB.invalidate === 'function') {
-        DB.invalidate(table);
-      }
-    } catch (e) { /* cache invalidation must never break handlers */ }
-
-    const fns = this._handlers[table];
-    if (fns) {
-      fns.forEach(fn => {
-        try { fn(payload); } catch (e) { console.error('[Realtime] handler:', e); }
-      });
+    let batch = this._eventBatches.get(table);
+    if (!batch) {
+      batch = { count: 0, payloads: [], timer: null };
+      this._eventBatches.set(table, batch);
+      /* Invalidate immediately; burst completion repeats invalidation once to
+         cover reads that began while a batch of writes was still arriving. */
+      try {
+        if (typeof DB !== 'undefined' && typeof DB.invalidate === 'function') {
+          DB.invalidate(table);
+        }
+      } catch (e) { /* cache invalidation must never break handlers */ }
+    }
+    batch.count++;
+    batch.payloads.push(payload);
+    if (batch.count === 1) {
+      batch.timer = setTimeout(() => {
+        this._eventBatches.delete(table);
+        if (batch.count > 1 && typeof DB !== 'undefined' && typeof DB.invalidate === 'function') {
+          try { DB.invalidate(table); } catch (e) { /* cache invalidation must not block handlers */ }
+        }
+        const fns = this._handlers[table];
+        if (fns) batch.payloads.forEach(eventPayload => fns.forEach(fn => {
+          try { fn(eventPayload); } catch (e) { console.error('[Realtime] handler:', e); }
+        }));
+      }, 80);
     }
   },
 

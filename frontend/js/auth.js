@@ -24,9 +24,9 @@ const Auth = {
     }
 
     if (data?.user) {
-      if (typeof DB !== 'undefined' && DB.clearUserCache) DB.clearUserCache();
+      if (typeof DB !== 'undefined' && DB.clearUserCache) DB.clearUserCache(data.user.id);
       await this.fetchOrCreateProfile(data.user);
-      if (typeof DB !== 'undefined' && DB.setUserScope) DB.setUserScope(data.user.id);
+      if (typeof Router !== 'undefined' && Router.clearPrefetch) Router.clearPrefetch();
     }
     return data?.user;
   },
@@ -37,6 +37,7 @@ const Auth = {
     this.userProfile = null;
     this.teacherProfile = null;
     if (typeof DB !== 'undefined' && DB.clearUserCache) DB.clearUserCache();
+    if (typeof Router !== 'undefined' && Router.clearPrefetch) Router.clearPrefetch();
   },
 
   generateTeacherCode() {

@@ -1,3 +1,32 @@
+async function loadParentMarksContext(learnerId) {
+  const visibleAssessmentStatuses = ['submitted', 'approved', 'locked'];
+  const [learners, classes, marks, subjects, terms] = await Promise.all([
+    DB.getFresh('learners', { id: learnerId }, { select: 'id,full_name,learner_code,class_id' }),
+    DB.get('classes', {}, { select: 'id,name,education_level' }),
+    DB.getFresh('marks', { learner_id: learnerId }, {
+      select: 'id,assessment_id,learner_id,mark,percentage,grade,status'
+    }),
+    DB.get('subjects', {}, { select: 'id,name,status,level,education_level' }),
+    DB.get('terms', {}, { select: 'id,name,academic_year_id,term_no,status,is_current' })
+  ]);
+  const learner = learners[0] || null;
+  if (!learner) return { learner, classes, assessments: [], marks, subjects, terms };
+
+  const assessmentIds = [...new Set(marks.map(mark => mark.assessment_id).filter(Boolean))];
+  const assessmentBatches = [];
+  for (let i = 0; i < assessmentIds.length; i += 100) {
+    assessmentBatches.push(assessmentIds.slice(i, i + 100));
+  }
+  const assessments = (await Promise.all(assessmentBatches.map(ids =>
+    DB.getFresh('assessments', { id: ids, status: visibleAssessmentStatuses }, {
+      select: 'id,name,display_name,class_id,subject_id,maximum_mark,term_id,assessment_date,status'
+    })
+  ))).flat();
+  const visibleAssessmentIds = new Set(assessments.map(assessment => String(assessment.id)));
+  const visibleMarks = marks.filter(mark => visibleAssessmentIds.has(String(mark.assessment_id)));
+  return { learner, classes, assessments, marks: visibleMarks, subjects, terms };
+}
+
 async function renderParentDashboard() {
   setHeader('Parent Dashboard', 'Your learner\'s academic performance');
   setContent(Utils.loading());
@@ -9,14 +38,7 @@ async function renderParentDashboard() {
       return;
     }
 
-    const [learner, classes, assessments, marks, subjects, terms] = await Promise.all([
-      sbClient.from('learners').select('*').eq('id', learnerId).maybeSingle().then(r => r.data),
-      DB.get('classes').catch(() => []),
-      sbClient.from('assessments').select('*').in('status', ['submitted', 'approved', 'locked']).then(r => r.data || []).catch(() => []),
-      sbClient.from('marks').select('*').eq('learner_id', learnerId).in('status', ['submitted', 'approved', 'locked']).then(r => r.data || []).catch(() => []),
-      DB.get('subjects').catch(() => []),
-      DB.get('terms').catch(() => [])
-    ]);
+    const { learner, classes, assessments, marks, subjects } = await loadParentMarksContext(learnerId);
 
     if (!learner) {
       setContent(Utils.error('Learner record not found.'));
@@ -126,14 +148,7 @@ async function renderParentPerformance() {
       return;
     }
 
-    const [learner, classes, subjects, terms, assessments, marks] = await Promise.all([
-      sbClient.from('learners').select('*').eq('id', learnerId).maybeSingle().then(r => r.data),
-      DB.get('classes').catch(() => []),
-      DB.get('subjects').catch(() => []),
-      DB.get('terms').catch(() => []),
-      sbClient.from('assessments').select('*').in('status', ['submitted', 'approved', 'locked']).then(r => r.data || []).catch(() => []),
-      sbClient.from('marks').select('*').eq('learner_id', learnerId).in('status', ['submitted', 'approved', 'locked']).then(r => r.data || []).catch(() => [])
-    ]);
+    const { learner, classes, subjects, terms, assessments, marks } = await loadParentMarksContext(learnerId);
 
     if (!learner) {
       setContent(Utils.error('Learner record not found.'));
@@ -256,10 +271,10 @@ async function renderParentReports() {
     }
 
     const [learner, classes, years, terms] = await Promise.all([
-      sbClient.from('learners').select('*').eq('id', learnerId).maybeSingle().then(r => r.data),
-      DB.get('classes').catch(() => []),
-      DB.get('academic_years'),
-      DB.get('terms')
+      sbClient.from('learners').select('id,full_name,learner_code,class_id').eq('id', learnerId).maybeSingle().then(r => r.data),
+      DB.get('classes', {}, { select: 'id,name,education_level' }).catch(() => []),
+      DB.get('academic_years', {}, { select: 'id,name,status,is_current' }),
+      DB.get('terms', {}, { select: 'id,name,academic_year_id,term_no,status,is_current' })
     ]);
 
     if (!learner) {
@@ -364,14 +379,19 @@ const ParentReports = {
     }
     preview.innerHTML = Utils.loading();
     try {
-      const card = await ReportStudent.fetchCardData({
-        learnerId: state.learner.id,
-        classId: state.cls.id,
-        yearId: state.yearId,
-        termId: state.termId,
-        termIds: [state.termId],
-        assessmentStatuses: ['submitted', 'approved', 'locked']
+      const { data, error } = await sbClient.rpc('get_student_marks_portal', {
+        p_class_id: state.cls.id,
+        p_learner_code: state.learner.learner_code,
+        p_academic_year_id: state.yearId,
+        p_term_id: state.termId
       });
+      if (error) throw error;
+      if (!data?.student || String(data.student.id) !== String(state.learner.id)
+        || String(data.academic_year?.id) !== String(state.yearId)
+        || String(data.term?.id) !== String(state.termId)) {
+        throw new Error('The report data did not match the selected learner and reporting period.');
+      }
+      const card = await ReportStudent.buildPortalCard(data);
       if (!card.withMarks) {
         preview.innerHTML = '<p class="text-muted">No submitted results are available for this learner in the selected term.</p>';
         return;

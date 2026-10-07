@@ -101,6 +101,12 @@
 .rc-compact-term-table .rc-term-detail strong { display: block; margin-top: 2px; }
 .rc-compact-term-table .rc-overall-cell { font-weight: 700; }
 .rc-no-mark { color: #555; font-style: italic; }
+.rc-below-half,
+.rms-below-half {
+  text-decoration: underline;
+  text-decoration-thickness: 1px;
+  text-underline-offset: 2px;
+}
 
 /* ── HEADER ────────────────────────────────────────────────── */
 .rc-header {
@@ -428,28 +434,17 @@
 
 /* ── RESPONSIVE (screen preview on small devices) ─────────── */
 @media (max-width: 768px) {
-  .rc-paper {
-    width: 100% !important;
-    min-height: 0 !important;
-    padding: 12px !important;
-    box-shadow: none !important;
-  }
-  .rc-paper-fit { width: calc(210mm * var(--rc-view-scale, 1)) !important; height: calc(297mm * var(--rc-view-scale, 1)) !important; min-height: calc(297mm * var(--rc-view-scale, 1)) !important; max-height: calc(297mm * var(--rc-view-scale, 1)) !important; overflow: hidden !important; }
-  .rc-header { flex-wrap: wrap; gap: 8px; }
-  .rc-table-wrapper {
+  .rc-paper-outer {
+    width: 100%;
+    align-items: flex-start;
     overflow-x: auto;
+    overscroll-behavior-x: contain;
     -webkit-overflow-scrolling: touch;
-    padding-bottom: 4px;
   }
-  .rc-data-table { min-width: 760px; }
-  .rc-data-table-dynamic { min-width: max-content; }
-  .rc-data-table-dynamic.rc-compact-term-table { min-width: 0; }
-  .rc-footer-panels { flex-direction: column; }
-  .rc-scale-panel,
-  .rc-desc-panel { width: 100%; }
-  .rc-scale-panel { overflow-x: auto; }
-  .rc-scale-tbl { min-width: 420px; }
-  .rc-footer-panels .rc-desc-box { min-width: 0; }
+  .rc-paper-fit {
+    flex: 0 0 auto;
+    box-shadow: 0 4px 24px rgba(29,78,216,.18);
+  }
 }
 
 /* Compact subject-by-term report matching the student summary layout. */

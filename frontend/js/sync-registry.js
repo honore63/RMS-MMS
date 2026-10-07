@@ -60,11 +60,9 @@ Realtime.route('teacher/analytics', ['assessments', 'assessment_types', 'marks',
      shared table event. Handlers below add cross-table dependency
      invalidation + report/analytics context resets. */
 
-  /* Every marks/assessment change must invalidate all data caches
-      so Analytics, Reports, DOS dashboards and teacher views see fresh
-      marks immediately — no stale DB cache. */
+  /* Invalidate only dependent data and derived report contexts. */
   Realtime.on('marks', () => {
-    DB.invalidateMany(['marks', 'assessments']);
+    DB.invalidate('assessments');
     if (typeof AnalyticsEngine !== 'undefined') AnalyticsEngine.resetContext();
     if (typeof ReportUtils !== 'undefined') {
       ReportUtils.invalidate(); // clear any report caches that used marks
@@ -73,38 +71,28 @@ Realtime.route('teacher/analytics', ['assessments', 'assessment_types', 'marks',
     if (typeof Utils !== 'undefined' && Utils._gradingCache) Utils._gradingCache = null;
   });
   Realtime.on('assessments', () => {
-    DB.invalidateMany(['assessments', 'marks']);
+    DB.invalidate('marks');
     if (typeof AnalyticsEngine !== 'undefined') AnalyticsEngine.resetContext();
     if (typeof ReportUtils !== 'undefined') ReportUtils.invalidate();
   });
   Realtime.on('learners', () => {
-    DB.invalidate('learners');
     if (typeof AnalyticsEngine !== 'undefined') AnalyticsEngine.resetContext();
   });
   Realtime.on('classes', () => {
-    DB.invalidate('classes');
     if (typeof AnalyticsEngine !== 'undefined') AnalyticsEngine.resetContext();
   });
   Realtime.on('subjects', () => {
-    DB.invalidate('subjects');
     if (typeof AnalyticsEngine !== 'undefined') AnalyticsEngine.resetContext();
   });
   Realtime.on('teachers', () => {
-    DB.invalidateMany(['teachers', 'teacher_assignments']);
-  });
-  Realtime.on('teacher_assignments', () => {
     DB.invalidate('teacher_assignments');
   });
   Realtime.on('academic_years', () => {
-    DB.invalidate('academic_years');
-    if (typeof invalidateHeaderYears === 'function') invalidateHeaderYears();
+    if (typeof invalidateHeaderYears === 'function') invalidateHeaderYears(false);
   });
-  Realtime.on('terms', () => DB.invalidate('terms'));
-  Realtime.on('users', () => DB.invalidate('users'));
   let assessmentTypesRenderTimer = null;
   Realtime.on('assessment_types', () => {
-    if (typeof Utils !== 'undefined') Utils.invalidateAssessmentTypeCaches();
-    else DB.invalidate('assessment_types');
+    if (typeof Utils !== 'undefined') Utils.invalidateAssessmentTypeCaches({ skipDb: true });
     if (typeof AnalyticsEngine !== 'undefined') AnalyticsEngine.resetContext();
     clearTimeout(assessmentTypesRenderTimer);
     assessmentTypesRenderTimer = setTimeout(() => {
@@ -113,17 +101,13 @@ Realtime.route('teacher/analytics', ['assessments', 'assessment_types', 'marks',
           && typeof renderAssessmentTypes === 'function') renderAssessmentTypes();
     }, 100);
   });
-  Realtime.on('audit_logs', () => DB.invalidate('audit_logs'));
-
   /* School settings / grading scale changes invalidate report caches
       so reports always regenerate from fresh Supabase data. */
   Realtime.on('school_settings', () => {
-    DB.invalidate('school_settings');
     if (typeof ReportUtils !== 'undefined') ReportUtils.invalidate('settings');
     if (typeof AnalyticsEngine !== 'undefined') AnalyticsEngine.resetContext();
   });
   Realtime.on('grading_scales', () => {
-    DB.invalidate('grading_scales');
     if (typeof ReportUtils !== 'undefined') ReportUtils.invalidate('scale');
     if (typeof Utils !== 'undefined') Utils._gradingCache = null;
     if (typeof AnalyticsEngine !== 'undefined') AnalyticsEngine.resetContext();
@@ -144,8 +128,13 @@ Realtime.route('teacher/analytics', ['assessments', 'assessment_types', 'marks',
 
   /* Keep the unread-notification badge live. NotificationCenter owns the
      toast and in-page list to avoid duplicate realtime alerts. */
-  Realtime.on('notifications', payload => {
-    refreshNotificationBadge();
+  let notificationBadgeTimer = null;
+  Realtime.on('notifications', () => {
+    clearTimeout(notificationBadgeTimer);
+    notificationBadgeTimer = setTimeout(() => {
+      notificationBadgeTimer = null;
+      refreshNotificationBadge();
+    }, 120);
   });
 
   /* ---------- Initial badge load (after login) ---------- */

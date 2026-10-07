@@ -3,15 +3,26 @@ async function renderPrincipalDashboard() {
   setContent(Utils.loading());
 
   try {
-    const [learners, teachers, dosUsers, classes, subjects, assessments, marks, parents] = await Promise.all([
-      DB.get('learners').catch(() => []),
-      DB.get('teachers').catch(() => []),
-      sbClient.from('users').select('*').eq('role', 'dos').then(r => r.data || []).catch(() => []),
-      DB.get('classes').catch(() => []),
-      DB.get('subjects').catch(() => []),
-      DB.get('assessments').catch(() => []),
-      DB.get('marks').catch(() => []),
-      sbClient.from('users').select('*').eq('role', 'parent').then(r => r.data || []).catch(() => [])
+    const [
+      learners, teachers, dosUsers, classes, subjects, assessments,
+      pendingMarks, submittedMarks, approvedMarks, parentCount
+    ] = await Promise.all([
+      DB.get('learners', {}, { select: 'id,class_id' }),
+      DB.get('teachers', {}, { select: 'id,education_level' }),
+      DB.get('users', { role: 'dos' }, { select: 'education_level' }),
+      DB.get('classes', {}, { select: 'id,name,education_level' }),
+      DB.get('subjects', {}, { select: 'id,name' }),
+      DB.query(
+        'assessments',
+        'id,name,class_id,subject_id,status,assessment_date,created_at',
+        {},
+        { column: 'created_at', asc: false },
+        5
+      ),
+      DB.count('marks', { status: 'draft' }),
+      DB.count('marks', { status: 'submitted' }),
+      DB.count('marks', { status: ['submitted', 'approved', 'locked'] }),
+      DB.count('users', { role: 'parent' })
     ]);
 
     const primaryLearners = learners.filter(l => {
@@ -29,13 +40,7 @@ async function renderPrincipalDashboard() {
     const primaryDos = dosUsers.filter(d => d.education_level === 'PRIMARY' || d.education_level === 'Primary');
     const secondaryDos = dosUsers.filter(d => d.education_level === 'SECONDARY' || d.education_level === 'Secondary');
 
-    const pendingMarks = marks.filter(m => m.status === 'draft').length;
-    const submittedMarks = marks.filter(m => m.status === 'submitted').length;
-    const approvedMarks = marks.filter(m => m.status === 'submitted' || m.status === 'approved' || m.status === 'locked').length;
-
-    const recentAssessments = assessments
-      .sort((a, b) => new Date(b.created_at) - new Date(a.created_at))
-      .slice(0, 5);
+    const recentAssessments = assessments;
 
     const statCards = [
       { label: 'Total Learners', value: learners.length, icon: 'users', color: 'blue' },
@@ -47,7 +52,7 @@ async function renderPrincipalDashboard() {
       { label: 'Total DOS', value: dosUsers.length, icon: 'shield', color: 'red' },
       { label: 'Primary DOS', value: primaryDos.length, icon: 'shield', color: 'pink' },
       { label: 'Secondary DOS', value: secondaryDos.length, icon: 'shield', color: 'rose' },
-      { label: 'Parents/Guardians', value: parents.length, icon: 'heart', color: 'amber' },
+      { label: 'Parents/Guardians', value: parentCount, icon: 'heart', color: 'amber' },
       { label: 'Total Classes', value: classes.length, icon: 'school', color: 'cyan' },
       { label: 'Total Subjects', value: subjects.length, icon: 'book-open', color: 'lime' },
       { label: 'Pending Marks', value: pendingMarks, icon: 'clock', color: 'yellow' },

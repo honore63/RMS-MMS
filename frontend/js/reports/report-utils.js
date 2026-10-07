@@ -184,6 +184,11 @@ const ReportUtils = {
     return DB.query('assessments', '*', filter || {}, { column: 'assessment_date', asc: false });
   },
 
+  includeSubmittedAssessmentStatus(statuses) {
+    if (!Array.isArray(statuses) || !statuses.length) return statuses;
+    return [...new Set([...statuses, 'submitted'])];
+  },
+
   async getAssessmentTypes() {
   if (this._cache.has('assessmentTypes')) return this._cache.get('assessmentTypes');
   let res = [];
@@ -210,7 +215,49 @@ const ReportUtils = {
   async getMarksForLearners(learnerIds, filters = {}) {
     const ids = (learnerIds || []).filter(Boolean);
     if (!ids.length) return [];
-    return DB.query('marks', '*', { ...filters, learner_id: ids });
+    return this.getFreshMarks({ ...filters, learner_id: ids });
+  },
+
+  async getFreshMarks(filters = {}, order = null, select = '*') {
+    const filterEntries = Object.entries(filters || {});
+    if (filterEntries.some(([, value]) => Array.isArray(value) && value.length === 0)) return [];
+    const batches = filterEntries
+      .filter(([, value]) => Array.isArray(value) && value.length > 50)
+      .map(([key, values]) => [key, [...new Set(values)], 50]);
+    if (!batches.length) return DB.getFreshQuery('marks', select, filters, order);
+
+    const batchFilters = new Map(batches.map(([key, values, size]) => [
+      key,
+      Array.from({ length: Math.ceil(values.length / size) }, (_, index) =>
+        values.slice(index * size, (index + 1) * size))
+    ]));
+    const jobCount = [...batchFilters.values()].reduce((count, values) => count * values.length, 1);
+    if (jobCount > 120) {
+      throw new Error('This report selection is too large to load at once. Narrow it by class, subject, or term and try again.');
+    }
+    const jobs = [];
+    const keys = [...batchFilters.keys()];
+    const enqueue = (index, partial) => {
+      if (index === keys.length) {
+        const merged = { ...filters, ...partial };
+        jobs.push(() => DB.getFreshQuery('marks', select, merged, order));
+        return;
+      }
+      const key = keys[index];
+      batchFilters.get(key).forEach(values => enqueue(index + 1, { ...partial, [key]: values }));
+    };
+    enqueue(0, {});
+
+    const results = new Array(jobs.length);
+    let next = 0;
+    const worker = async () => {
+      while (next < jobs.length) {
+        const index = next++;
+        results[index] = await jobs[index]();
+      }
+    };
+    await Promise.all(Array.from({ length: Math.min(3, jobs.length) }, worker));
+    return results.flat();
   },
 
   formatPct(v) {

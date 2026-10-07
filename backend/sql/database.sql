@@ -1189,8 +1189,9 @@ $fn$;
 CREATE OR REPLACE FUNCTION public.rms_account_can_learner(p_learner_id UUID)
 RETURNS BOOLEAN LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public, pg_temp AS $fn$
   SELECT CASE public.rms_account_role()
-    WHEN 'dos' THEN EXISTS (SELECT 1 FROM public.learners l JOIN public.classes c ON c.id = l.class_id
-      WHERE l.id = p_learner_id AND public.rms_dos_can_level(c.education_level))
+    -- DOS visibility is enforced by the separate learner level-scope policies.
+    -- Avoid looking up each learner row again from its own restrictive policy.
+    WHEN 'dos' THEN true
     WHEN 'teacher' THEN EXISTS (SELECT 1 FROM public.learners l JOIN public.teacher_assignments ta ON ta.class_id = l.class_id
       WHERE l.id = p_learner_id AND ta.teacher_id = public.rms_account_teacher_id())
       OR EXISTS (SELECT 1 FROM public.learners l JOIN public.classes c ON c.id = l.class_id

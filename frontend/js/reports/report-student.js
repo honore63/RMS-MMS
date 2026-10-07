@@ -47,17 +47,24 @@ const ReportStudent = {
     };
     const assessBatches = chunk(assessIds, 10);
     const learnerBatches = learnerIds && learnerIds.length ? chunk(learnerIds, 10) : [null];
-    let out = [];
-    for (const aBatch of assessBatches) {
-      for (const lBatch of learnerBatches) {
-        let q = sbClient.from('marks').select('id,assessment_id,learner_id,mark').in('assessment_id', aBatch);
-        if (lBatch) q = q.in('learner_id', lBatch);
-        const { data, error } = await q;
-        if (error) throw error;
-        out = out.concat(data || []);
+    const jobs = assessBatches.flatMap(aBatch => learnerBatches.map(lBatch => ({
+      assessment_id: aBatch,
+      ...(lBatch ? { learner_id: lBatch } : {})
+    })));
+    const results = new Array(jobs.length);
+    let next = 0;
+    const worker = async () => {
+      while (next < jobs.length) {
+        const index = next++;
+        results[index] = await DB.getFreshQuery(
+          'marks',
+          'id,assessment_id,learner_id,mark',
+          jobs[index]
+        );
       }
-    }
-    return out;
+    };
+    await Promise.all(Array.from({ length: Math.min(3, jobs.length) }, worker));
+    return results.flat();
   },
 
   /* ---------- Validation ---------- */
@@ -110,7 +117,7 @@ const ReportStudent = {
     }
     /* General staff reports include every stored status unless a caller limits them. */
     const official = assessmentStatuses && assessmentStatuses.length
-      ? list.filter(a => assessmentStatuses.includes(a.status))
+      ? list.filter(a => ReportUtils.includeSubmittedAssessmentStatus(assessmentStatuses).includes(a.status))
       : list;
     if (assessmentIds && assessmentIds.length) {
       const selectedIds = new Set(assessmentIds.map(String));
@@ -125,7 +132,7 @@ const ReportStudent = {
     const drafts = list.filter(a => !['approved', 'locked', 'submitted'].includes(a.status));
     let approval = 'DRAFT';
     if (official.length && !drafts.length && official.every(a => ['approved', 'locked'].includes(a.status))) approval = 'APPROVED';
-    else if (official.length || pending.length) approval = 'PENDING APPROVAL';
+    else if (official.length || pending.length) approval = 'SUBMITTED';
     return { all: list, official, pending, drafts, approval };
   },
 
@@ -186,13 +193,9 @@ const ReportStudent = {
           availableWidth / Math.max(bounds.width, 1),
           availableHeight / Math.max(bounds.height, 1)
         );
-        const viewScale = Math.min(
-          1,
-          Math.max(0.01, (document.documentElement.clientWidth - 16) / page.clientWidth)
-        );
         page.removeAttribute('style');
         page.style.setProperty('--src-fit-scale', String(Math.max(scale, 0.01)));
-        page.style.setProperty('--src-view-scale', String(viewScale));
+        page.style.setProperty('--src-view-scale', '1');
         sheet.removeAttribute('style');
       });
       return probe.innerHTML;
@@ -281,49 +284,42 @@ const ReportStudent = {
         const rows = (subjects || []).map(subject => {
           const related = periodAssessments.filter(assessment =>
             String(assessment.subject_id) === String(subject.id));
-          const valid = related
-            .map(assessment => marks.find(mark =>
-              String(mark.assessment_id) === String(assessment.id)))
-            .filter(mark => mark && mark.mark != null && mark.mark !== '');
+          const scored = related.map(assessment => {
+            const mark = marks.find(item =>
+              String(item.assessment_id) === String(assessment.id));
+            return mark && mark.mark != null && mark.mark !== ''
+              ? mark
+              : { assessment_id: assessment.id, mark: 0 };
+          });
           const components = columns.map(column => {
             const componentAssessments = related.filter(assessment => this.colMatches(column, assessment));
-            const componentMarks = componentAssessments
-              .map(assessment => marks.find(mark =>
-                String(mark.assessment_id) === String(assessment.id)))
-              .filter(mark => mark && mark.mark != null && mark.mark !== '');
-            if (!componentMarks.length) return null;
-            const maximum = componentMarks.reduce((sum, mark) => {
-              const assessment = componentAssessments.find(item =>
-                String(item.id) === String(mark.assessment_id));
-              return sum + Number(assessment?.maximum_mark || 0);
-            }, 0);
+            if (!componentAssessments.length) return null;
+            const componentMarks = componentAssessments.map(assessment =>
+              scored.find(mark => String(mark.assessment_id) === String(assessment.id)));
+            const maximum = componentAssessments.reduce((sum, assessment) =>
+              sum + Number(assessment.maximum_mark || 0), 0);
             return {
               obtained: componentMarks.reduce((sum, mark) => sum + Number(mark.mark), 0),
               maximum
             };
           });
-          const percentage = valid.length
-            ? this.subjectPct(valid, related, types)
+          const percentage = scored.length
+            ? this.subjectPct(scored, related, types)
             : null;
-          const obtained = valid.reduce((sum, mark) => sum + Number(mark.mark), 0);
-          const maximum = valid.reduce((sum, mark) => {
-            const assessment = related.find(item =>
-              String(item.id) === String(mark.assessment_id));
-            return sum + Number(assessment?.maximum_mark || 0);
-          }, 0);
+          const obtained = scored.reduce((sum, mark) => sum + Number(mark.mark), 0);
+          const maximum = related.reduce((sum, assessment) =>
+            sum + Number(assessment.maximum_mark || 0), 0);
           return {
             subject,
             components,
             details: related.map(assessment => {
-              const mark = marks.find(item =>
+              const mark = scored.find(item =>
                 String(item.assessment_id) === String(assessment.id));
               const column = columns.find(item => this.colMatches(item, assessment));
               return {
                 code: column?.code || column?.name || 'Assessment',
                 label: assessment.period_label || assessment.name || column?.name || 'Assessment',
-                obtained: mark && mark.mark != null && mark.mark !== ''
-                  ? Number(mark.mark)
-                  : null,
+                obtained: Number(mark.mark),
                 maximum: Number(assessment.maximum_mark || 0),
                 weight: this.effWeight(assessment, types)
               };
@@ -332,7 +328,7 @@ const ReportStudent = {
               .filter(assessment => String(assessment.subject_id) === String(subject.id)
                 && this.colMatches(column, assessment))
               .reduce((sum, assessment) => sum + Number(assessment.maximum_mark || 0), 0)),
-            obtained: valid.length ? obtained : null,
+            obtained: scored.length ? obtained : null,
             maximum,
             percentage,
             grade: percentage == null ? '—' : ReportUtils.calcGrade(percentage, scale).grade
@@ -423,24 +419,25 @@ const ReportStudent = {
       const sAssess = official.filter(a => String(a.subject_id) === String(subj.id));
       const sMarks = myMarks.filter(m => sAssess.some(a => String(a.id) === String(m.assessment_id)));
       const valid = sMarks.filter(m => m.mark != null && m.mark !== '');
-      if (!sAssess.length || !valid.length) {
+      if (!sAssess.length) {
         subjRows.push({ subject: subj, components: columns.map(() => null), obtained: null, maxMark: sAssess.reduce((s, a) => s + Number(a.maximum_mark || 0), 0), pct: null, grade: '—', status: 'Missing', remark: 'No mark available.', hasMarks: false });
         continue;
       }
+      const scored = sAssess.map(assessment => {
+        const mark = valid.find(item => String(item.assessment_id) === String(assessment.id));
+        return mark || { assessment_id: assessment.id, mark: 0 };
+      });
       const components = columns.map(col => {
         const colAssess = sAssess.filter(a => this.colMatches(col, a));
-        const rel = valid.filter(m => colAssess.some(a => String(a.id) === String(m.assessment_id)));
-        if (!rel.length) return null;
+        if (!colAssess.length) return null;
+        const rel = scored.filter(m => colAssess.some(a => String(a.id) === String(m.assessment_id)));
         const obt = rel.reduce((s, m) => s + Number(m.mark), 0);
         const mx = colAssess.reduce((s, a) => s + Number(a.maximum_mark || 0), 0);
         return { obtained: obt, max: mx };
       });
-      const obt = valid.reduce((s, m) => s + Number(m.mark), 0);
-      const mx = sAssess.reduce((s, a) => {
-        const has = valid.some(m => String(m.assessment_id) === String(a.id));
-        return has ? s + Number(a.maximum_mark || 0) : s;
-      }, 0);
-      const pct = this.subjectPct(valid, sAssess, types);
+      const obt = scored.reduce((s, m) => s + Number(m.mark), 0);
+      const mx = sAssess.reduce((s, a) => s + Number(a.maximum_mark || 0), 0);
+      const pct = this.subjectPct(scored, sAssess, types);
       const g = ReportUtils.calcGrade(pct == null ? 0 : pct, scale);
       const pf = pct == null ? 'Missing' : ReportUtils.calcPassFail(pct, passMark);
       const remark = pct == null ? 'No mark available.' : await ReportComments.getSubjectRemark(pct, { level: level.short, scale });
@@ -819,7 +816,8 @@ const ReportStudent = {
       obtained: 0,
       maximum: 0,
       percentages: [],
-      components: new Map(componentColumns.map(column => [column.key, 0]))
+      components: new Map(componentColumns.map(column => [column.key, 0])),
+      componentMaximums: new Map(componentColumns.map(column => [column.key, 0]))
     }]));
     const overallTotals = { obtained: 0, maximum: maximumTotal, percentages: [] };
     const totalColumnCount = card.annualMode === false ? 0 : 4;
@@ -861,12 +859,23 @@ const ReportStudent = {
         const complete = assessments.length > 0 && assessments.every(detail => detail.obtained != null);
         const componentCells = period.columns.map((column, columnIndex) => {
           const index = componentIndex(period, column);
-          const value = index < 0 ? null : details[index]?.obtained;
+          const component = index < 0 ? null : details[index];
+          const value = component?.obtained;
+          if (component) {
+            const totals = termTotals.get(String(period.id));
+            totals.componentMaximums.set(column.key,
+              (totals.componentMaximums.get(column.key) || 0) + Number(component.maximum || 0));
+          }
           if (value != null) {
             const totals = termTotals.get(String(period.id));
             totals.components.set(column.key, (totals.components.get(column.key) || 0) + Number(value));
           }
-          return `<td${columnIndex === 0 ? ' class="src-term-start"' : ''}>${value == null ? '' : fmtMark(value)}</td>`;
+          const classes = [
+            columnIndex === 0 ? 'src-term-start' : '',
+            value != null && Number(component?.maximum) > 0 && Number(value) < Number(component.maximum) / 2
+              ? 'src-below-half' : ''
+          ].filter(Boolean).join(' ');
+          return `<td${classes ? ` class="${classes}"` : ''}>${value == null ? '' : fmtMark(value)}</td>`;
         }).join('');
         const obtained = assessments.reduce((sum, detail) =>
           sum + Number(detail.obtained == null ? 0 : detail.obtained), 0);
@@ -879,12 +888,13 @@ const ReportStudent = {
         if (row?.percentage != null) {
           totals.percentages.push(row.percentage);
         }
-        return `${componentCells}<td class="src-term-total">${assessments.length ? fmtMark(obtained) : ''}</td><td>${percentage == null ? '' : `${percentage.toFixed(1)}%`}</td><td>${Utils.escapeHtml(grade)}</td>`;
+        const totalClass = totalMaximum > 0 && obtained < totalMaximum / 2 ? ' src-below-half' : '';
+        return `${componentCells}<td class="src-term-total${totalClass}">${assessments.length ? fmtMark(obtained) : ''}</td><td>${percentage == null ? '' : `${percentage.toFixed(1)}%`}</td><td>${Utils.escapeHtml(grade)}</td>`;
       }).join('');
       const allDetails = periods.flatMap(period => (periodRow(period, subjectRow.subject.id)?.details || []));
       const completeOverall = allDetails.length > 0 && allDetails.every(detail => detail.obtained != null);
       const annualScore = subjectRow.hasMarks
-        ? `<td class="src-overall-cell">${fmtMark(subjectRow.obtained)}</td><td class="src-maximum-cell">${fmtMark(maximum)}</td><td>${completeOverall && subjectRow.pct != null ? `${subjectRow.pct.toFixed(1)}%` : ''}</td><td>${completeOverall ? Utils.escapeHtml(subjectRow.grade) : allDetails.length ? 'Incomplete' : ''}</td>`
+        ? `<td class="src-overall-cell${maximum > 0 && subjectRow.obtained < maximum / 2 ? ' src-below-half' : ''}">${fmtMark(subjectRow.obtained)}</td><td class="src-maximum-cell">${fmtMark(maximum)}</td><td>${completeOverall && subjectRow.pct != null ? `${subjectRow.pct.toFixed(1)}%` : ''}</td><td>${completeOverall ? Utils.escapeHtml(subjectRow.grade) : allDetails.length ? 'Incomplete' : ''}</td>`
         : `<td class="src-overall-cell"></td><td class="src-maximum-cell">${fmtMark(maximum)}</td><td></td><td>${allDetails.length ? 'Incomplete' : ''}</td>`;
       if (subjectRow.hasMarks) {
         overallTotals.obtained += subjectRow.obtained;
@@ -905,10 +915,21 @@ const ReportStudent = {
         ? totals.obtained / totals.maximum * 100
         : null;
       const grade = percentage == null ? '' : ReportUtils.calcGrade(percentage, card.scale).grade;
-      const componentTotals = period.columns.map((column, index) =>
-        `<td${index === 0 ? ' class="src-term-start"' : ''}>${totals.components.get(column.key) ? fmtMark(totals.components.get(column.key)) : ''}</td>`
-      ).join('');
-      return `${componentTotals}<td class="src-term-total${period.columns.length ? '' : ' src-term-start'}">${totals.obtained ? fmtMark(totals.obtained) : ''}</td><td>${percentage == null ? '' : `${percentage.toFixed(1)}%`}</td><td>${Utils.escapeHtml(grade)}</td>`;
+      const componentTotals = period.columns.map((column, index) => {
+        const obtained = totals.components.get(column.key) || 0;
+        const maximum = totals.componentMaximums.get(column.key) || 0;
+        const classes = [
+          index === 0 ? 'src-term-start' : '',
+          maximum > 0 && obtained < maximum / 2 ? 'src-below-half' : ''
+        ].filter(Boolean).join(' ');
+        return `<td${classes ? ` class="${classes}"` : ''}>${totals.components.has(column.key) ? fmtMark(obtained) : ''}</td>`;
+      }).join('');
+      const totalClasses = [
+        'src-term-total',
+        period.columns.length ? '' : 'src-term-start',
+        totals.maximum > 0 && totals.obtained < totals.maximum / 2 ? 'src-below-half' : ''
+      ].filter(Boolean).join(' ');
+      return `${componentTotals}<td class="${totalClasses}">${fmtMark(totals.obtained)}</td><td>${percentage == null ? '' : `${percentage.toFixed(1)}%`}</td><td>${Utils.escapeHtml(grade)}</td>`;
     }).join('');
     const overallPercentage = overallTotals.maximum > 0
       ? overallTotals.obtained / overallTotals.maximum * 100
@@ -917,7 +938,7 @@ const ReportStudent = {
     const totalMarkup = `<tr class="src-total-row">
       <td class="src-subject">Total</td>${maximumComponentTotals}<td class="src-maximum-cell">${maximumAll ? fmtMark(maximumAll) : ''}</td>
       ${totalCells}
-      ${card.annualMode === false ? '' : `<td class="src-term-total">${overallTotals.obtained ? fmtMark(overallTotals.obtained) : ''}</td><td class="src-maximum-cell">${fmtMark(maximumAll)}</td><td>${overallPercentage == null ? '' : `${overallPercentage.toFixed(1)}%`}</td><td>${Utils.escapeHtml(overallGrade)}</td>`}
+      ${card.annualMode === false ? '' : `<td class="src-term-total${maximumAll > 0 && overallTotals.obtained < maximumAll / 2 ? ' src-below-half' : ''}">${fmtMark(overallTotals.obtained)}</td><td class="src-maximum-cell">${fmtMark(maximumAll)}</td><td>${overallPercentage == null ? '' : `${overallPercentage.toFixed(1)}%`}</td><td>${Utils.escapeHtml(overallGrade)}</td>`}
     </tr>`;
     const table = `<div class="src-multi-term-wrap src-reference-matrix-wrap"><table class="src-table src-multi-term-table src-compact-term-table src-reference-matrix">
       <thead>${headerMarkup}</thead>
@@ -930,7 +951,7 @@ const ReportStudent = {
     const posText = card.position ? `${card.position} out of ${card.positionOutOf}` : 'Not available';
 
     return `
-    <div class="src-sheet ${densityClass}">
+    <div class="src-sheet src-report-card-fixed ${densityClass}">
       <div class="src-header">
         <div class="src-head-left">
           <img src="${Utils.escapeHtml(ministryLogo)}" class="src-logo" alt="Ministry logo" onerror="this.style.display='none'">

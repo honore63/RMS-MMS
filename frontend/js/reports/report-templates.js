@@ -311,12 +311,12 @@ const ReportTemplates = {
   },
 
   teacherPerformance(data) {
-    const { settings, year, term, teacher, assessments, approvedAssessments, submittedAssessments, stats } = data;
+    const { settings, year, term, teacher, assessments, submittedOrFinalAssessments, submittedAssessments, stats } = data;
     const header = ReportHeader.getOfficialHeader({ settings, title: 'TEACHER PERFORMANCE REPORT', subtitle: teacher?.full_name || '' });
 
     const tbody = `
       <tr><td colspan="4"><strong>Teacher:</strong> ${Utils.escapeHtml(teacher?.full_name || '-')}</td></tr>
-      <tr><td colspan="4"><strong>Total Assessments:</strong> ${assessments.length} | Approved/Locked: ${approvedAssessments.length} | Submitted: ${submittedAssessments.length}</td></tr>
+      <tr><td colspan="4"><strong>Total Assessments:</strong> ${assessments.length} | Submitted/Approved/Locked: ${submittedOrFinalAssessments.length} | Submitted: ${submittedAssessments.length}</td></tr>
       <tr><td colspan="4"><strong>Learners Assessed:</strong> ${stats.total} | Average: ${ReportUtils.formatPct(stats.avg)} | Pass Rate: ${ReportUtils.formatPct(stats.passRate)}</td></tr>
     `;
 
@@ -408,7 +408,8 @@ const ReportTemplates = {
     let tbody = '';
     (rows || []).forEach((r, i) => {
       const badge = r.passFail === 'PASS' ? 'badge-success' : r.passFail === 'FAIL' ? 'badge-danger' : 'badge-warning';
-      tbody += `<tr><td class="text-center">${i + 1}</td><td>${Utils.escapeHtml(r.assessment.display_name || r.assessment.name)}</td><td>${Utils.escapeHtml(r.type)}</td><td>${Utils.escapeHtml(r.subject)}</td><td class="text-center">${Utils.escapeHtml((r.date || '').slice(0, 10))}</td><td class="text-center">${r.max}</td><td class="text-center font-bold">${r.mark == null ? '—' : r.mark}</td><td class="text-center">${r.pct == null ? 'N/A' : r.pct.toFixed(1) + '%'}</td><td class="text-center font-bold">${r.grade}</td><td class="text-center"><span class="badge ${badge}">${Utils.escapeHtml(r.passFail)}</span></td></tr>`;
+      const belowHalf = r.mark != null && r.max > 0 && r.mark < r.max / 2;
+      tbody += `<tr><td class="text-center">${i + 1}</td><td>${Utils.escapeHtml(r.assessment.display_name || r.assessment.name)}</td><td>${Utils.escapeHtml(r.type)}</td><td>${Utils.escapeHtml(r.subject)}</td><td class="text-center">${Utils.escapeHtml((r.date || '').slice(0, 10))}</td><td class="text-center">${r.max}</td><td class="text-center font-bold${belowHalf ? ' rms-below-half' : ''}">${r.mark == null ? '—' : r.mark}</td><td class="text-center">${r.pct == null ? 'N/A' : r.pct.toFixed(1) + '%'}</td><td class="text-center font-bold">${r.grade}</td><td class="text-center"><span class="badge ${badge}">${Utils.escapeHtml(r.passFail)}</span></td></tr>`;
     });
 
     const incomplete = data.missingMarks > 0 ? ReportHeader.warningBanner(`${data.missingMarks} assessment mark(s) are missing for this student. The report cannot be finalised until they are entered.`) : '';

@@ -212,12 +212,13 @@ async function rcFetchLearnerData({ learnerId, classId, yearId, termIds, allSubj
     .sort((a,b) => a.name.localeCompare(b.name));
   const activeSubjectIds = new Set(activeSubjects.map(subject => String(subject.id)));
 
-  const [submittedA, approvedA, lockedA] = await Promise.all([
-    DB.query('assessments','*',{ class_id: classId, academic_year_id: yearId || undefined, status:'submitted' }),
-    DB.query('assessments','*',{ class_id: classId, academic_year_id: yearId || undefined, status:'approved' }),
-    DB.query('assessments','*',{ class_id: classId, academic_year_id: yearId || undefined, status:'locked' })
-  ]);
-  const allAssessments = [...lockedA, ...approvedA, ...submittedA]
+  const reportStatuses = ReportUtils.includeSubmittedAssessmentStatus(['approved', 'locked']);
+  const reportAssessments = await DB.query('assessments', '*', {
+    class_id: classId,
+    academic_year_id: yearId || undefined,
+    status: reportStatuses
+  });
+  const allAssessments = reportAssessments
     .filter(a => !(Utils.isConversionHelper && Utils.isConversionHelper(a)))
     .filter(a => selectedTermIds.has(String(a.term_id)))
     .filter(a => activeSubjectIds.has(String(a.subject_id)));
@@ -313,7 +314,12 @@ function rcComponentColumns(assessments, types) {
 function rcCalcSubject(sub, termAssessments, marksForLearner, scale, types = []) {
   const subAssessments = (termAssessments || []).filter(a => String(a.subject_id) === String(sub.id));
   const byAssessment = new Map((marksForLearner || []).map(mark => [String(mark.assessment_id), mark]));
-  const marks = subAssessments.map(a => byAssessment.get(String(a.id))).filter(mark => mark && mark.mark != null && mark.mark !== '');
+  const marks = subAssessments.map(assessment => {
+    const mark = byAssessment.get(String(assessment.id));
+    return mark && mark.mark != null && mark.mark !== ''
+      ? mark
+      : { assessment_id: assessment.id, mark: 0 };
+  });
   const pct = marks.length
     ? (typeof AnalyticsEngine !== 'undefined' && AnalyticsEngine.learnerPct
       ? AnalyticsEngine.learnerPct(marks, subAssessments, types)
@@ -322,34 +328,29 @@ function rcCalcSubject(sub, termAssessments, marksForLearner, scale, types = [])
   const components = new Map();
   rcComponentColumns(subAssessments, types).forEach(column => {
     const componentAssessments = column.assessments;
-    const componentMarks = componentAssessments.map(a => byAssessment.get(String(a.id)))
-      .filter(mark => mark && mark.mark != null && mark.mark !== '');
+    const componentMarks = componentAssessments.map(assessment =>
+      marks.find(mark => String(mark.assessment_id) === String(assessment.id)));
     const obtained = componentMarks.reduce((sum, mark) => sum + Number(mark.mark), 0);
     const maximum = componentAssessments.reduce((sum, a) => sum + Number(a.maximum_mark || 0), 0);
     components.set(column.key, {
-      obtained: componentMarks.length ? obtained : null,
-      scoredMaximum: componentMarks.reduce((sum, mark) => {
-        const assessment = componentAssessments.find(a => String(a.id) === String(mark.assessment_id));
-        return sum + Number(assessment?.maximum_mark || 0);
-      }, 0),
+      obtained: componentAssessments.length ? obtained : null,
+      scoredMaximum: maximum,
       maximum,
       count: componentAssessments.length
     });
   });
   const obtained = marks.reduce((sum, mark) => sum + Number(mark.mark), 0);
-  const maximum = marks.reduce((sum, mark) => {
-    const assessment = subAssessments.find(a => String(a.id) === String(mark.assessment_id));
-    return sum + Number(assessment?.maximum_mark || 0);
-  }, 0);
+  const maximum = subAssessments.reduce((sum, assessment) =>
+    sum + Number(assessment.maximum_mark || 0), 0);
   const grade = pct == null ? '' : rcGrade(pct, scale);
   return {
     subjectId: sub.id,
     components,
-    obtained: marks.length ? obtained : null,
+    obtained: subAssessments.length ? obtained : null,
     maximum,
     pct,
     grade,
-    hasMarks: marks.length > 0
+    hasMarks: subAssessments.length > 0
   };
 }
 
@@ -459,10 +460,6 @@ function rcFitReportPages(root) {
     const mmToPx = pageWidth / 210;
     const availableWidth = pageWidth - 10 * mmToPx;
     const availableHeight = pageHeight - 10 * (pageHeight / 297);
-    const viewScale = Math.min(
-      1,
-      Math.max(0.01, (document.documentElement.clientWidth - 16) / pageWidth)
-    );
     const scale = Math.min(
       1,
       availableWidth / Math.max(bounds.width, 1),
@@ -470,7 +467,7 @@ function rcFitReportPages(root) {
     );
     page.removeAttribute('style');
     page.style.setProperty('--rc-fit-scale', String(Math.max(scale, 0.01)));
-    page.style.setProperty('--rc-view-scale', String(viewScale));
+    page.style.setProperty('--rc-view-scale', '1');
     content.removeAttribute('style');
   });
 }
@@ -513,10 +510,7 @@ function rcRenderCard(learner, d) {
     ${termCols.map(term => `<th>${Utils.escapeHtml(term.name)}${d.year?.name ? ` / ${Utils.escapeHtml(d.year.name)}` : ''}</th>`).join('')}
     ${showAnn ? '<th>OVERALL</th>' : ''}
   </tr>`;
-  const isComplete = assessments => assessments.length > 0 && assessments.every(assessment => {
-    const mark = mMarks.find(item => String(item.assessment_id) === String(assessment.id));
-    return mark && mark.mark != null && mark.mark !== '';
-  });
+  const isComplete = assessments => assessments.length > 0;
   const renderAssessmentDetails = assessments => {
     if (!assessments.length) return '<span class="rc-no-assessment">No assessment</span>';
     return assessments.map(assessment => {
@@ -525,8 +519,10 @@ function rcRenderCard(learner, d) {
       const mark = mMarks.find(item => String(item.assessment_id) === String(assessment.id));
       const markText = mark && mark.mark != null && mark.mark !== ''
         ? numberText(Number(mark.mark))
-        : '—';
-      return `<span class="rc-assessment-mark"><b>${Utils.escapeHtml(component?.code || rcAssessmentComponentLabel(assessment, types))}</b>${label ? ` ${Utils.escapeHtml(label)}` : ''} ${markText}/${numberText(Number(assessment.maximum_mark || 0))}</span>`;
+        : '0';
+      const maximum = Number(assessment.maximum_mark || 0);
+      const markClass = maximum > 0 && Number(markText) < maximum / 2 ? ' rc-below-half' : '';
+      return `<span class="rc-assessment-mark"><b>${Utils.escapeHtml(component?.code || rcAssessmentComponentLabel(assessment, types))}</b>${label ? ` ${Utils.escapeHtml(label)}` : ''} <span class="${markClass.trim()}">${markText}</span>/${numberText(maximum)}</span>`;
     }).join(' ');
   };
   let tbody = `<tr class="rc-all-subjects-row"><td colspan="${tableColumnCount}">All Subjects</td></tr>`;
@@ -539,9 +535,13 @@ function rcRenderCard(learner, d) {
       const assessments = (assessmentsByTerm.get(String(term.id)) || [])
         .filter(assessment => String(assessment.subject_id) === String(subject.id));
       const complete = isComplete(assessments);
-      const scoreSummary = complete && score?.hasMarks
-        ? `<strong>${numberText(score.obtained)}/${numberText(score.maximum)} · ${score.pct.toFixed(1)}% ${Utils.escapeHtml(score.grade)}</strong>`
-        : '<strong>Incomplete</strong>';
+      const termMaximum = assessments.reduce((sum, assessment) =>
+        sum + Number(assessment.maximum_mark || 0), 0);
+      const scoreSummary = complete && score?.hasMarks && score.pct != null
+        ? `<strong><span class="${score.maximum > 0 && score.obtained < score.maximum / 2 ? 'rc-below-half' : ''}">${numberText(score.obtained)}</span>/${numberText(score.maximum)} · ${score.pct.toFixed(1)}% ${Utils.escapeHtml(score.grade)}</strong>`
+        : assessments.length
+          ? `<strong><span class="${termMaximum > 0 ? 'rc-below-half' : ''}">0</span>/${numberText(termMaximum)} · 0.0%</strong>`
+          : '<strong>No assessment</strong>';
       row += `<td class="rc-term-detail"><div>${renderAssessmentDetails(assessments)}</div>${scoreSummary}</td>`;
       const termTotal = termTotals.get(String(term.id));
       termTotal.maximum += assessments.reduce((sum, assessment) =>
@@ -560,8 +560,8 @@ function rcRenderCard(learner, d) {
       const maximum = assessments.reduce((sum, assessment) =>
         sum + Number(assessment.maximum_mark || 0), 0);
       const overallSummary = annual?.hasMarks
-        ? `<strong>${numberText(annual.obtained)}/${numberText(maximum)}${complete && annual.pct != null ? `<br>${annual.pct.toFixed(1)}% ${Utils.escapeHtml(annual.grade)}` : ''}</strong>`
-        : `<strong>—/${numberText(maximum)}</strong>`;
+        ? `<strong><span class="${maximum > 0 && annual.obtained < maximum / 2 ? 'rc-below-half' : ''}">${numberText(annual.obtained)}</span>/${numberText(maximum)}${complete && annual.pct != null ? `<br>${annual.pct.toFixed(1)}% ${Utils.escapeHtml(annual.grade)}` : ''}</strong>`
+        : `<strong><span class="${maximum > 0 ? 'rc-below-half' : ''}">0</span>/${numberText(maximum)}</strong>`;
       row += `<td class="rc-overall-cell">${overallSummary}</td>`;
       if (complete && annual?.hasMarks) {
         annualTotal.obtained += annual.obtained;
@@ -579,11 +579,11 @@ function rcRenderCard(learner, d) {
   termCols.forEach(term => {
     const total = termTotals.get(String(term.id));
     const pct = average(total.percentages);
-    totalRow += `<td><strong>${numberText(total.obtained)}/${numberText(total.maximum)}${pct == null ? '' : `<br>${pct.toFixed(1)}% ${Utils.escapeHtml(rcGrade(pct, d.scale))}`}</strong></td>`;
+    totalRow += `<td><strong><span class="${total.maximum > 0 && total.obtained < total.maximum / 2 ? 'rc-below-half' : ''}">${numberText(total.obtained)}</span>/${numberText(total.maximum)}${pct == null ? '' : `<br>${pct.toFixed(1)}% ${Utils.escapeHtml(rcGrade(pct, d.scale))}`}</strong></td>`;
   });
   if (showAnn) {
     const pct = average(annualTotal.percentages);
-    totalRow += `<td><strong>${numberText(annualTotal.obtained)}/${numberText(annualTotal.maximum)}${pct == null ? '' : `<br>${pct.toFixed(1)}% ${Utils.escapeHtml(rcGrade(pct, d.scale))}`}</strong></td>`;
+    totalRow += `<td><strong><span class="${annualTotal.maximum > 0 && annualTotal.obtained < annualTotal.maximum / 2 ? 'rc-below-half' : ''}">${numberText(annualTotal.obtained)}</span>/${numberText(annualTotal.maximum)}${pct == null ? '' : `<br>${pct.toFixed(1)}% ${Utils.escapeHtml(rcGrade(pct, d.scale))}`}</strong></td>`;
   }
   totalRow += '</tr>';
 

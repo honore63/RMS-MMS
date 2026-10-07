@@ -11,13 +11,22 @@
    ============================================================ */
 
 const DB = {
-  _cache: new Map(),          // key -> { data, ts, table }
+  _cache: new Map(),          // LRU key -> { data, ts, accessedAt, table, rows }
   _pending: new Map(),        // key -> Promise (request dedup)
   _tableGen: new Map(),       // table -> invalidation generation
   _uid: null,                 // auth user scope for cache keys
   _gen: 0,                    // generation: bump clears without race
+  MAX_ENTRIES: 120,
+  MAX_ENTRY_ROWS: 5000,
+  MAX_CACHE_ROWS: 15000,
   debug: false,               // set true to log [CACHE HIT/MISS/...]
-  _stats: { hits: 0, misses: 0, sets: 0, invalidations: 0, avoided: 0, swr: 0, network: 0, errors: 0 },
+  _cacheRows: 0,
+  _stats: {
+    hits: 0, misses: 0, sets: 0, invalidations: 0, invalidatedEntries: 0,
+    avoided: 0, deduplicated: 0, swr: 0, network: 0, errors: 0,
+    evictions: 0, prefetches: 0, revalidations: 0,
+    requestCount: 0, requestMsTotal: 0, slowRequests: 0, criticalRequests: 0
+  },
 
   /* Per-table TTL (ms). Frequently changing data = shorter. */
   TTL: {
@@ -67,6 +76,25 @@ const DB = {
     return this.TTL[table] ?? this.DEFAULT_TTL;
   },
 
+  _stableValue(value) {
+    if (Array.isArray(value)) {
+      const unique = new Map(value.map(item => {
+          const normalized = this._stableValue(item);
+          return [JSON.stringify(normalized), normalized];
+      }));
+      return [...unique.entries()]
+          .sort(([left], [right]) => left < right ? -1 : left > right ? 1 : 0)
+          .map(([, item]) => item);
+    }
+    if (value && typeof value === 'object') {
+      return Object.keys(value).sort().reduce((result, key) => {
+        result[key] = this._stableValue(value[key]);
+        return result;
+      }, {});
+    }
+    return value;
+  },
+
   applyFilters(query, filters = {}) {
     let q = query;
     for (const [key, value] of Object.entries(filters)) {
@@ -83,12 +111,51 @@ const DB = {
 
   _cacheKey(table, select, filters, order, limit) {
     const uid = this._uid || 'anon';
-    return `${table}:${uid}:${select}:${JSON.stringify(filters || {})}:${order?.column || ''}:${order?.asc || ''}:${limit || ''}`;
+    const normalizedFilters = {};
+    Object.keys(filters || {}).sort().forEach(key => {
+      const value = filters[key];
+      if (value !== undefined && value !== null && value !== 'all') {
+        normalizedFilters[key] = this._stableValue(value);
+      }
+    });
+    const normalizedOrder = order
+      ? { column: order.column, ascending: order.asc == null ? false : Boolean(order.asc) }
+      : null;
+    return `${table}:${uid}:${select}:${JSON.stringify(normalizedFilters)}:${JSON.stringify(normalizedOrder)}:${limit > 0 ? limit : ''}`;
+  },
+
+  _deleteCache(key, eviction = false) {
+    const entry = this._cache.get(key);
+    if (!entry) return false;
+    this._cache.delete(key);
+    this._cacheRows = Math.max(0, this._cacheRows - entry.rows);
+    if (eviction) this._stats.evictions++;
+    return true;
+  },
+
+  _touchCache(key, entry) {
+    entry.accessedAt = Date.now();
+    this._cache.delete(key);
+    this._cache.set(key, entry);
   },
 
   _setCache(key, table, data) {
-    this._cache.set(key, { data, ts: Date.now(), table });
+    const rows = Array.isArray(data) ? data.length : 1;
+    if (rows > this.MAX_ENTRY_ROWS) {
+      this._deleteCache(key);
+      this._log('SKIP_LARGE', `${table} (${rows} rows)`);
+      return;
+    }
+    this._deleteCache(key);
+    const now = Date.now();
+    this._cache.set(key, { data, ts: now, accessedAt: now, table, rows });
+    this._cacheRows += rows;
     this._stats.sets++;
+    while (this._cache.size > this.MAX_ENTRIES || this._cacheRows > this.MAX_CACHE_ROWS) {
+      const oldest = this._cache.keys().next();
+      if (oldest.done) break;
+      this._deleteCache(oldest.value, true);
+    }
     this._log('SET', key);
   },
 
@@ -99,19 +166,21 @@ const DB = {
     const age = Date.now() - entry.ts;
     const ttl = this._ttlFor(table);
     if (age < ttl) {
+      this._touchCache(key, entry);
       this._stats.hits++;
       this._stats.avoided++;
       this._log('HIT', key);
       return { data: entry.data, stale: false };
     }
     if (this.SWR_TABLES.has(table) && age < ttl * 2) {
+      this._touchCache(key, entry);
       this._stats.hits++;
       this._stats.swr++;
       this._stats.avoided++;
       this._log('SWR', key);
       return { data: entry.data, stale: true };
     }
-    if (entry) this._cache.delete(key);
+    this._deleteCache(key);
     return null;
   },
 
@@ -120,11 +189,14 @@ const DB = {
     const existing = this._pending.get(key);
     if (existing) {
       this._stats.avoided++;
+      this._stats.deduplicated++;
       this._log('DEDUP', key);
       return existing;
     }
     const gen = this._gen;
     const p = (async () => {
+      const start = typeof performance !== 'undefined' && performance.now
+        ? performance.now() : Date.now();
       try {
         this._stats.network++;
         const result = await runner();
@@ -132,6 +204,16 @@ const DB = {
         /* user changed mid-flight — do not cache or return cross-user data */
         throw new Error('DB cache generation changed');
       } finally {
+        const end = typeof performance !== 'undefined' && performance.now
+          ? performance.now() : Date.now();
+        const duration = Math.max(0, end - start);
+        this._stats.requestCount++;
+        this._stats.requestMsTotal += duration;
+        if (duration >= 1000) this._stats.slowRequests++;
+        if (duration >= 3000) this._stats.criticalRequests++;
+        if (this.debug && duration >= 1000) {
+          console.warn(`[DB slow request] ${key} ${Math.round(duration)}ms`);
+        }
         if (this._pending.get(key) === p) this._pending.delete(key);
       }
     })();
@@ -160,6 +242,7 @@ const DB = {
     if (this._pending.has(key)) return;
     const gen = this._gen;
     const tableGen = this._tableGen.get(table) || 0;
+    this._stats.revalidations++;
     this._log('REFRESH', key);
     this._dedup(key, async () => {
       const result = await this._runQuery(table, select, filters, order, limit);
@@ -189,11 +272,17 @@ const DB = {
     else this._stats.misses++;
 
     const tableGen = this._tableGen.get(table) || 0;
-    return this._dedup(key, async () => {
+    const result = await this._dedup(key, async () => {
       const result = await this._runQuery(table, select, filters, order, limit);
       if (cache && (this._tableGen.get(table) || 0) === tableGen) this._setCache(key, table, result);
       return result;
     });
+    if ((this._tableGen.get(table) || 0) !== tableGen && !opts._retriedAfterInvalidation) {
+      return this._select(table, select, filters, order, limit, {
+        ...opts, fresh: true, _retriedAfterInvalidation: true
+      });
+    }
+    return result;
   },
 
   /* ---------- public API ---------- */
@@ -229,31 +318,40 @@ const DB = {
 
   /* Alias used by reports: invalidate + force next read to hit network. */
   refresh(...tables) {
-    if (!tables.length) { this._cache.clear(); return; }
+    if (!tables.length) { this.invalidate(); return; }
     tables.forEach(t => this.invalidate(t));
   },
 
   /* Invalidate every cache entry for a table (partial key match by table field). */
   invalidate(table) {
-    if (!table) { this._cache.clear(); this._stats.invalidations++; this._log('CLEAR', '*'); return; }
+    if (!table) {
+      const removed = this._cache.size + this._pending.size;
+      this._gen++;
+      this._cache.clear();
+      this._cacheRows = 0;
+      this._pending.clear();
+      this._stats.invalidations++;
+      this._stats.invalidatedEntries += removed;
+      this._log('CLEAR', '*');
+      return;
+    }
     this._tableGen.set(table, (this._tableGen.get(table) || 0) + 1);
-    let n = 0;
+    let removed = 0;
     for (const [key, entry] of this._cache.entries()) {
-      if (entry.table === table || key.startsWith(`${table}:`)) {
-        this._cache.delete(key);
-        n++;
+      if (entry.table === table) {
+        this._deleteCache(key);
+        removed++;
       }
     }
     for (const key of this._pending.keys()) {
-      if (key.startsWith(`${table}:`)) {
+      if (key.startsWith(`${table}:`) || key.startsWith(`count:${table}:`)) {
         this._pending.delete(key);
-        n++;
+        removed++;
       }
     }
-    if (n) {
-      this._stats.invalidations += n;
-      this._log('INVALIDATE', `${table} (${n})`);
-    }
+    this._stats.invalidations++;
+    this._stats.invalidatedEntries += removed;
+    this._log('INVALIDATE', `${table} (${removed})`);
   },
 
   /* Explicit alias */
@@ -261,18 +359,19 @@ const DB = {
 
   /* Invalidate several related tables at once (write dependency graph). */
   invalidateMany(tables = []) {
-    (tables || []).forEach(t => this.invalidate(t));
+    [...new Set(tables || [])].forEach(t => this.invalidate(t));
   },
 
   /* Drop everything (no args) — same as invalidate(). */
   clear() { this.invalidate(); },
 
   /* Call on login / logout / user switch — prevents cross-user data leaks. */
-  clearUserCache() {
+  clearUserCache(userId = null) {
     this._gen++;
     this._cache.clear();
+    this._cacheRows = 0;
     this._pending.clear();
-    this._uid = null;
+    this._uid = userId || null;
     this._log('CLEAR_USER', '*');
   },
 
@@ -300,24 +399,61 @@ const DB = {
     return {
       ...this._stats,
       size: this._cache.size,
+      cachedRows: this._cacheRows,
       pending: this._pending.size,
+      hitRate: this._stats.hits + this._stats.misses
+        ? this._stats.hits / (this._stats.hits + this._stats.misses)
+        : 0,
+      averageRequestMs: this._stats.requestCount
+        ? this._stats.requestMsTotal / this._stats.requestCount
+        : 0,
       userScope: this._uid,
       generation: this._gen,
       tables
     };
   },
 
-  /* Background prewarm of common reference datasets (fire-and-forget). */
-  warm(tables = []) {
-    tables.forEach(t => {
-      this.get(t).catch(() => { /* prewarm must never break the page */ });
+  /* Background reads are bounded and deduplicated with normal page requests. */
+  async prefetch(requests = []) {
+    const specs = (requests || []).map(request => typeof request === 'string'
+      ? { table: request }
+      : request).filter(request => request && request.table);
+    const safe = specs.filter(request => {
+      const filters = request.filters || {};
+      const large = ['learners', 'marks', 'assessments', 'audit_logs', 'notifications'];
+      const hasEffectiveFilter = Object.values(filters).some(value =>
+        value !== undefined && value !== null && value !== 'all'
+          && (!Array.isArray(value) || value.length > 0));
+      return !large.includes(request.table) || hasEffectiveFilter;
     });
+    this._stats.prefetches += safe.length;
+    const results = new Array(safe.length);
+    let next = 0;
+    const worker = async () => {
+      while (next < safe.length) {
+        const index = next++;
+        const { table, filters = {}, opts = {} } = safe[index];
+        try {
+          results[index] = await this.get(table, filters, opts);
+        } catch (error) {
+          results[index] = null;
+          if (this.debug) console.warn(`[DB prefetch failed] ${table}:`, error);
+        }
+      }
+    };
+    await Promise.all(Array.from({ length: Math.min(3, safe.length) }, worker));
+    return results;
+  },
+
+  warm(tables = []) {
+    return this.prefetch(tables);
   },
 
   /* Count with dedup (not stored — badge/counts stay fresh). */
-  async count(table, filters = {}) {
+  async count(table, filters = {}, retriedAfterInvalidation = false) {
     const key = `count:${this._cacheKey(table, 'id', filters, null, null)}`;
-    return this._dedup(key, async () => {
+    const tableGen = this._tableGen.get(table) || 0;
+    const result = await this._dedup(key, async () => {
       try {
         const q = this.applyFilters(sbClient.from(table).select('id', { count: 'exact', head: true }), filters);
         const { count, error } = await q;
@@ -328,6 +464,42 @@ const DB = {
         throw e;
       }
     });
+    if (!retriedAfterInvalidation && (this._tableGen.get(table) || 0) !== tableGen) {
+      return this.count(table, filters, true);
+    }
+    return result;
+  },
+
+  async getPage(table, select, filters = {}, order = null, from = 0, pageSize = 100, search = null) {
+    if (!Number.isInteger(from) || from < 0 || !Number.isInteger(pageSize) || pageSize < 1) {
+      throw new RangeError('Page offset and size must be non-negative integers, with a positive size.');
+    }
+    let query = this.applyFilters(
+      sbClient.from(table).select(select),
+      filters
+    );
+    const term = search && typeof search.term === 'string'
+      ? search.term.trim().slice(0, 80).replace(/[^\p{L}\p{N}\s'-]/gu, '')
+      : '';
+    const columns = search && Array.isArray(search.columns)
+      ? search.columns.filter(column => /^[a-z_][a-z0-9_]*$/i.test(column))
+      : [];
+    if (term && columns.length) {
+      const pattern = `%${term}%`;
+      query = query.or(columns.map(column => `${column}.ilike."${pattern}"`).join(','));
+    }
+    if (order) query = query.order(order.column, { ascending: order.asc ?? false });
+    this._stats.network++;
+    const { data, error } = await query.range(from, from + pageSize);
+    if (error) {
+      this._stats.errors++;
+      throw error;
+    }
+    const rows = data || [];
+    return {
+      data: rows.slice(0, pageSize),
+      hasMore: rows.length > pageSize
+    };
   },
 
   /* Uncached single read (existing helper). */

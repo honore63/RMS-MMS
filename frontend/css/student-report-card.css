@@ -254,6 +254,11 @@
 .src-overall-cell { font-weight: 700; }
 .src-term-summary { display: block; margin-top: 2px; }
 .src-no-mark { color: #555; font-style: italic; }
+.src-below-half {
+  text-decoration: underline !important;
+  text-decoration-thickness: 1px;
+  text-underline-offset: 2px;
+}
 .rms-student-card-page {
   position: relative !important;
   width: calc(210mm * var(--src-view-scale, 1)) !important;
@@ -547,6 +552,74 @@
   .rms-full-report-preview .src-comment { padding: 6px 10px; }
 }
 
+@media screen and (max-width: 900px) {
+  .pmp-report-preview,
+  .rms-full-report-preview,
+  .rw-preview-area {
+    max-width: 100%;
+    overflow-x: auto;
+    overscroll-behavior-x: contain;
+    -webkit-overflow-scrolling: touch;
+  }
+  .rms-student-card-page {
+    flex: 0 0 auto;
+    margin-left: 0 !important;
+    margin-right: 0 !important;
+  }
+  .src-report-card-fixed {
+    font-size: 11px !important;
+    padding: 0 !important;
+  }
+  .src-report-card-fixed .src-header {
+    flex-direction: row;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 10px;
+  }
+  .src-report-card-fixed .src-head-left,
+  .src-report-card-fixed .src-head-right {
+    width: 22%;
+    flex-direction: column;
+    align-items: center;
+    gap: 2px;
+  }
+  .src-report-card-fixed .src-head-left .src-logo,
+  .src-report-card-fixed .src-head-right .src-logo { height: 74px; }
+  .src-report-card-fixed .src-head-center { flex: 1; text-align: center; }
+  .src-report-card-fixed .src-info { flex-direction: row; }
+  .src-report-card-fixed .src-info-col { width: 50%; padding: 6px 10px; }
+  .src-report-card-fixed .src-info-col + .src-info-col {
+    border-left: 1.5px solid #1976d2;
+    border-top: none;
+  }
+  .src-report-card-fixed .src-info-row { flex-wrap: nowrap; }
+  .src-report-card-fixed .src-info-lbl { min-width: 108px; }
+  .src-report-card-fixed .src-info-val { min-width: auto; overflow-wrap: normal; }
+  .src-report-card-fixed .src-table {
+    display: table;
+    width: 100%;
+    overflow: visible;
+  }
+  .src-report-card-fixed .src-multi-term-table {
+    width: 100%;
+    min-width: 900px;
+    table-layout: auto;
+  }
+  .src-report-card-fixed .src-compact-term-table {
+    width: 100%;
+    min-width: 0;
+    table-layout: fixed;
+  }
+  .src-report-card-fixed .src-panels,
+  .src-report-card-fixed .src-charts,
+  .src-report-card-fixed .src-signatures,
+  .src-report-card-fixed .src-comments { flex-direction: row; }
+  .src-report-card-fixed .src-panel { width: auto; }
+  .src-report-card-fixed .src-comment,
+  .src-report-card-fixed .src-sig { width: auto; }
+  .src-report-card-fixed .src-comment { padding: 6px 10px; }
+}
+
 @media print {
   .src-info { flex-direction: row !important; }
   .src-info-col {
@@ -787,10 +860,10 @@
   border-bottom: 2px solid #64748b !important;
 }
 .src-reference-matrix tfoot {
-  border-top: 10px solid #fff;
+  border-top: 0 !important;
 }
 .src-sheet .src-reference-matrix tfoot .src-total-row td {
-  border-top: 2px solid #64748b !important;
+  border-top: 2px solid #111 !important;
 }
 .src-sheet .src-reference-matrix tfoot td {
   background: #eaf0f7 !important;
@@ -1004,6 +1077,12 @@
 .src-sheet .src-multi-term-table.src-reference-matrix td {
   border: 1px solid #111 !important;
 }
+.src-sheet .src-multi-term-table.src-reference-matrix tfoot {
+  border-top: 0 !important;
+}
+.src-sheet .src-multi-term-table.src-reference-matrix tfoot .src-total-row td {
+  border-top: 2px solid #111 !important;
+}
 .src-sheet .src-reference-matrix tr > :first-child,
 .src-sheet .src-reference-matrix tr > :last-child {
   border-color: #111 !important;
@@ -1020,4 +1099,12 @@
 .src-sheet .src-reference-matrix tbody > tr:last-child:not(.src-all-subjects-row) > *,
 .src-sheet .src-reference-matrix tfoot > tr:last-child > * {
   border-bottom: 1.5px solid #111 !important;
+}
+
+.src-sheet .src-multi-term-table.src-reference-matrix {
+  border: 1.5px solid #111 !important;
+}
+.src-sheet .src-multi-term-table.src-reference-matrix th,
+.src-sheet .src-multi-term-table.src-reference-matrix td {
+  border: 1px solid #111 !important;
 }

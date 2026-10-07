@@ -248,19 +248,20 @@ const ImportSystem = (() => {
     return new Promise((resolve, reject) => {
       const isExcel = /\.(xlsx|xls)$/i.test(file.name);
       if (isExcel) {
-        if (typeof XLSX === 'undefined') { reject(new Error('Excel import library is not loaded. Check your internet connection and reload the page.')); return; }
         const reader = new FileReader();
-        reader.onload = e => {
-          try {
-            const wb = XLSX.read(new Uint8Array(e.target.result), { type: 'array' });
-            const sheet = wb.Sheets[wb.SheetNames[0]];
-            const textRows = XLSX.utils.sheet_to_json(sheet, { header: 1, raw: false, defval: '' });
-            const rawRows = XLSX.utils.sheet_to_json(sheet, { header: 1, raw: true, defval: '' });
-            resolve(buildSheetRows(textRows, rawRows));
-          } catch (err) { reject(err); }
-        };
-        reader.onerror = () => reject(new Error('Could not read the Excel file.'));
-        reader.readAsArrayBuffer(file);
+        Utils.loadSpreadsheetLibrary().then(() => {
+          reader.onload = e => {
+            try {
+              const wb = XLSX.read(new Uint8Array(e.target.result), { type: 'array' });
+              const sheet = wb.Sheets[wb.SheetNames[0]];
+              const textRows = XLSX.utils.sheet_to_json(sheet, { header: 1, raw: false, defval: '' });
+              const rawRows = XLSX.utils.sheet_to_json(sheet, { header: 1, raw: true, defval: '' });
+              resolve(buildSheetRows(textRows, rawRows));
+            } catch (err) { reject(err); }
+          };
+          reader.onerror = () => reject(new Error('Could not read the Excel file.'));
+          reader.readAsArrayBuffer(file);
+        }).catch(reject);
       } else {
         file.text().then(t => resolve(parseCSV(t))).catch(() => reject(new Error('Could not read the CSV file.')));
       }
@@ -317,9 +318,16 @@ const ImportSystem = (() => {
     return true;
   }
 
-  function downloadTemplate(type) {
+  async function downloadTemplate(type) {
     const def = DEFS[type];
     if (!def) return;
+    if (typeof XLSX === 'undefined') {
+      try {
+        await Utils.loadSpreadsheetLibrary();
+      } catch (e) {
+        console.error('[ImportSystem] Spreadsheet library unavailable; downloading CSV template instead:', e);
+      }
+    }
     if (typeof XLSX !== 'undefined') {
       try {
         const head = def.columns.map(c => c.label);

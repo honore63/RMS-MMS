@@ -270,7 +270,7 @@ Serve `frontend/` as the document root, otherwise root-absolute paths such as
 
 ### DOS / Administrator
 - Dashboard with stats overview and education-level scope filter
-- Manage academic years, terms, classes, subjects (level-aware CRUD with FK-usage delete guard)
+- Manage academic years, terms, classes, subjects (level-aware CRUD with FK-usage delete guard); assign a class teacher directly from each class card and download an Excel learner list with student codes preserved as text
 - Add/edit/deactivate teachers and learners (manual + Excel import)
 - Assign teachers to classes with **multiple subjects per class**
 - Create, approve, reject, lock, reopen assessments (single-page modals, validations)
@@ -404,7 +404,12 @@ All Supabase reads go through the centralized `DB` layer in `frontend/js/db.js`.
 
 - **Stale-while-revalidate** applies only to reference/config tables — never marks, assessments, notifications, or audit logs.
 - **Cache keys** include table, user scope, select, filters, order, and limit.
-- **Request deduplication** — five simultaneous calls share one Supabase request.
+- **Deterministic keys + request deduplication** — equivalent filters share a single in-flight Supabase request.
+- **Bounded LRU cache** — up to 120 entries and 15,000 cached rows; individual results over 5,000 rows are returned but not retained.
+- **Freshness** — marks and assessments are never stale-while-revalidated; report generation explicitly fetches fresh marks.
+- **Bounded report reads** — large mark filters are split into 50-ID batches with at most three concurrent reads; oversized Cartesian selections are rejected with guidance to narrow the report.
+- **Learner management** — fetches and renders learner rows in 100-record pages, with database-side filters/search and exact counts rather than downloading and rendering the full learner table.
+- **On-demand imports** — the large Excel spreadsheet library loads only when an Excel file or Excel template is requested; CSV continues to work without it.
 - **User isolation** — cache is scoped by auth user; `DB.clearUserCache()` on login/logout.
 - **RLS remains authoritative** — caching never bypasses Row Level Security.
 
@@ -417,8 +422,9 @@ DB.getFresh(table, filters)         // force network read
 DB.invalidate(table)                // drop one table
 DB.invalidateMany([t1, t2])         // drop several
 DB.clearUserCache()                 // drop on auth change
-DB.getStats()                       // hits, misses, size, pending
-DB.warm(['classes','subjects',…])   // background prewarm
+DB.getStats()                       // hit rate, request timings, evictions, prefetches
+DB.prefetch([{table, filters}])     // bounded, deduplicated background reads
+DB.warm(['subjects','terms',…])     // background prewarm for reference data
 DB.debug = true                     // enable [CACHE HIT/MISS/…] logs
 ```
 
@@ -469,6 +475,7 @@ After any **raw** `sbClient` write, call `DB.invalidate(tableName)`.
 - **Config**: `vercel.json` handles rewrites, cache headers, and CORS
 - **Cache**: `index.html` has `Cache-Control: no-store` for fresh deploys
 - **Static files**: `public/` served with `Cache-Control: public, max-age=31536000, immutable`
+- **Versioned JS/CSS**: references use `?v=...` cache-busters and immutable one-year cache headers; bump the query version whenever a referenced file changes.
 
 ### Vercel Configuration (`vercel.json`)
 - Catch-all rewrite: `/(.*)` → `/frontend/$1`

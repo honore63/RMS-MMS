@@ -342,9 +342,9 @@ async function ensureHeaderYears(force = false) {
   return _headerYears;
 }
 
-function invalidateHeaderYears() {
+function invalidateHeaderYears(invalidateCache = true) {
   _headerYears = null;
-  if (typeof DB !== 'undefined' && DB.invalidate) DB.invalidate('academic_years');
+  if (invalidateCache && typeof DB !== 'undefined' && DB.invalidate) DB.invalidate('academic_years');
 }
 
 // returns the ID of the year the user currently has selected for the app.
@@ -360,10 +360,15 @@ function getActiveYearId(years) {
   return list[0] ? list[0].id : null;
 }
 
-function setActiveYearId(id) {
+async function setActiveYearId(id) {
+  if (typeof Router !== 'undefined' && Router.beforeNavigate && Router.current) {
+    const allowed = await Router.beforeNavigate(Router.current, Router.current);
+    if (allowed === false) return false;
+  }
   if (id) localStorage.setItem(YEAR_STORE_KEY, id);
   else localStorage.removeItem(YEAR_STORE_KEY);
   if (typeof Router !== 'undefined') Router.render();
+  return true;
 }
 
 function refreshHeaderYearSelect() {
@@ -395,21 +400,21 @@ async function showApp() {
   Sidebar.init();
   registerRoutes();
   Router.init();
-  // Canonical assessment types are defined in code; quietly ensure their rows
-  // exist so every dropdown is populated. Additive, best-effort, never blocks.
-  try { await Utils.ensureAssessmentTypes(); } catch (e) { /* non-fatal */ }
+  Router.beforeNavigate = (from) => String(from).split('?')[0] === 'teacher/enter-marks'
+    && typeof flushMarksBeforeNavigation === 'function'
+      ? flushMarksBeforeNavigation()
+      : true;
+  Router.clearPrefetch();
+  // These reference writes are not needed to display the first route.
+  Promise.resolve().then(() => Utils.ensureAssessmentTypes()).catch(error => {
+    console.warn('[Startup] Could not verify assessment types:', error);
+  });
   if (typeof Realtime !== 'undefined') Realtime.init();
-if (typeof NotificationCenter !== 'undefined') {
-      NotificationCenter.init();
-      NotificationCenter.loadNotifications();
-    }
-    if (typeof refreshNotificationBadge === 'function') refreshNotificationBadge();
-  /* Cache-first: prewarm common reference data in the background so the
-     first dashboard → classes → subjects → teachers navigation is a HIT. */
-  if (typeof DB !== 'undefined' && DB.warm) {
-    DB.warm(['school_settings', 'grading_scales', 'academic_years', 'terms',
-      'subjects', 'classes', 'teachers', 'assessment_types']);
+  if (typeof NotificationCenter !== 'undefined') {
+    NotificationCenter.init();
+    NotificationCenter.loadNotifications();
   }
+  if (typeof refreshNotificationBadge === 'function') refreshNotificationBadge();
   ensureHeaderYears().then(list => {
     const sel = document.getElementById('global-year-select');
     if (!sel) return;
@@ -427,6 +432,14 @@ if (typeof NotificationCenter !== 'undefined') {
   } else {
     Router.render();
   }
+  const warmReferenceData = () => {
+    if (typeof DB !== 'undefined' && DB.warm) {
+      DB.warm(['school_settings', 'grading_scales', 'academic_years', 'terms',
+        'subjects', 'assessment_types']);
+    }
+  };
+  if (typeof requestIdleCallback === 'function') requestIdleCallback(warmReferenceData, { timeout: 1500 });
+  else setTimeout(warmReferenceData, 0);
 }
 
 function registerRoutes() {
@@ -474,6 +487,22 @@ function registerRoutes() {
   Router.register('parent/dashboard', renderParentDashboard);
   Router.register('parent/performance', renderParentPerformance);
   Router.register('parent/reports', renderParentReports);
+
+  Router.registerPrefetch('admin/assessments', () => DB.prefetch([
+    'classes', 'subjects', 'teachers', 'assessment_types', 'academic_years', 'terms'
+  ]));
+  Router.registerPrefetch('teacher/my-classes', () => DB.prefetch([
+    { table: 'teacher_assignments', filters: { teacher_id: Auth.getTeacherId() } },
+    'classes', 'subjects'
+  ]));
+  Router.registerPrefetch('teacher/enter-marks', () => DB.prefetch([
+    { table: 'teacher_assignments', filters: { teacher_id: Auth.getTeacherId() } },
+    'academic_years', 'terms', 'assessment_types', 'classes', 'subjects'
+  ]));
+  Router.registerPrefetch('teacher/my-subjects', () => DB.prefetch([
+    { table: 'teacher_assignments', filters: { teacher_id: Auth.getTeacherId() } },
+    'subjects'
+  ]));
   Router.register('parent/notifications', renderNotifications);
 }
 
@@ -495,8 +524,9 @@ function renderNotifications() {
 }
 
 const App = {
-  setGlobalYear: (id) => { 
-    setActiveYearId(id); 
+  setGlobalYear: async (id) => {
+    const updated = await setActiveYearId(id);
+    if (!updated) return;
     // Reflect the new value visually and refresh
     const sel = document.getElementById('global-year-select');
     if (sel) sel.value = id;
@@ -504,6 +534,7 @@ const App = {
   logout: async () => {
     await Auth.signOut();
     if (typeof DB !== 'undefined' && DB.clearUserCache) DB.clearUserCache();
+    if (typeof Router !== 'undefined' && Router.clearPrefetch) Router.clearPrefetch();
     if (typeof Realtime !== 'undefined') Realtime.stop();
     window.location.hash = '';
     document.getElementById('app-layout').style.display = 'none';

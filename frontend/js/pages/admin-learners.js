@@ -2,6 +2,14 @@ let learnersSearch = '';
 let learnersClass = 'all';
 let learnersGender = 'all';
 let learnersStatus = 'all';
+let learnersPage = 0;
+let learnersRenderId = 0;
+const LEARNERS_PAGE_SIZE = 100;
+
+function goToLearnersPage(page) {
+  learnersPage = Math.max(0, page);
+  renderLearners();
+}
 
 function requireDosLearnerAccess() {
   if (Auth.getRole() === 'dos') return true;
@@ -32,27 +40,41 @@ async function renderLearners() {
   }
   setHeader('Learner Management', 'Register and manage learners individually or through bulk import');
   setContent(Utils.loading());
-  const [data, allClasses] = await Promise.all([
-    DB.query('learners', '*', {}, { column: 'full_name', asc: true }),
-    DB.get('classes')
-  ]);
-  const classes = (typeof Scope !== 'undefined' && Scope.isScoped()) ? Scope.filterClasses(allClasses) : allClasses;
-  const classIds = new Set(classes.map(c => String(c.id)));
-  const visibleData = (typeof Scope !== 'undefined' && Scope.isScoped())
-    ? data.filter(l => l.class_id && classIds.has(String(l.class_id)))
-    : data;
-  const filtered = visibleData.filter(l => {
-    const matchS = !learnersSearch || (l.full_name + ' ' + l.learner_code).toLowerCase().includes(learnersSearch.toLowerCase());
-    const matchC = learnersClass === 'all' || l.class_id === learnersClass;
-    const matchG = learnersGender === 'all' || l.gender === learnersGender;
-    const matchSt = learnersStatus === 'all' || l.status === learnersStatus;
-    return matchS && matchC && matchG && matchSt;
+  const renderId = ++learnersRenderId;
+  try {
+  const allClasses = await DB.get('classes', {}, {
+    select: 'id,name,level,stream,education_level,status'
   });
-  const totalActive = visibleData.filter(l => l.status === 'active').length;
-  const totalInactive = visibleData.filter(l => l.status === 'inactive').length;
-
-  const rows = filtered.map(l => {
-    const cls = classes.find(c => c.id === l.class_id);
+  const isScoped = typeof Scope !== 'undefined' && Scope.isScoped();
+  const classes = isScoped ? Scope.filterClasses(allClasses) : allClasses;
+  const scopedClassIds = classes.map(c => String(c.id));
+  const requestedClass = learnersClass !== 'all'
+    && classes.some(c => String(c.id) === String(learnersClass))
+    ? learnersClass : null;
+  const filters = {};
+  if (requestedClass) filters.class_id = requestedClass;
+  if (learnersStatus !== 'all') filters.status = learnersStatus;
+  if (learnersGender !== 'all') filters.gender = learnersGender;
+  const hasVisibleClasses = !isScoped || scopedClassIds.length > 0;
+  const pageResult = hasVisibleClasses
+    ? await DB.getPage(
+        'learners',
+        'id,learner_code,full_name,gender,class_id,status,academic_year_id,created_at',
+        filters,
+        { column: 'full_name', asc: true },
+        learnersPage * LEARNERS_PAGE_SIZE,
+        LEARNERS_PAGE_SIZE,
+        { term: learnersSearch, columns: ['full_name', 'learner_code'] }
+      )
+    : { data: [], hasMore: false };
+  if (renderId !== learnersRenderId) return;
+  if (!pageResult.data.length && learnersPage > 0) {
+    learnersPage--;
+    return renderLearners();
+  }
+  const pageLearners = pageResult.data;
+  const rows = pageLearners.map(l => {
+    const cls = classes.find(c => String(c.id) === String(l.class_id));
     return `<tr>
       <td class="text-center" style="width:40px"><input type="checkbox" class="cb-learner" value="${l.id}" data-name="${Utils.escapeHtml(l.full_name)}" onchange="updateLearnerBulkBar()"></td>
       <td class="col-code">${Utils.escapeHtml(l.learner_code)}</td>
@@ -66,31 +88,22 @@ async function renderLearners() {
         ${l.status === 'active' ? `<button class="btn btn-sm btn-danger" onclick="learnerDeactivate('${l.id}')" title="Deactivate"><i data-lucide="user-x"></i></button>` : `<button class="btn btn-sm btn-success" onclick="learnerActivate('${l.id}')" title="Activate"><i data-lucide="user-check"></i></button>`}
       </td></tr>`;
   }).join('');
+  const pagination = learnersPage > 0 || pageResult.hasMore ? `
+    <div class="flex justify-between items-center" style="padding:12px 16px;gap:12px;flex-wrap:wrap">
+      <span class="text-sm text-muted">Showing ${learnersPage * LEARNERS_PAGE_SIZE + (pageLearners.length ? 1 : 0)}–${learnersPage * LEARNERS_PAGE_SIZE + pageLearners.length} learners</span>
+      <div class="flex gap-2">
+        <button class="btn btn-sm btn-outline" onclick="goToLearnersPage(${learnersPage - 1})" ${learnersPage === 0 ? 'disabled' : ''}>Previous</button>
+        <span class="text-sm text-muted" style="align-self:center">Page ${learnersPage + 1}</span>
+        <button class="btn btn-sm btn-outline" onclick="goToLearnersPage(${learnersPage + 1})" ${!pageResult.hasMore ? 'disabled' : ''}>Next</button>
+      </div>
+    </div>` : '';
 
   setContent(`
-    <div class="grid-3 mb-6">
-      <div class="stat-card">
-        <div class="stat-icon" style="background:var(--blue-50);color:var(--blue-600)"><i data-lucide="users"></i></div>
-        <div class="stat-value">${visibleData.length}</div>
-        <div class="stat-label">Total Learners</div>
-      </div>
-      <div class="stat-card">
-        <div class="stat-icon" style="background:var(--green-50);color:var(--green-600)"><i data-lucide="user-check"></i></div>
-        <div class="stat-value" style="color:var(--green-600)">${totalActive}</div>
-        <div class="stat-label">Active</div>
-      </div>
-      <div class="stat-card">
-        <div class="stat-icon" style="background:var(--red-50);color:var(--red-500)"><i data-lucide="user-x"></i></div>
-        <div class="stat-value" style="color:var(--red-500)">${totalInactive}</div>
-        <div class="stat-label">Inactive</div>
-      </div>
-    </div>
-
     <div class="flex justify-between items-center mb-4" style="flex-wrap:wrap;gap:12px">
       <div class="tab-bar">
-        <button class="tab-btn ${learnersStatus === 'all' ? 'active' : ''}" onclick="learnersStatus='all';renderLearners()">All</button>
-        <button class="tab-btn ${learnersStatus === 'active' ? 'active' : ''}" onclick="learnersStatus='active';renderLearners()">Active</button>
-        <button class="tab-btn ${learnersStatus === 'inactive' ? 'active' : ''}" onclick="learnersStatus='inactive';renderLearners()">Inactive</button>
+        <button class="tab-btn ${learnersStatus === 'all' ? 'active' : ''}" onclick="learnersStatus='all';learnersPage=0;renderLearners()">All</button>
+        <button class="tab-btn ${learnersStatus === 'active' ? 'active' : ''}" onclick="learnersStatus='active';learnersPage=0;renderLearners()">Active</button>
+        <button class="tab-btn ${learnersStatus === 'inactive' ? 'active' : ''}" onclick="learnersStatus='inactive';learnersPage=0;renderLearners()">Inactive</button>
       </div>
       <div class="flex gap-2" style="flex-wrap:wrap">
         <button class="btn btn-secondary" onclick="downloadTemplate()"><i data-lucide="download"></i> Download Template</button>
@@ -101,15 +114,18 @@ async function renderLearners() {
     </div>
 
     <div class="filter-bar">
-      <div class="search-input-wrapper" style="flex:1;min-width:220px">
-        <i data-lucide="search"></i>
-        <input type="text" class="input-field" placeholder="Search by student number or name..." value="${Utils.escapeHtml(learnersSearch)}" oninput="learnersSearch=this.value;renderLearners()">
-      </div>
-      <div class="form-group"><select class="select-field" onchange="learnersClass=this.value;renderLearners()">
+      <form class="flex gap-2" style="flex:1;min-width:220px" onsubmit="event.preventDefault();learnersSearch=document.getElementById('learners-search-input').value.trim();learnersPage=0;renderLearners()">
+        <div class="search-input-wrapper" style="flex:1">
+          <i data-lucide="search"></i>
+          <input id="learners-search-input" type="text" class="input-field" placeholder="Search by student number or name..." value="${Utils.escapeHtml(learnersSearch)}">
+        </div>
+        <button class="btn btn-secondary" type="submit">Search</button>
+      </form>
+      <div class="form-group"><select class="select-field" onchange="learnersClass=this.value;learnersPage=0;renderLearners()">
         <option value="all">All Classes</option>
         ${classes.map(c => `<option value="${c.id}" ${learnersClass === c.id ? 'selected' : ''}>${c.name}</option>`).join('')}
       </select></div>
-      <div class="form-group"><select class="select-field" onchange="learnersGender=this.value;renderLearners()">
+      <div class="form-group"><select class="select-field" onchange="learnersGender=this.value;learnersPage=0;renderLearners()">
         <option value="all" ${learnersGender === 'all' ? 'selected' : ''}>All Genders</option>
         <option value="M" ${learnersGender === 'M' ? 'selected' : ''}>Male</option>
         <option value="F" ${learnersGender === 'F' ? 'selected' : ''}>Female</option>
@@ -118,15 +134,15 @@ async function renderLearners() {
 
     <div class="card">
       <div class="card-header" style="flex-wrap:wrap;gap:12px">
-        <h3><i data-lucide="users" style="width:18px;height:18px;vertical-align:middle;margin-right:8px;color:var(--blue-600)"></i>Learners (${filtered.length})</h3>
+        <h3><i data-lucide="users" style="width:18px;height:18px;vertical-align:middle;margin-right:8px;color:var(--blue-600)"></i>Learners</h3>
         <div class="flex gap-2" style="align-items:center">
           <span id="learner-bulk-count" class="text-sm text-muted" style="display:none"><strong id="learner-sel-count">0</strong> selected</span>
           <button class="btn btn-sm btn-danger" id="btn-learner-delete" disabled onclick="learnerDeleteSelected()"><i data-lucide="trash-2"></i> Delete Selected (<span id="btn-learner-delete-count">0</span>)</button>
         </div>
       </div>
       <div id="learner-bulk-bar" class="bulk-bar" style="display:none">
-        <button class="btn btn-sm btn-secondary" onclick="learnerSelectAllList()"><i data-lucide="check-check"></i> Select All ${filtered.length > 0 ? `(${filtered.length})` : ''}</button>
-        <p class="text-xs text-muted" style="margin:0"><i data-lucide="info"></i> Use the checkboxes or the class filter to pick which learners to select.</p>
+        <button class="btn btn-sm btn-secondary" onclick="learnerSelectAllList()"><i data-lucide="check-check"></i> Select This Page (${pageLearners.length})</button>
+        <p class="text-xs text-muted" style="margin:0"><i data-lucide="info"></i> Bulk selection applies to learners on this page.</p>
       </div>
       <div class="table-container"><table class="data-table">
         <thead><tr>
@@ -134,8 +150,25 @@ async function renderLearners() {
           <th>Student Number</th><th>Name</th><th>Gender</th><th>Class</th><th>Status</th><th>Actions</th>
         </tr></thead>
         <tbody>${rows || `<tr><td colspan="7">${Utils.empty('No learners found', 'users')}</td></tr>`}</tbody>
-      </table></div>
+      </table></div>${pagination}
     </div>`);
+  } catch (error) {
+    if (renderId !== learnersRenderId) return;
+    const detail = [
+      error?.message,
+      error?.details,
+      error?.hint,
+      error?.code ? `Database code: ${error.code}` : null
+    ].filter(Boolean).join(' — ') || 'Please try again.';
+    console.error('[Learner Management] failed to load learners:', {
+      status: error?.status,
+      code: error?.code,
+      message: error?.message,
+      details: error?.details,
+      hint: error?.hint
+    });
+    setContent(Utils.errorCard('Failed to load learners', Utils.escapeHtml(detail)));
+  }
 }
 
 async function learnerForm() {

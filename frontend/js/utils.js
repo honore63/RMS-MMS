@@ -60,8 +60,33 @@ const ASSESSMENT_TYPE_DEFAULTS = {
 const Utils = {
   _gradingCache: null,
   _gradingPromise: null,
+  _spreadsheetLibraryPromise: null,
   assessmentTypesCache: null,
   _ensureTypesPromise: null,
+
+  loadSpreadsheetLibrary() {
+    if (typeof XLSX !== 'undefined') return Promise.resolve(XLSX);
+    if (!this._spreadsheetLibraryPromise) {
+      this._spreadsheetLibraryPromise = new Promise((resolve, reject) => {
+        const script = document.createElement('script');
+        script.src = 'https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js';
+        script.onload = () => {
+          if (typeof XLSX === 'undefined') {
+            this._spreadsheetLibraryPromise = null;
+            reject(new Error('Spreadsheet library loaded without exposing XLSX.'));
+            return;
+          }
+          resolve(XLSX);
+        };
+        script.onerror = () => {
+          this._spreadsheetLibraryPromise = null;
+          reject(new Error('Failed to load the spreadsheet library.'));
+        };
+        document.head.appendChild(script);
+      });
+    }
+    return this._spreadsheetLibraryPromise;
+  },
 
   pct(mark, max) {
     if (!max || (!mark && mark !== 0)) return 0;
@@ -297,9 +322,9 @@ const Utils = {
     return (name || '').replace(/[^A-Za-z]/g, '').slice(0, 4).toUpperCase();
   },
 
-  invalidateAssessmentTypeCaches() {
+  invalidateAssessmentTypeCaches({ skipDb = false } = {}) {
     this.assessmentTypesCache = null;
-    if (typeof DB !== 'undefined' && DB.invalidate) DB.invalidate('assessment_types');
+    if (!skipDb && typeof DB !== 'undefined' && DB.invalidate) DB.invalidate('assessment_types');
     if (typeof ReportUtils !== 'undefined') ReportUtils.invalidate('assessmentTypes');
     if (typeof invalidateAssessmentTypesPageCache === 'function') invalidateAssessmentTypesPageCache();
   },

@@ -1,6 +1,9 @@
 let markEntries = [];
 let markAssessment = null;
 let autoSaveTimer = null;
+let markSavePromise = null;
+let markSaveAssessmentId = null;
+let markSaveRequested = false;
 let marksView = 'list';
 let teacherAssignments = [];
 let activeYear = null;
@@ -71,7 +74,11 @@ async function renderAssessmentList() {
   if (assessments.length) {
     try {
       const ids = assessments.map(a => a.id);
-      const { data } = await sbClient.from('marks').select('assessment_id, learner_id, mark').in('assessment_id', ids);
+      const data = await ReportUtils.getFreshMarks(
+        { assessment_id: ids },
+        null,
+        'assessment_id,learner_id,mark'
+      );
       if (data) {
         progressMap = {};
         data.forEach(m => {
@@ -822,7 +829,7 @@ async function renderMarksEntry(assessId) {
   setHeader('Enter Marks', 'Enter and manage marks for your assessment');
   setContent(Utils.loading());
 
-  const targetAssessment = await DB.getRelated('assessments', '*', { id: assessId });
+  const targetAssessment = await DB.getFreshQuery('assessments', '*', { id: assessId });
   if (!targetAssessment.length) { setContent(Utils.empty('Assessment not found', 'file-x')); return; }
   markAssessment = targetAssessment[0];
   /* Conversion helpers live only on the Convert Marks page — never opened here. */
@@ -841,7 +848,7 @@ async function renderMarksEntry(assessId) {
   }
 
   const [existingMarks, gradingData, settingsData, clsData, subData, types] = await Promise.all([
-    DB.query('marks', '*', { assessment_id: assessId }),
+    DB.getFreshQuery('marks', 'id,learner_id,mark,status', { assessment_id: assessId }),
     Utils.getGradingScale(),
     DB.query('school_settings', '*'),
     DB.getRelated('classes', '*', { id: markAssessment.class_id }),
@@ -862,10 +869,19 @@ async function renderMarksEntry(assessId) {
 
   let learners;
   if (rosterPolicy === 'freeze_on_submit' && frozenRoster) {
-    const { data } = await sbClient.from('learners').select('*').in('id', frozenRoster).order('full_name', { ascending: true });
-    learners = data || [];
+    learners = await DB.getFreshQuery(
+      'learners',
+      'id,full_name,learner_code,gender',
+      { id: frozenRoster },
+      { column: 'full_name', asc: true }
+    );
   } else {
-    learners = await DB.query('learners', '*', { class_id: markAssessment.class_id, status: 'active' }, { column: 'full_name', asc: true });
+    learners = await DB.query(
+      'learners',
+      'id,full_name,learner_code,gender',
+      { class_id: markAssessment.class_id, status: 'active' },
+      { column: 'full_name', asc: true }
+    );
   }
 
   let rosterNote;
@@ -897,7 +913,8 @@ async function renderMarksEntry(assessId) {
       remark: markVal ? Utils.remark(pct, gradingData) : '',
       pf: Utils.passFail(pct, settings.pass_mark),
       markId: em?.id || null,
-      existingStatus: em?.status || 'draft'
+      existingStatus: em?.status || 'draft',
+      savedMark: markVal
     };
   });
 
@@ -1083,6 +1100,13 @@ function filterMarksTable() {
 function updateMark(index, value) {
   if (!markAssessment) return;
   const maxMark = markAssessment.maximum_mark;
+  const e = markEntries[index];
+  if ((value === '' || value == null) && e?.markId && e.savedMark !== '' && e.savedMark != null) {
+    const input = document.querySelector(`#marks-table-body tr[data-mark-index="${index}"] input`);
+    if (input) input.value = e.mark;
+    Utils.toast('A saved mark cannot be cleared here. Enter 0 or ask the DOS to remove it.', 'error');
+    return;
+  }
 
   if (value !== '' && value != null) {
     const n = parseFloat(value);
@@ -1095,15 +1119,17 @@ function updateMark(index, value) {
     }
   }
 
-  const e = markEntries[index];
   e.mark = value;
+  if (markSavePromise && markSaveAssessmentId === markAssessment.id) {
+    markSaveRequested = true;
+  }
   const normalized = (value !== '' && value != null)
     ? Utils.normalizedMark(parseFloat(value), maxMark)
     : 0;
   const pct = normalized == null ? 0 : normalized;
   e.pct = pct;
 
-  Utils.getGradingScale().then(scale => {
+  e.calculationPromise = Utils.getGradingScale().then(scale => {
     e.grade = (value !== '' && value != null) ? Utils.grade(pct, scale) : '';
     e.remark = (value !== '' && value != null) ? Utils.remark(pct, scale) : '';
     e.pf = (value !== '' && value != null) ? Utils.passFail(pct, markSettings.pass_mark) : '';
@@ -1170,59 +1196,129 @@ function updateStatsBar() {
   }
 }
 
+function markEntryHasUnsavedValue(entry) {
+  const currentEmpty = entry.mark === '' || entry.mark == null;
+  const savedEmpty = entry.savedMark === '' || entry.savedMark == null;
+  if (currentEmpty) return false;
+  if (savedEmpty) return true;
+  return Number(entry.mark) !== Number(entry.savedMark);
+}
+
+async function flushMarksBeforeNavigation() {
+  if (marksView !== 'entry') return true;
+  if (autoSaveTimer) {
+    clearTimeout(autoSaveTimer);
+    autoSaveTimer = null;
+  }
+  if (!markEntries.some(markEntryHasUnsavedValue)) return true;
+  const saved = await saveMarks(true);
+  if (!saved) Utils.toast('Your unsaved marks could not be saved. Stay on this page and retry.', 'error');
+  return saved;
+}
+
 async function saveMarks(isAuto = false) {
-  if (!markAssessment) return;
+  const assessment = markAssessment;
+  const entries = markEntries;
+  if (!assessment) return false;
+  if (autoSaveTimer) {
+    clearTimeout(autoSaveTimer);
+    autoSaveTimer = null;
+  }
+  if (markSavePromise) {
+    if (markSaveAssessmentId === assessment.id) {
+      markSaveRequested = true;
+      return markSavePromise;
+    }
+    await markSavePromise;
+    return saveMarks(isAuto);
+  }
   if (isAuto) showSaveStatus('saving');
 
-  const toSave = markEntries.filter(e => e.mark !== '' && e.mark != null);
-  if (toSave.length && Utils.normalizedMark(toSave[0].mark, markAssessment.maximum_mark) == null) {
-    showSaveStatus('error');
-    Utils.toast('Assessment maximum mark must be greater than zero before marks can be saved.', 'error');
-    return;
-  }
+  markSaveAssessmentId = assessment.id;
+  const run = (async () => {
+    let wrote = false;
+    try {
+      do {
+        markSaveRequested = false;
+        const dirtyEntries = entries.filter(markEntryHasUnsavedValue);
+        if (dirtyEntries.some(e => Utils.normalizedMark(e.mark, assessment.maximum_mark) == null)) {
+          showSaveStatus('error');
+          Utils.toast('Assessment maximum mark must be greater than zero before marks can be saved.', 'error');
+          return false;
+        }
 
-  try {
-    for (const e of toSave) {
-      const data = {
-        assessment_id: markAssessment.id,
-        learner_id: e.learnerId,
-        mark: parseFloat(e.mark),
-        normalized_mark: e.pct,
-        percentage: e.pct,
-        grade: e.grade,
-        remark: e.remark,
-        status: ['submitted', 'approved'].includes(markAssessment.status)
-          ? 'submitted'
-          : markAssessment.status === 'draft'
-            ? 'draft'
-            : e.existingStatus === 'submitted' ? 'submitted' : 'draft'
-      };
-      if (e.markId) {
-        const { error } = await sbClient.from('marks').update(data).eq('id', e.markId);
-        if (error) throw error;
-      } else {
-        data.original_mark = parseFloat(e.mark);
-        data.original_maximum = Number(markAssessment.maximum_mark);
-        const { data: newMark, error } = await sbClient.from('marks').insert(data).select().single();
-        if (error) throw error;
-        e.markId = newMark.id;
+        for (const entry of dirtyEntries) {
+          while (entry.calculationPromise) {
+            const pendingCalculation = entry.calculationPromise;
+            await pendingCalculation;
+            if (entry.calculationPromise === pendingCalculation) break;
+          }
+          if (!markEntryHasUnsavedValue(entry)) continue;
+          const snapshot = {
+            mark: entry.mark,
+            pct: entry.pct,
+            grade: entry.grade,
+            remark: entry.remark
+          };
+          const value = parseFloat(snapshot.mark);
+          const data = {
+            assessment_id: assessment.id,
+            learner_id: entry.learnerId,
+            mark: value,
+            normalized_mark: snapshot.pct,
+            percentage: snapshot.pct,
+            grade: snapshot.grade,
+            remark: snapshot.remark,
+            status: ['submitted', 'approved'].includes(assessment.status)
+              ? 'submitted'
+              : assessment.status === 'draft'
+                ? 'draft'
+                : entry.existingStatus === 'submitted' ? 'submitted' : 'draft'
+          };
+          if (entry.markId) {
+            const { error } = await sbClient.from('marks').update(data).eq('id', entry.markId);
+            if (error) throw error;
+          } else {
+            data.original_mark = value;
+            data.original_maximum = Number(assessment.maximum_mark);
+            const { data: newMark, error } = await sbClient.from('marks').insert(data).select().single();
+            if (error) throw error;
+            entry.markId = newMark.id;
+          }
+          entry.savedMark = snapshot.mark;
+          wrote = true;
+        }
+      } while (markSaveRequested || entries.some(markEntryHasUnsavedValue));
+
+      if (wrote) {
+        DB.invalidate('marks');
+        if (typeof AnalyticsEngine !== 'undefined') AnalyticsEngine.resetContext();
+        if (typeof ReportUtils !== 'undefined') ReportUtils.invalidate();
       }
+      if (markAssessment?.id === assessment.id) {
+        if (!isAuto) Utils.toast(wrote ? 'Marks saved — synced to Analytics, Reports & DOS' : 'Marks are up to date.', 'success');
+        showSaveStatus('saved');
+        setTimeout(() => {
+          const el = document.getElementById('save-status');
+          if (el && markAssessment?.id === assessment.id) el.innerHTML = '';
+        }, isAuto ? 3000 : 2000);
+      }
+      return true;
+    } catch (error) {
+      if (markAssessment?.id === assessment.id) showSaveStatus('error');
+      if (!isAuto) Utils.toast('Error saving: ' + error.message, 'error');
+      return false;
     }
-    // === SYNC EVERYWHERE: marks changed → invalidate caches so Analytics/Reports/DOS see fresh data ===
-    DB.invalidate('marks');
-    if (typeof AnalyticsEngine !== 'undefined') AnalyticsEngine.resetContext();
-    if (typeof ReportUtils !== 'undefined') ReportUtils.invalidate();
-    if (isAuto) {
-      showSaveStatus('saved');
-      setTimeout(() => { const el = document.getElementById('save-status'); if (el) el.innerHTML = ''; }, 3000);
-    } else {
-      Utils.toast('Marks saved — synced to Analytics, Reports & DOS', 'success');
-      showSaveStatus('saved');
-      setTimeout(() => { const el = document.getElementById('save-status'); if (el) el.innerHTML = ''; }, 2000);
+  })();
+  markSavePromise = run;
+  try {
+    return await run;
+  } finally {
+    if (markSavePromise === run) {
+      markSavePromise = null;
+      markSaveAssessmentId = null;
+      markSaveRequested = false;
     }
-  } catch (e) {
-    showSaveStatus('error');
-    if (!isAuto) Utils.toast('Error saving: ' + e.message, 'error');
   }
 }
 
@@ -1260,6 +1356,8 @@ async function openSubmitConfirm() {
 
 async function submitMarks() {
   try {
+    const saved = await saveMarks(false);
+    if (!saved) return;
     Modal.close();
 
     /* Stale-data guard: confirm the assessment is still editable before

@@ -300,10 +300,10 @@ const MarksImport = (() => {
   }
 
   // ------------------------------------------------------------
-  // Excel / CSV extraction (SheetJS is already loaded)
+  // Excel / CSV extraction
   // ------------------------------------------------------------
   async function ensureSpreadsheetLib() {
-    if (typeof XLSX === 'undefined') await loadScript('https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js');
+    if (typeof XLSX === 'undefined') await Utils.loadSpreadsheetLibrary();
   }
 
   async function extractSpreadsheet(file) {

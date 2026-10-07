@@ -7,6 +7,142 @@ let classesCategory  = 'all'; // Primary, Lower Secondary, Upper Secondary
 let classesStatus    = 'all';
 let classesYear      = 'all';
 
+async function downloadClassLearners(classId) {
+  if (typeof Auth === 'undefined' || !Auth.isAdmin()) {
+    Utils.toast('Only DOS accounts can download class lists.', 'error');
+    return;
+  }
+
+  try {
+    const classes = await DB.getFresh('classes', { id: classId }, {
+      select: 'id,name,level,stream,education_level,class_teacher_id'
+    });
+    const cls = classes[0];
+    if (!cls || (typeof Scope !== 'undefined' && !Scope.matchesClass(cls))) {
+      Utils.toast('This class is outside your DOS access scope.', 'error');
+      return;
+    }
+
+    const learners = await DB.getFreshQuery(
+      'learners',
+      'learner_code,full_name,gender,status',
+      { class_id: cls.id },
+      { column: 'full_name', asc: true }
+    );
+    const rows = [
+      ['Class', cls.name],
+      ['Education Level', EducationLevels.getCategory(cls)],
+      ['Generated', new Date().toLocaleDateString()],
+      [],
+      ['No.', 'Student Code', 'Full Name', 'Gender', 'Status'],
+      ...learners.map((learner, index) => [
+        index + 1,
+        String(learner.learner_code || ''),
+        learner.full_name,
+        learner.gender,
+        learner.status
+      ])
+    ];
+    await Utils.loadSpreadsheetLibrary();
+    const sheet = XLSX.utils.aoa_to_sheet(rows);
+    sheet['!cols'] = [{ wch: 8 }, { wch: 20 }, { wch: 36 }, { wch: 12 }, { wch: 14 }];
+    for (let rowIndex = 5; rowIndex < rows.length; rowIndex++) {
+      const codeCell = XLSX.utils.encode_cell({ r: rowIndex, c: 1 });
+      sheet[codeCell] = { t: 's', v: String(rows[rowIndex][1]), z: '@' };
+    }
+    const workbook = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(workbook, sheet, 'Learners');
+    const safeName = String(cls.name || 'class').replace(/[^a-z0-9_-]+/gi, '_');
+    XLSX.writeFile(workbook, `RMS_${safeName}_Learner_List.xlsx`);
+    Utils.toast(`Class list downloaded (${learners.length} learners).`, 'success');
+  } catch (error) {
+    console.error('[Class Management] class list download failed:', error);
+    Utils.toast('Could not download the class list: ' + (error.message || 'Unknown error'), 'error');
+  }
+}
+
+async function assignClassTeacher(classId) {
+  if (typeof Auth === 'undefined' || !Auth.isAdmin()) {
+    Utils.toast('Only DOS accounts can assign class teachers.', 'error');
+    return;
+  }
+
+  try {
+    const [classes, teachers] = await Promise.all([
+      DB.getFresh('classes', { id: classId }, {
+        select: 'id,name,level,stream,education_level,class_teacher_id'
+      }),
+      DB.getFreshQuery(
+        'teachers',
+        'id,full_name,teacher_code,status',
+        {},
+        { column: 'full_name', asc: true }
+      ),
+    ]);
+    const cls = classes[0];
+    if (!cls || (typeof Scope !== 'undefined' && !Scope.matchesClass(cls))) {
+      Utils.toast('This class is outside your DOS access scope.', 'error');
+      return;
+    }
+
+    const options = teachers
+      .filter(teacher => teacher.status === 'active' || String(teacher.id) === String(cls.class_teacher_id || ''))
+      .map(teacher => `<option value="${teacher.id}" ${String(teacher.id) === String(cls.class_teacher_id || '') ? 'selected' : ''}>${Utils.escapeHtml(teacher.full_name)} (${Utils.escapeHtml(teacher.teacher_code || '')})${teacher.status !== 'active' ? ' — Inactive' : ''}</option>`)
+      .join('');
+    Modal.show(`Assign Class Teacher — ${Utils.escapeHtml(cls.name)}`, `
+      <div class="form-group">
+        <label for="class-teacher-assignment">Class Teacher</label>
+        <select id="class-teacher-assignment" class="select-field">
+          <option value="">Not assigned</option>
+          ${options}
+        </select>
+        <p class="form-hint">Each class has one class teacher. Assigning a different teacher transfers this class to them.</p>
+      </div>`,
+      `<button class="btn btn-secondary" onclick="Modal.close()">Cancel</button>
+       <button class="btn btn-primary" onclick="saveClassTeacherAssignment('${cls.id}')"><i data-lucide="save"></i> Save Assignment</button>`);
+    if (typeof lucide !== 'undefined') lucide.createIcons();
+  } catch (error) {
+    console.error('[Class Management] could not load class teacher assignment:', error);
+    Utils.toast('Could not load teachers for assignment: ' + (error.message || 'Unknown error'), 'error');
+  }
+}
+
+async function saveClassTeacherAssignment(classId) {
+  if (typeof Auth === 'undefined' || !Auth.isAdmin()) {
+    Utils.toast('Only DOS accounts can assign class teachers.', 'error');
+    return;
+  }
+  const classTeacherId = document.getElementById('class-teacher-assignment')?.value || null;
+  try {
+    const classes = await DB.getFresh('classes', { id: classId }, {
+      select: 'id,name,level,stream,education_level'
+    });
+    const cls = classes[0];
+    if (!cls || (typeof Scope !== 'undefined' && !Scope.matchesClass(cls))) {
+      Utils.toast('This class is outside your DOS access scope.', 'error');
+      return;
+    }
+    if (classTeacherId) {
+      const teachers = await DB.getFresh('teachers', { id: classTeacherId }, {
+        select: 'id,status'
+      });
+      const selectedTeacher = teachers[0];
+      if (!selectedTeacher || (selectedTeacher.status !== 'active'
+          && String(cls.class_teacher_id || '') !== String(classTeacherId))) {
+        Utils.toast('Select an active teacher to assign.', 'error');
+        return;
+      }
+    }
+    await DB.update('classes', classId, { class_teacher_id: classTeacherId });
+    Modal.close();
+    Utils.toast(classTeacherId ? 'Class teacher assigned successfully.' : 'Class teacher assignment removed.', 'success');
+    await renderClasses();
+  } catch (error) {
+    console.error('[Class Management] class teacher assignment failed:', error);
+    Utils.toast('Could not save class teacher assignment: ' + (error.message || 'Unknown error'), 'error');
+  }
+}
+
 // ---- Main Render ------------------------------------------------------------
 
 async function renderClasses() {
@@ -128,7 +264,13 @@ async function renderClasses() {
             </div>
           </div>
 
-          <div style="display:flex;gap:8px;padding-top:10px;border-top:1px solid #f3f4f6">
+          <div style="display:flex;flex-wrap:wrap;gap:8px;padding-top:10px;border-top:1px solid #f3f4f6">
+            <button class="btn btn-sm btn-primary" style="flex:1 1 100%" title="Assign or change class teacher" aria-label="${c.class_teacher_id ? 'Change' : 'Assign'} class teacher for ${Utils.escapeHtml(c.name)}" onclick="assignClassTeacher('${c.id}')">
+              <i data-lucide="user-round-cog" style="width:13px;height:13px"></i> ${c.class_teacher_id ? 'Change Class Teacher' : 'Assign Class Teacher'}
+            </button>
+            <button class="btn btn-sm btn-outline" style="flex:1 1 100%" title="Download Excel learner list with student codes preserved as text" aria-label="Download ${Utils.escapeHtml(c.name)} learner list as Excel" onclick="downloadClassLearners('${c.id}')">
+              <i data-lucide="download" style="width:13px;height:13px"></i> Download Excel List
+            </button>
             <button class="btn btn-sm btn-outline" style="flex:1" onclick='classEdit(${JSON.stringify(c).replace(/'/g, "&#39;")})'>
               <i data-lucide="pencil" style="width:13px;height:13px"></i> Edit
             </button>

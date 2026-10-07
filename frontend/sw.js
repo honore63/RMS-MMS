@@ -1,9 +1,9 @@
 /* ============================================================
-  RMS-MIS — Service Worker v8
+  RMS-MIS — Service Worker v9
    Production-ready: caching, offline, push, background sync
    ============================================================ */
 
-const CACHE_NAME = 'rms-mis-v8';
+const CACHE_NAME = 'rms-mis-v9';
 const APP_SHELL = [
   '/',
   '/index.html',
@@ -26,19 +26,39 @@ const APP_SHELL = [
   '/js/components/sidebar.js',
   '/js/communication-center.js',
   '/js/pages/admin-dashboard.js',
+  '/js/pages/admin-academic.js',
   '/js/pages/admin-teachers.js',
   '/js/pages/admin-classes.js',
   '/js/pages/admin-subjects.js',
+  '/js/pages/admin-learners.js',
+  '/js/pages/admin-assignments.js',
   '/js/pages/admin-assessments.js',
+  '/js/pages/admin-assessment-types.js',
   '/js/pages/admin-marks.js',
+  '/js/pages/admin-report-card.js',
+  '/js/pages/admin-audit-logs.js',
+  '/js/pages/admin-grading.js',
+  '/js/pages/admin-settings.js',
+  '/js/pages/principal-dashboard.js',
+  '/js/pages/parent-portal.js',
+  '/js/reports/report-header.js',
+  '/js/reports/report-utils.js',
+  '/js/reports/report-comments.js',
+  '/js/reports/report-student.js',
+  '/js/reports/report-engine.js',
+  '/js/reports/report-templates.js',
+  '/js/reports/report-wizard.js',
   '/js/pages/admin-reports.js',
+  '/js/pages/analytics.js',
   '/js/pages/teacher-pages.js',
   '/js/pages/teacher-enter-marks.js',
+  '/js/pages/teacher-convert-marks.js',
   '/js/pages/teacher-account.js',
   '/js/app.js',
   '/js/welcome-notification.js',
   '/js/charts.js',
   '/js/analytics-engine.js',
+  '/js/import-system.js',
   '/js/marks-import.js',
   '/js/sync-registry.js',
   '/manifest.webmanifest',
@@ -53,7 +73,7 @@ self.addEventListener('install', (event) => {
     caches.open(CACHE_NAME)
       .then((cache) => Promise.all(APP_SHELL.map(async (asset) => {
         try {
-          await cache.add(asset);
+          await cache.add(new Request(asset, { cache: 'reload' }));
         } catch (error) {
           console.warn('[SW] Precache failed:', asset, error);
         }
@@ -137,7 +157,7 @@ async function networkFirst(request) {
     }
     return response;
   } catch (err) {
-    const cached = await caches.match(request);
+    const cached = await caches.match(request) || await caches.match(request, { ignoreSearch: true });
     if (cached) return cached;
     if (request.mode === 'navigate') {
       return caches.match(OFFLINE_URL);

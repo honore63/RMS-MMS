@@ -256,7 +256,7 @@ const ReportEngine = {
     if (assessIds.length) {
       for (let i = 0; i < assessIds.length; i += 50) {
         const batch = assessIds.slice(i, i + 50);
-        const marks = await DB.query('marks', '*', { learner_id: studentId, assessment_id: batch });
+        const marks = await ReportUtils.getFreshMarks({ learner_id: studentId, assessment_id: batch });
         allMarks = allMarks.concat(marks);
       }
     }
@@ -308,7 +308,7 @@ const ReportEngine = {
     if (!assess) throw new Error('No assessment found');
 
     const assessIds = scopedAssessments.map(a => a.id);
-    const allMarks = await DB.query('marks', '*', { assessment_id: assessIds }, { column: 'learner_id' });
+    const allMarks = await ReportUtils.getFreshMarks({ assessment_id: assessIds }, { column: 'learner_id' });
     const assessmentsById = new Map(scopedAssessments.map(a => [String(a.id), a]));
     const marksByLearner = new Map();
     allMarks.forEach(mark => {
@@ -383,7 +383,7 @@ const ReportEngine = {
     const assessments = filterReportAssessments(scopedAssessments, scopedSubjects, cls);
     const assessIds = assessments.map(a => a.id);
 
-    const allMarks = await DB.query('marks', '*', { assessment_id: assessIds }, { column: 'learner_id' });
+    const allMarks = await ReportUtils.getFreshMarks({ assessment_id: assessIds }, { column: 'learner_id' });
     const assessmentsById = new Map(assessments.map(a => [String(a.id), a]));
     const marksByLearner = new Map();
     allMarks.forEach(mark => {
@@ -471,7 +471,7 @@ const ReportEngine = {
     });
     const assessments = filterReportAssessments(raw, filteredSubjects, cls);
     const assessIds = assessments.map(a => a.id);
-    const allMarks = assessIds.length ? await DB.query('marks', '*', { assessment_id: assessIds }, { column: 'learner_id' }) : [];
+    const allMarks = assessIds.length ? await ReportUtils.getFreshMarks({ assessment_id: assessIds }, { column: 'learner_id' }) : [];
     const assessmentsById = new Map(assessments.map(a => [String(a.id), a]));
     const marksByLearner = new Map();
     allMarks.forEach(mark => {
@@ -547,10 +547,11 @@ const ReportEngine = {
         const assessIds = subjAssessments.map(a => a.id);
         const expectedLearners = await DB.query('learners', '*', { class_id: cls.id, status: 'active' });
         const expectedCount = expectedLearners.length;
-        let marksEntered = 0;
-        const { count: totalMarks } = await sbClient.from('marks').select('*', { count: 'exact', head: true }).in('assessment_id', assessIds);
-        const { count: nonNullMarks } = await sbClient.from('marks').select('*', { count: 'exact', head: true }).in('assessment_id', assessIds).not('mark', 'is', null);
-        marksEntered = nonNullMarks || 0;
+        const { count: nonNullMarks } = await sbClient.from('marks')
+          .select('id', { count: 'exact', head: true })
+          .in('assessment_id', assessIds)
+          .not('mark', 'is', null);
+        const marksEntered = nonNullMarks || 0;
         const missingCount = expectedCount * subjAssessments.length - marksEntered;
         const completionPct = expectedCount * subjAssessments.length > 0 ? Math.round((marksEntered / (expectedCount * subjAssessments.length)) * 1000) / 10 : 0;
         const teacher = teachers.find(t => t.id === subjAssessments[0]?.teacher_id);
@@ -587,7 +588,7 @@ const ReportEngine = {
       return subjectMatchesReportScope(subjects.find(subject => String(subject.id) === String(assessment.subject_id)), cls);
     });
     const assessIds = assessments.map(a => a.id);
-    const allMarks = assessIds.length ? await DB.query('marks', '*', { assessment_id: assessIds }, { column: 'learner_id' }) : [];
+    const allMarks = assessIds.length ? await ReportUtils.getFreshMarks({ assessment_id: assessIds }, { column: 'learner_id' }) : [];
     const assessmentsById = new Map(assessments.map(a => [String(a.id), a]));
     const marksByLearner = new Map();
     allMarks.forEach(mark => {
@@ -645,11 +646,11 @@ const ReportEngine = {
     if (termIds && termIds.length){ const tSet=new Set(termIds.map(String)); rawAssess=rawAssess.filter(a=> !a.term_id || tSet.has(String(a.term_id))); }
     if (assessmentIds && assessmentIds.length){ const aSet=new Set(assessmentIds.map(String)); rawAssess=rawAssess.filter(a=> aSet.has(String(a.id))); }
     const assessments = filterReportAssessments(rawAssess, subjects).filter(assessment => scopedAssignments.some(assignment => String(assignment.class_id) === String(assessment.class_id) && String(assignment.subject_id) === String(assessment.subject_id)));
-    const approvedAssessments = assessments.filter(a => ['submitted', 'approved', 'locked'].includes(a.status));
+    const submittedOrFinalAssessments = assessments.filter(a => ['submitted', 'approved', 'locked'].includes(a.status));
     const submittedAssessments = assessments.filter(a => a.status === 'submitted');
     const assessIds = assessments.map(a => a.id);
     const learners = await DB.query('learners', '*', { class_id: classIds, status: 'active' });
-    const allMarks = assessIds.length ? await DB.query('marks', '*', { assessment_id: assessIds }, { column: 'learner_id' }) : [];
+    const allMarks = assessIds.length ? await ReportUtils.getFreshMarks({ assessment_id: assessIds }, { column: 'learner_id' }) : [];
     const assessmentsById = new Map(assessments.map(a => [String(a.id), a]));
     const marksByLearner = new Map();
     allMarks.forEach(mark => {
@@ -673,7 +674,7 @@ const ReportEngine = {
     }
 
     const stats = await ReportUtils.computeStats(learnerStats);
-    return { type: 'teacher-performance', title: 'TEACHER PERFORMANCE REPORT', settings, year, term, teacher, assignments: scopedAssignments, classes: scopedClasses, subjects: subjects.filter(subject => assignedSubjectIds.some(id => String(id) === String(subject.id))), assessments, approvedAssessments, submittedAssessments, stats };
+    return { type: 'teacher-performance', title: 'TEACHER PERFORMANCE REPORT', settings, year, term, teacher, assignments: scopedAssignments, classes: scopedClasses, subjects: subjects.filter(subject => assignedSubjectIds.some(id => String(id) === String(subject.id))), assessments, submittedOrFinalAssessments, submittedAssessments, stats };
   },
 
   async generateGradeDistribution(ctx) {
@@ -702,7 +703,7 @@ const ReportEngine = {
       return subjectMatchesReportScope(subjects.find(subject => String(subject.id) === String(assessment.subject_id)), cls);
     });
     const assessIds = assessments.map(a => a.id);
-    const allMarks = assessIds.length ? await DB.query('marks', '*', { assessment_id: assessIds }, { column: 'learner_id' }) : [];
+    const allMarks = assessIds.length ? await ReportUtils.getFreshMarks({ assessment_id: assessIds }, { column: 'learner_id' }) : [];
     const assessmentsById = new Map(assessments.map(a => [String(a.id), a]));
     const marksByLearner = new Map();
     allMarks.forEach(mark => {
@@ -751,7 +752,9 @@ const ReportEngine = {
 
   async _queryTermScopedAssessments({ classIds, subjectIds, assessmentIds, termIds, year, term, status, assessmentTypeId }) {
     const qf = { academic_year_id: (year && year.id) ? year.id : undefined };
-    if (status && status.length) qf.status = status;
+    if (status && status.length) {
+      qf.status = ReportUtils.includeSubmittedAssessmentStatus(status);
+    }
     if (classIds && classIds.length) qf.class_id = classIds;
     if (subjectIds && subjectIds.length) qf.subject_id = subjectIds;
     if (assessmentIds && assessmentIds.length) qf.id = assessmentIds;
@@ -839,7 +842,7 @@ const ReportEngine = {
       ass.sort((a, b) => String(a.assessment_date || '').localeCompare(String(b.assessment_date || '')) || String(a.name).localeCompare(String(b.name)));
 
       const learners = await ReportUtils.getLearners(cls.id);
-      const marks = await DB.query('marks', '*', { assessment_id: ass.map(a => a.id) }, { column: 'learner_id' });
+      const marks = await ReportUtils.getFreshMarks({ assessment_id: ass.map(a => a.id) }, { column: 'learner_id' });
       const assessmentsById = new Map(ass.map(a => [String(a.id), a]));
       const marksByLearner = new Map();
       marks.forEach(m => {
@@ -907,7 +910,7 @@ const ReportEngine = {
     ass = ass.filter(a => levelSubjects.some(s => String(s.id) === String(a.subject_id)));
     if (!ass.length) throw new Error('No marks are available for this student in the selected period.');
 
-    const marksFor = await DB.query('marks', '*', { learner_id: sid, assessment_id: ass.map(a => a.id) });
+    const marksFor = await ReportUtils.getFreshMarks({ learner_id: sid, assessment_id: ass.map(a => a.id) });
     const marksById = new Map();
     ass.forEach(a => marksById.set(String(a.id), a));
     const typeById = new Map();
@@ -958,7 +961,7 @@ const ReportEngine = {
     let ass = await this._queryTermScopedAssessments({ classIds: [cls.id], subjectIds: [subject.id], assessmentIds, termIds, year, term });
     if (!ass.length) throw new Error('No assessments found for this subject in the selected period.');
     const learners = await ReportUtils.getLearners(classId);
-    const marks = await DB.query('marks', '*', { assessment_id: ass.map(a => a.id) });
+    const marks = await ReportUtils.getFreshMarks({ assessment_id: ass.map(a => a.id) });
     const rows = ass.map(a => {
       const ms = marks.filter(m => String(m.assessment_id) === String(a.id) && m.mark != null && m.mark !== '');
       const mx = Number(a.maximum_mark || 0);
@@ -990,7 +993,7 @@ const ReportEngine = {
     const learners = await DB.query('learners', '*', { class_id: classes.map(c => c.id), status: 'active' });
     const learnersByClass = new Map();
     learners.forEach(l => { if (!learnersByClass.has(String(l.class_id))) learnersByClass.set(String(l.class_id), []); learnersByClass.get(String(l.class_id)).push(l); });
-    const marks = await DB.query('marks', '*', { assessment_id: ass.map(a => a.id) });
+    const marks = await ReportUtils.getFreshMarks({ assessment_id: ass.map(a => a.id) });
     const rows = ass.map(a => {
       const ms = marks.filter(m => String(m.assessment_id) === String(a.id) && m.mark != null && m.mark !== '');
       const mx = Number(a.maximum_mark || 0);
@@ -1022,7 +1025,7 @@ const ReportEngine = {
     const learners = await DB.query('learners', '*', { class_id: classes.map(c => c.id), status: 'active' });
     const learnersByClass = new Map();
     learners.forEach(l => { if (!learnersByClass.has(String(l.class_id))) learnersByClass.set(String(l.class_id), []); learnersByClass.get(String(l.class_id)).push(l); });
-    const marks = await DB.query('marks', '*', { assessment_id: ass.map(a => a.id) });
+    const marks = await ReportUtils.getFreshMarks({ assessment_id: ass.map(a => a.id) });
 
     const rows = ass.map(a => {
       const ms = marks.filter(m => String(m.assessment_id) === String(a.id));
@@ -1114,7 +1117,7 @@ const ReportEngine = {
       const classSet = new Set(ass.map(a => a.class_id));
       const subjSet = new Set(ass.map(a => a.subject_id));
       const ids = ass.map(a => a.id);
-      const mks = await DB.query('marks', '*', { assessment_id: ids });
+      const mks = await ReportUtils.getFreshMarks({ assessment_id: ids });
       const entered = mks.filter(m => m.mark != null && m.mark !== '').length;
       const expected = entered; // entered as proxy; missing computed per expected learners omitted for brevity
       rows.push({
