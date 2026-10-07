@@ -16,6 +16,7 @@ backend/
     ├── database.sql              # MASTER SETUP: complete schema + RLS + triggers + seeds (run this)
     ├── assessment_normalization_upgrade.sql # Existing-project upgrade for normalized mark storage
     ├── user_id_fk_upgrade.sql    # Existing-project fix for auth/profile ID relinking
+    ├── teacher_registration_users_rls.sql # Existing-project DOS policy for teacher profile creation
     ├── class_teacher_access.sql  # Class Teacher read access, DOS assignment RPC and audit trail
     ├── admin_dashboard_count_upgrade.sql # Scoped dashboard learner-count RPC
     ├── primary_subjects_catalog_upgrade.sql # Ensure all Primary curriculum subjects are available
@@ -39,6 +40,7 @@ backend/
 7. Start the frontend (open `frontend/index.html` or deploy to Vercel).
 
 > All SQL is pasted and run **manually** in the SQL Editor — there is no migration runner. Prefer paste-ready queries with no placeholders.
+> On an existing project where teacher registration fails with a `users` row-level security error, run `sql/teacher_registration_users_rls.sql` in the SQL Editor. It allows DOS teacher-profile inserts while preserving education-level scoping.
 > For an existing project, run `sql/assessment_normalization_upgrade.sql` to add and backfill the nullable `marks.normalized_mark` field. The original `marks.mark` value remains unchanged; `marks.percentage` remains supported as the same normalized percentage.
 > If a previous setup run failed while relinking profile IDs because notifications reference `public.users`, run `sql/user_id_fk_upgrade.sql` first, then rerun `sql/database.sql`.
 > For the dashboard's scoped learner total on an existing project, run `sql/admin_dashboard_count_upgrade.sql` in Supabase SQL Editor before publishing the frontend that calls it.

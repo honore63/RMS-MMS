@@ -824,10 +824,11 @@ async function teacherSave() {
       .filter(item => item && item.class_id && (item.subject_ids || []).length)
       .map(item => ({ class_id: String(item.class_id), subject_ids: [...new Set((item.subject_ids || []).map(String))] }));
 
-    // Upsert profile rows (idempotent, so retrying a partial registration is safe)
+    // Ignore an existing profile row: DOS cannot update it until the teacher
+    // row exists, and the following teacher upsert repairs partial registrations.
     const { error: userUpsertErr } = await sbClient.from('users').upsert(
       { id: teacherAuthId, email, full_name: name, role: 'teacher', status: 'active', phone, education_level: accountEducationLevel },
-      { onConflict: 'id' }
+      { onConflict: 'id', ignoreDuplicates: true }
     );
     if (userUpsertErr) throw userUpsertErr;
     const { error: teacherUpsertErr } = await sbClient.from('teachers').upsert(

@@ -1744,7 +1744,8 @@ CREATE POLICY rms_account_users_select ON public.users FOR SELECT TO authenticat
 DROP POLICY IF EXISTS rms_account_users_insert ON public.users;
 CREATE POLICY rms_account_users_insert ON public.users FOR INSERT TO authenticated
   WITH CHECK ((id = auth.uid() AND role = 'teacher')
-    OR (public.rms_account_role() = 'dos' AND role IN ('teacher', 'parent')));
+    OR (public.rms_account_role() = 'dos' AND role IN ('teacher', 'parent')
+      AND public.rms_dos_can_teacher_level(education_level)));
 DROP POLICY IF EXISTS rms_account_users_update ON public.users;
 CREATE POLICY rms_account_users_update ON public.users FOR UPDATE TO authenticated
   USING (public.rms_account_can_access_user(id)) WITH CHECK (public.rms_account_can_access_user(id));
