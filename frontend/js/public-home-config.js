@@ -10,7 +10,7 @@ const RMS_PUBLIC_LINKS = [
     status: 'online',
     actions: [
       { id: 'staff', label: 'Staff Login', url: '#staff-login' },
-      { id: 'marks', label: 'Parent / Student Marks', url: 'parent-marks.html', note: 'Keep your learner code private.' }
+      { id: 'marks', label: 'Check student progress', url: 'parent-marks.html', note: 'Keep your learner code private.' }
     ]
   },
   {
@@ -58,6 +58,11 @@ const RMS_PUBLIC_SETTINGS = {
     welcome: 'Welcome to Rukara Model School',
     heroTitle: 'One place to access all school systems',
     heroDescription: 'Choose a platform below to check marks, find learning resources or take an examination.',
+    progressAudience: 'For students & parents',
+    progressTitle: 'Keep track of student progress',
+    progressDescription: 'Check marks, results and academic performance in the secure Parent / Student portal.',
+    progressAction: 'Check student progress',
+    progressPrivacy: 'Have your learner code ready and keep it private.',
     searchLabel: 'Search platforms',
     searchPlaceholder: 'Search by platform, audience or purpose',
     platformsEyebrow: 'School platforms',
@@ -70,7 +75,7 @@ const RMS_PUBLIC_SETTINGS = {
     audience: 'Audience',
     openNewTab: 'Opens in a new tab',
     quickLinks: 'Quick links',
-    checkMarks: 'Check my marks',
+    checkMarks: 'Check student progress',
     openLibrary: 'Open library',
     takeExam: 'Take an exam',
     previewEyebrow: 'A glimpse inside',

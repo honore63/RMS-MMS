@@ -234,6 +234,11 @@
     setText('rph-welcome', strings.welcome);
     setText('rph-hero-title', strings.heroTitle);
     setText('rph-hero-description', strings.heroDescription);
+    setText('rph-progress-audience', strings.progressAudience);
+    setText('rph-progress-title', strings.progressTitle);
+    setText('rph-progress-description', strings.progressDescription);
+    setText('rph-progress-action', strings.progressAction);
+    setText('rph-progress-privacy', strings.progressPrivacy);
     setText('rph-search-label', strings.searchLabel);
     byId('rph-search').placeholder = strings.searchPlaceholder;
     setText('rph-platforms-eyebrow', strings.platformsEyebrow);

@@ -3,7 +3,7 @@
    Production-ready: caching, offline, push, background sync
    ============================================================ */
 
-const CACHE_NAME = 'rms-mis-v50';
+const CACHE_NAME = 'rms-mis-v51';
 const APP_BASE = new URL('.', self.location.href);
 const APP_BASE_PATH = APP_BASE.pathname;
 const APP_SHELL = [

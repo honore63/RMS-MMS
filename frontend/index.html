@@ -24,7 +24,7 @@
   <link rel="stylesheet" href="css/digital-library.css?v=20261008-22">
   <link rel="stylesheet" href="css/report-wizard.css?v=20261006-2">
   <link rel="stylesheet" href="css/communication-center.css?v=20260928-1">
-  <link rel="stylesheet" href="css/public-home.css?v=10">
+  <link rel="stylesheet" href="css/public-home.css?v=11">
   <script>
     (function() {
       var manifest = {
@@ -98,6 +98,22 @@
               <label class="rph-search"><i data-lucide="search"></i><span class="rph-sr-only" id="rph-search-label"></span><input id="rph-search" type="search" autocomplete="off"></label>
             </div>
             <div class="rph-hero-mark" aria-hidden="true"><i data-lucide="book-open-check"></i></div>
+          </section>
+          <section class="rph-progress-section" aria-labelledby="rph-progress-title">
+            <div class="rph-progress-card">
+              <span class="rph-progress-icon" aria-hidden="true"><i data-lucide="chart-no-axes-combined"></i></span>
+              <div class="rph-progress-copy">
+                <p class="rph-progress-eyebrow" id="rph-progress-audience"></p>
+                <h2 id="rph-progress-title"></h2>
+                <p id="rph-progress-description"></p>
+                <small><i data-lucide="lock-keyhole" aria-hidden="true"></i><span id="rph-progress-privacy"></span></small>
+              </div>
+              <a class="rph-progress-action" href="parent-marks.html">
+                <i data-lucide="chart-no-axes-column-increasing" aria-hidden="true"></i>
+                <span id="rph-progress-action"></span>
+                <i data-lucide="arrow-right" aria-hidden="true"></i>
+              </a>
+            </div>
           </section>
           <section class="rph-section" id="rph-platforms">
             <div class="rph-section-heading">
@@ -336,7 +352,7 @@
   </div>
 
   <script src="js/config.js?v=20250924-8"></script>
-  <script src="js/public-home-config.js?v=6"></script>
+  <script src="js/public-home-config.js?v=7"></script>
   <script src="js/public-home.js?v=12"></script>
     <script defer src="https://cdn.jsdelivr.net/npm/@emailjs/browser@4/dist/email.min.js"></script>
     <script>
