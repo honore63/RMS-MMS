@@ -476,6 +476,8 @@ After any **raw** `sbClient` write, call `DB.invalidate(tableName)`.
 - **Cache**: `index.html` has `Cache-Control: no-store` for fresh deploys
 - **Static files**: `public/` served with `Cache-Control: public, max-age=31536000, immutable`
 - **Versioned JS/CSS**: references use `?v=...` cache-busters and immutable one-year cache headers; bump the query version whenever a referenced file changes.
+- **Public homepage**: the unauthenticated root page is the School Portal, embedded in the RMS-MIS frontend. It previews up to three public, published library documents and up to three published/open exams after a visitor enters their class. Visitors can use **Start test** on an open exam preview; the guest flow collects their name and starts the selected assessment. The “Explore” links open the full Digital Library and guest Examination Centre. Staff sign-in and all role-protected RMS-MIS pages remain in the same app. Portal cards link to the local parent marks page and system routes; update `frontend/js/public-home-config.js` to change platform links and school text.
+- **Guest exam class search**: searching a grade such as `P4` also returns exams assigned to its one-letter section classes, such as `P4A` and `P4B`; exact section searches still work. The student chooses the matching section when needed before starting, so the guest attempt is recorded against an assigned class. To update an existing Supabase database, run `backend/sql/examination_centre_grade_search.sql` in the Supabase SQL editor. The main `backend/sql/examination_centre.sql` definition includes the same behavior for fresh setup.
 
 ### Vercel Configuration (`vercel.json`)
 - Catch-all rewrite: `/(.*)` → `/frontend/$1`

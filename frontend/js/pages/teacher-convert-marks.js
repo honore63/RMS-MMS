@@ -15,11 +15,49 @@
 let bulkConvert = null;   // page state
 let bulkApplying = false; // realtime guard: never rebuild mid-conversion
 let bulkSearch = '';
-let bulkFilter = 'convertible';
+let bulkFilter = 'all';
 let bulkOnlyMissing = false;
 let bulkMissingZero = true; // missing marks count as zero (user-toggleable)
 let bulkReviewView = 'sheet'; // 'sheet' = converted-marks page, 'full' = full review
 let bulkLibView = null; // currently opened saved conversion { helper, max, rows }
+
+async function bulkLoadAllPages(table, select, filters, order = null) {
+  const pageSize = 500;
+  const rows = [];
+  let offset = 0;
+  let page;
+  do {
+    page = await DB.getPage(table, select, filters, order, offset, pageSize);
+    rows.push(...page.data);
+    offset += pageSize;
+  } while (page.hasMore);
+  return rows;
+}
+
+async function bulkLoadAssessments(teacherId) {
+  return bulkLoadAllPages(
+    'assessments',
+    '*',
+    { teacher_id: teacherId },
+    { column: 'assessment_date', asc: true }
+  );
+}
+
+async function bulkLoadAssessmentMarks(assessmentIds) {
+  const marks = [];
+  const assessmentBatchSize = 100;
+  for (let start = 0; start < assessmentIds.length; start += assessmentBatchSize) {
+    const ids = assessmentIds.slice(start, start + assessmentBatchSize);
+    let offset = 0;
+    let page;
+    do {
+      page = await DB.getPage('marks', 'assessment_id, learner_id, mark', { assessment_id: ids }, null, offset, 500);
+      marks.push(...page.data);
+      offset += 500;
+    } while (page.hasMore);
+  }
+  return marks;
+}
 
 async function renderConvertMarks() {
   setHeader('Convert Marks', 'Combine multiple assessments and convert all students' + "'" + ' marks into one assessment');
@@ -33,7 +71,7 @@ async function renderConvertMarks() {
   /* Full-row reads: academic_years/terms schemas vary (status/is_active/
      is_current, term_no/sequence), and a wrong explicit column list makes
      the whole query fail silently — so select * and sort client-side. */
-  const [yearsRaw, termsRaw, classes, subjects, types, grading, settingsData, assessments, learners] = await Promise.all([
+  const [yearsRaw, termsRaw, classes, subjects, types, grading, settingsData, learners] = await Promise.all([
     DB.get('academic_years').catch(() => []),
     DB.get('terms').catch(() => []),
     DB.get('classes'),
@@ -41,9 +79,19 @@ async function renderConvertMarks() {
     getAssessmentTypes(),
     Utils.getGradingScale(),
     DB.query('school_settings', '*'),
-    DB.query('assessments', '*', { teacher_id: teacherId }, { column: 'assessment_date', asc: true }, 500),
     DB.get('learners').catch(() => [])
   ]);
+  let assessments;
+  let markRows;
+  try {
+    assessments = await bulkLoadAssessments(teacherId);
+    markRows = await bulkLoadAssessmentMarks(assessments.map(a => a.id));
+  } catch (e) {
+    console.error('Convert: assessment data load failed', e);
+    setContent(`<div class="alert alert-error"><i data-lucide="alert-circle"></i><div><strong>Assessments could not be loaded.</strong><br>${Utils.escapeHtml(e?.message || 'Please check your connection and try again.')}</div></div>`);
+    if (typeof lucide !== 'undefined') lucide.createIcons();
+    return;
+  }
   const isYearActive = y => y && (y.is_active || y.is_current || y.status === 'active');
   const years = [...(yearsRaw || [])].sort((a, b) => Number(isYearActive(b)) - Number(isYearActive(a)) || String(b.name || '').localeCompare(String(a.name || '')));
   const termOrd = t => t.term_no ?? t.sequence ?? t.term_number ?? 0;
@@ -51,17 +99,14 @@ async function renderConvertMarks() {
 
   const counts = {};
   const marksByAssess = new Map();
-  if (assessments.length) {
-    try {
-      const ids = assessments.map(a => a.id);
-      const { data } = await sbClient.from('marks').select('assessment_id, learner_id, mark').in('assessment_id', ids);
-      (data || []).forEach(m => {
-        const kid = String(m.assessment_id);
-        if (!marksByAssess.has(kid)) marksByAssess.set(kid, new Map());
-        if (m.mark != null) { marksByAssess.get(kid).set(String(m.learner_id), Number(m.mark)); counts[kid] = (counts[kid] || 0) + 1; }
-      });
-    } catch (e) { console.error('Convert: progress count error', e); }
-  }
+  markRows.forEach(m => {
+    const kid = String(m.assessment_id);
+    if (!marksByAssess.has(kid)) marksByAssess.set(kid, new Map());
+    if (m.mark != null) {
+      marksByAssess.get(kid).set(String(m.learner_id), Number(m.mark));
+      counts[kid] = (counts[kid] || 0) + 1;
+    }
+  });
 
   const settings = settingsData[0] || {};
   const classMap = new Map(classes.map(c => [c.id, c]));
@@ -90,7 +135,9 @@ async function renderConvertMarks() {
       /* Any status can be a SOURCE (draft → locked): conversion only READS
          source marks into a separate helper — originals are never modified,
          so approved assessments stay exactly as the DOS approved them. */
-      editable: (counts[a.id] || 0) > 0 && allowed.has(a.class_id + '|' + a.subject_id)
+      editable: (counts[a.id] || 0) > 0 &&
+        Number(a.maximum_mark) > 0 &&
+        allowed.has(a.class_id + '|' + a.subject_id)
     })),
     allowed,
     selClassId: null, selSubjectId: null, selYearId: (defaultYear && defaultYear.id) || '',
@@ -145,9 +192,9 @@ function bulkRenderPage() {
     const label = (y.name || 'Year') + ((y.is_active || y.is_current || y.status === 'active') ? ' (Active)' : '');
     return `<option value="${y.id}" ${String(bc.selYearId) === String(y.id) ? 'selected' : ''}>${Utils.escapeHtml(label)} — ${yearsIn.length} term${yearsIn.length === 1 ? '' : 's'}</option>`;
   }).join('') || '<option value="">No academic years found</option>';
-  const termsOpts = (bc.terms.filter(t => String(t.academic_year_id) === String(bc.selYearId))).map(t => {
+  const termsOpts = `<option value="" ${!bc.selTermId ? 'selected' : ''}>All terms</option>` + (bc.terms.filter(t => String(t.academic_year_id) === String(bc.selYearId))).map(t => {
     return `<option value="${t.id}" ${String(bc.selTermId) === String(t.id) ? 'selected' : ''}>${Utils.escapeHtml(t.name)}${(t.is_active || t.is_current || t.status === 'active') ? ' (Active)' : ''}</option>`;
-  }).join('') || '<option value="">No terms for this year</option>';
+  }).join('');
   const classOpts = [...new Set(teacherAssignments.map(a => a.class_id))].map(cid => {
     const c = bc.classMap.get(cid);
     return `<option value="${cid}" ${String(bc.selClassId) === String(cid) ? 'selected' : ''}>${Utils.escapeHtml(c?.name || 'Class')}</option>`;
@@ -164,11 +211,7 @@ function bulkRenderPage() {
   const ctxSubj = bc.subjMap.get(bc.selSubjectId)?.name || '—';
   const ctxYear = (bc.years.find(y => String(y.id) === String(bc.selYearId)) || {}).name || '—';
   const ctxTerm = (bc.terms.find(t => String(t.id) === String(bc.selTermId)) || {}).name || 'All terms';
-  const ctxFound = bc.assessments.filter(r =>
-    String(r.a.class_id) === String(bc.selClassId) &&
-    String(r.a.subject_id) === String(bc.selSubjectId) &&
-    String(r.a.academic_year_id) === String(bc.selYearId) &&
-    (!bc.selTermId || String(r.a.term_id) === String(bc.selTermId))).length;
+  const ctxFound = bulkContextRows().length;
 
   setContent(`
     <div class="bulk-steps" role="tablist" aria-label="Conversion steps">
@@ -200,21 +243,18 @@ function bulkRenderPage() {
       </div>
       <hr style="margin:16px 0;border:none;border-top:1px solid var(--gray-200)">
       <h3 class="page-title" style="font-size:14px">Assessments to combine</h3>
-      <p class="text-sm text-muted" style="margin-bottom:12px">Tick two or more assessments with saved marks — including submitted or approved ones. Sources are only read, never changed, so official records and reports stay untouched.</p>
+      <p class="text-sm text-muted" style="margin-bottom:12px">All assessments for the selected class, subject, year and term are listed below. Select the assessments to combine; only those with saved marks can be selected. Official sources are read-only and never changed.</p>
       <div class="bulk-toolbar">
         <input class="input-field bulk-search" id="bulk-search" style="max-width:280px" placeholder="Search assessments..." value="${Utils.escapeHtml(bulkSearch)}" oninput="bulkSearch=this.value;bulkRefreshAssessRows()">
         <div class="tab-bar bulk-tabs" role="tablist" aria-label="Assessment status filter">
-          <button class="tab-btn ${bulkFilter === 'convertible' ? 'active' : ''}" onclick="bulkSetFilter('convertible')">Convertible</button>
-          <button class="tab-btn ${bulkFilter === 'draft' ? 'active' : ''}" onclick="bulkSetFilter('draft')">Draft</button>
-          <button class="tab-btn ${bulkFilter === 'rejected' ? 'active' : ''}" onclick="bulkSetFilter('rejected')">Rejected</button>
-          <button class="tab-btn ${bulkFilter === 'official' ? 'active' : ''}" onclick="bulkSetFilter('official')">Official</button>
-          <button class="tab-btn ${bulkFilter === 'all' ? 'active' : ''}" onclick="bulkSetFilter('all')">All</button>
+          ${bulkAssessmentFilterTabsHtml()}
         </div>
         <span class="bulk-spacer"></span>
         <span class="text-sm text-muted bulk-sel"><span id="bulk-sel-count">${bc.selAssess.size}</span> selected</span>
-        <button class="btn btn-sm btn-outline" onclick="bulkSelectAll(true)"><i data-lucide="check-square"></i> Select all</button>
+        <button class="btn btn-sm btn-outline" onclick="bulkSelectAll(true)"><i data-lucide="check-square"></i> Select all ready</button>
         <button class="btn btn-sm btn-outline" onclick="bulkSelectAll(false)"><i data-lucide="square"></i> Clear all</button>
       </div>
+      <div class="bulk-assessment-summary" id="bulk-assessment-summary">${bulkAssessmentSummaryHtml()}</div>
       <div class="bulk-swipe-hint"><i data-lucide="move-horizontal"></i> Swipe the table sideways on small screens</div>
       <div class="table-container" style="max-height:420px;overflow-y:auto"><table class="data-table">
         <thead><tr><th style="width:36px"></th><th>Assessment</th><th>Type</th><th>Max</th><th>Date</th><th>Saved marks</th><th>Status</th></tr></thead>
@@ -302,17 +342,54 @@ function bulkSetFilter(f) {
 
 /* ---------------- Section 2 : assessment list ---------------- */
 
+function bulkContextRows() {
+  const bc = bulkConvert;
+  return bc.assessments.filter(r =>
+    !(Utils.isConversionHelper && Utils.isConversionHelper(r.a)) &&
+    String(r.a.class_id) === String(bc.selClassId) &&
+    String(r.a.subject_id) === String(bc.selSubjectId) &&
+    String(r.a.academic_year_id) === String(bc.selYearId) &&
+    (!bc.selTermId || String(r.a.term_id) === String(bc.selTermId))
+  );
+}
+
+function bulkAssessmentFilterTabsHtml() {
+  const rows = bulkContextRows();
+  const counts = {
+    all: rows.length,
+    convertible: rows.filter(r => r.editable).length,
+    'no-marks': rows.filter(r => !r.saved).length,
+    draft: rows.filter(r => r.a.status === 'draft').length,
+    rejected: rows.filter(r => r.a.status === 'rejected').length,
+    official: rows.filter(r => ['submitted', 'approved', 'locked'].includes(r.a.status)).length
+  };
+  const tabs = [
+    ['all', 'All assessments'],
+    ['convertible', 'Ready to convert'],
+    ['no-marks', 'No saved marks'],
+    ['draft', 'Draft'],
+    ['rejected', 'Rejected'],
+    ['official', 'Official']
+  ];
+  return tabs.map(([key, label]) =>
+    `<button class="tab-btn ${bulkFilter === key ? 'active' : ''}" onclick="bulkSetFilter('${key}')">${label} <span class="bulk-tab-count">${counts[key]}</span></button>`
+  ).join('');
+}
+
+function bulkAssessmentSummaryHtml() {
+  const rows = bulkContextRows();
+  const visibleRows = bulkFilteredRows();
+  const ready = rows.filter(r => r.editable).length;
+  const selected = rows.filter(r => bulkConvert.selAssess.has(r.a.id)).length;
+  return `<span><strong>${visibleRows.length}</strong> shown</span><span><strong>${rows.length}</strong> assessments in this selection</span><span><strong>${ready}</strong> ready to convert</span><span><strong>${selected}</strong> selected</span>`;
+}
+
 function bulkFilteredRows() {
   const bc = bulkConvert;
   const q = bulkSearch.trim().toLowerCase();
-  return bc.assessments.filter(r => {
-    /* Helpers are never sources (no helper-chaining) — they only live here as results. */
-    if (Utils.isConversionHelper && Utils.isConversionHelper(r.a)) return false;
-    if (String(r.a.class_id) !== String(bc.selClassId)) return false;
-    if (String(r.a.subject_id) !== String(bc.selSubjectId)) return false;
-    if (bc.selTermId && String(r.a.term_id) !== String(bc.selTermId)) return false;
-    if (String(r.a.academic_year_id) !== String(bc.selYearId)) return false;
+  return bulkContextRows().filter(r => {
     if (bulkFilter === 'convertible' && !r.editable) return false;
+    if (bulkFilter === 'no-marks' && r.saved > 0) return false;
     if (bulkFilter === 'draft' && r.a.status !== 'draft') return false;
     if (bulkFilter === 'rejected' && r.a.status !== 'rejected') return false;
     if (bulkFilter === 'official' && !['submitted', 'approved', 'locked'].includes(r.a.status)) return false;
@@ -328,21 +405,27 @@ function bulkFilteredRows() {
 function bulkAssessRowsHtml() {
   const bc = bulkConvert;
   const rows = bulkFilteredRows();
-  if (!rows.length) return `<tr><td colspan="7">${Utils.empty('No assessments match the current filter', 'file-text')}</td></tr>`;
+  if (!rows.length) return `<tr><td colspan="7">${Utils.empty('No assessments match these filters. Check the academic year, term, or search text.', 'file-text')}</td></tr>`;
   return rows.map(r => {
     const a = r.a;
     const checked = bc.selAssess.has(a.id);
-    let reason = '';
-    if (r.saved === 0) reason = 'No saved marks yet';
-    else if (['approved', 'locked', 'submitted'].includes(a.status)) reason = 'Official (' + a.status + ') — read-only source, never modified';
-    return `<tr ${r.editable ? '' : 'style="opacity:.55"'}>
+    const reason = !r.saved
+      ? 'Not ready: no saved marks yet'
+      : !(Number(a.maximum_mark) > 0)
+        ? 'Not ready: maximum mark must be greater than zero'
+      : !r.editable
+        ? 'Not ready: this assessment is outside your assigned class/subject'
+        : ['approved', 'locked', 'submitted'].includes(a.status)
+          ? 'Ready to convert · official source is read-only'
+          : 'Ready to convert';
+    return `<tr ${r.editable ? '' : 'style="opacity:.75"'}>
       <td class="text-center"><input type="checkbox" value="${a.id}" ${checked ? 'checked' : ''} ${r.editable ? '' : 'disabled'} onchange="bulkToggle(this)"></td>
-      <td class="col-name">${Utils.escapeHtml(Utils.buildAssessmentDisplayName(a, bc.types))}${reason ? `<div class="text-xs text-muted">${Utils.escapeHtml(reason)}</div>` : ''}${a.converted_from_maximum ? `<div class="text-xs text-muted">Converted from ${Utils.escapeHtml(a.converted_from_maximum)} to ${Utils.escapeHtml(a.maximum_mark)}</div>` : ''}</td>
+      <td class="col-name">${Utils.escapeHtml(Utils.buildAssessmentDisplayName(a, bc.types))}<div class="text-xs ${r.editable ? 'text-success' : 'text-muted'}">${Utils.escapeHtml(reason)}</div>${a.converted_from_maximum ? `<div class="text-xs text-muted">Converted from ${Utils.escapeHtml(a.converted_from_maximum)} to ${Utils.escapeHtml(a.maximum_mark)}</div>` : ''}</td>
       <td class="text-xs">${Utils.escapeHtml(assessmentTypeName(bc.types, a.assessment_type_id, 'Assessment'))}</td>
       <td class="text-center font-semibold">${Utils.escapeHtml(a.maximum_mark)}</td>
       <td class="text-xs text-muted">${Utils.escapeHtml(a.assessment_date || '-')}</td>
       <td class="text-center">${r.saved}</td>
-      <td><span class="badge ${Utils.statusColor(a.status)}"><i data-lucide="${Utils.statusIcon(a.status)}"></i> ${a.status}</span></td>
+      <td><span class="badge ${Utils.statusColor(a.status)}"><i data-lucide="${Utils.statusIcon(a.status)}"></i> ${Utils.escapeHtml(a.status || 'unknown')}</span></td>
     </tr>`;
   }).join('');
 }
@@ -357,6 +440,10 @@ function bulkRefreshAssessRows() {
   if (c) c.textContent = bc.selAssess.size;
   const n = document.getElementById('bulk-nav-count');
   if (n) n.textContent = bc.selAssess.size;
+  const summary = document.getElementById('bulk-assessment-summary');
+  if (summary) summary.innerHTML = bulkAssessmentSummaryHtml();
+  const tabs = document.querySelector('.bulk-toolbar .bulk-tabs');
+  if (tabs) tabs.innerHTML = bulkAssessmentFilterTabsHtml();
   if (typeof lucide !== 'undefined') lucide.createIcons();
 }
 
@@ -368,6 +455,8 @@ function bulkToggle(el) {
   if (c) c.textContent = bulkConvert.selAssess.size;
   const n = document.getElementById('bulk-nav-count');
   if (n) n.textContent = bulkConvert.selAssess.size;
+  const summary = document.getElementById('bulk-assessment-summary');
+  if (summary) summary.innerHTML = bulkAssessmentSummaryHtml();
   bulkRecomputeAndRefresh();
 }
 

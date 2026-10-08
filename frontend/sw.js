@@ -3,7 +3,7 @@
    Production-ready: caching, offline, push, background sync
    ============================================================ */
 
-const CACHE_NAME = 'rms-mis-v23';
+const CACHE_NAME = 'rms-mis-v50';
 const APP_BASE = new URL('.', self.location.href);
 const APP_BASE_PATH = APP_BASE.pathname;
 const APP_SHELL = [
@@ -20,7 +20,10 @@ const APP_SHELL = [
   '/css/report-wizard.css',
   '/css/communication-center.css',
   '/css/digital-library.css',
+  '/css/public-home.css',
   '/js/config.js',
+  '/js/public-home-config.js',
+  '/js/public-home.js',
   '/js/auth.js',
   '/js/db.js',
   '/js/utils.js',
@@ -58,6 +61,7 @@ const APP_SHELL = [
   '/js/pages/teacher-pages.js',
   '/js/pages/teacher-enter-marks.js',
   '/js/pages/teacher-convert-marks.js',
+  '/js/pages/examination-centre.js',
   '/js/pages/teacher-account.js',
   '/js/app.js',
   '/js/welcome-notification.js',

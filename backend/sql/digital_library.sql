@@ -138,6 +138,18 @@ UPDATE public.digital_library_resources
 SET visibility = CASE WHEN is_published THEN 'public' ELSE 'private' END
 WHERE visibility IS NULL;
 
+-- Older uploads may be marked published while retaining private visibility
+-- flags. Treat the explicit published status as authoritative so they appear
+-- in the public catalogue and are eligible for signed file links.
+UPDATE public.digital_library_resources
+SET visibility = 'public',
+    is_published = true,
+    published_at = coalesce(published_at, created_at, now())
+WHERE status = 'published'
+  AND (visibility IS DISTINCT FROM 'public'
+    OR is_published IS DISTINCT FROM true
+    OR published_at IS NULL);
+
 UPDATE public.digital_library_resources AS resource
 SET class_name = (SELECT class.name FROM public.classes AS class WHERE class.id = resource.class_id),
     subject_name = coalesce((SELECT subject.name FROM public.subjects AS subject WHERE subject.id = resource.subject_id), ''),
@@ -837,7 +849,8 @@ BEGIN
     'total_resources', count(*),
     'lesson_plans', count(*) FILTER (WHERE resource_type = 'lesson_plan'),
     'pending_reviews', count(*) FILTER (WHERE status = 'submitted'),
-    'published_resources', count(*) FILTER (WHERE status = 'published'),
+    'published_resources', count(*) FILTER (
+      WHERE status = 'published' AND visibility = 'public' AND is_published),
     'teachers_contributing', count(DISTINCT teacher_id),
     'total_downloads', coalesce(sum(download_count), 0),
     'total_views', coalesce(sum(view_count), 0),
@@ -881,7 +894,8 @@ BEGIN
   END IF;
   SELECT jsonb_build_object(
     'total_resources', count(*),
-    'published_resources', count(*) FILTER (WHERE status = 'published'),
+    'published_resources', count(*) FILTER (
+      WHERE status = 'published' AND visibility = 'public' AND is_published),
     'pending_reviews', count(*) FILTER (WHERE status = 'submitted'),
     'returned_resources', count(*) FILTER (WHERE status = 'returned'),
     'total_downloads', coalesce(sum(download_count), 0),

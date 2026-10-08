@@ -2066,8 +2066,9 @@ DROP POLICY IF EXISTS rms_assessments_delete ON public.assessments;
 CREATE POLICY rms_assessments_delete ON public.assessments FOR DELETE
   USING ((public.rms_is_dos() AND public.rms_dos_can_level(
       (SELECT c.education_level FROM public.classes c WHERE c.id = assessments.class_id)))
-    OR (assessments.status = 'draft' AND EXISTS (
-      SELECT 1 FROM public.teachers t WHERE t.user_id = auth.uid() AND t.id = assessments.teacher_id)));
+    OR EXISTS (
+      SELECT 1 FROM public.teachers t
+      WHERE t.user_id = auth.uid() AND t.id = assessments.teacher_id));
 DROP POLICY IF EXISTS rms_account_assessment_select_scope ON public.assessments;
 CREATE POLICY rms_account_assessment_select_scope ON public.assessments AS RESTRICTIVE FOR SELECT TO authenticated
   USING (public.rms_account_can_assessment(id));
@@ -2115,7 +2116,12 @@ CREATE POLICY rms_marks_update ON public.marks FOR UPDATE
     )));
 DROP POLICY IF EXISTS rms_marks_delete ON public.marks;
 CREATE POLICY rms_marks_delete ON public.marks FOR DELETE
-  USING (public.rms_is_dos() AND public.rms_dos_can_marks(marks.assessment_id));
+  USING ((public.rms_is_dos() AND public.rms_dos_can_marks(marks.assessment_id))
+    OR EXISTS (
+      SELECT 1
+      FROM public.assessments a
+      JOIN public.teachers t ON t.id = a.teacher_id
+      WHERE a.id = marks.assessment_id AND t.user_id = auth.uid()));
 DROP POLICY IF EXISTS rms_account_marks_select_scope ON public.marks;
 CREATE POLICY rms_account_marks_select_scope ON public.marks AS RESTRICTIVE FOR SELECT TO authenticated
   USING (public.rms_account_can_assessment(assessment_id));

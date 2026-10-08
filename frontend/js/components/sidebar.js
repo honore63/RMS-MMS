@@ -49,6 +49,7 @@ const Sidebar = {
     if (role === 'dos') menu = this.adminMenu();
     else if (role === 'principal') menu = this.principalMenu();
     else if (role === 'parent') menu = this.parentMenu();
+    else if (role === 'learner') menu = this.learnerMenu();
     else menu = this.teacherMenu();
     const user = Auth.currentUser;
     const photoURL = user?.profile_photo_url || Auth.teacherProfile?.profile_photo_url || '';
@@ -120,6 +121,8 @@ const Sidebar = {
           <i data-lucide="tags"></i> Assessment Types</a>
         <a class="nav-link" data-route="admin/marks" onclick="Router.go('admin/marks')">
           <i data-lucide="list-checks"></i> Marks</a>
+        <a class="nav-link" data-route="admin/examinations" onclick="Router.go('admin/examinations')">
+          <i data-lucide="clipboard-check"></i> Examination Centre</a>
       </div>
       <div class="sidebar-section">
         <div class="sidebar-section-title">Reports</div>
@@ -177,6 +180,8 @@ const Sidebar = {
         <i data-lucide="library-big"></i> Digital Library</a>
       <a class="nav-link" data-route="teacher/convert-marks" onclick="Router.go('teacher/convert-marks')">
         <i data-lucide="arrow-left-right"></i> Convert Marks</a>
+      <a class="nav-link" data-route="teacher/examinations" onclick="Router.go('teacher/examinations')">
+        <i data-lucide="clipboard-check"></i> Examination Centre</a>
       <div class="sidebar-section">
         <div class="sidebar-section-title">My Teaching</div>
         <a class="nav-link" data-route="teacher/my-classes" onclick="Router.go('teacher/my-classes')">
@@ -230,6 +235,8 @@ const Sidebar = {
         <a class="nav-link" data-route="admin/marks" onclick="Router.go('admin/marks')">
           <i data-lucide="list-checks"></i> Marks</a>
       </div>
+      <a class="nav-link" href="digital-library.html" target="_blank" rel="noopener">
+        <i data-lucide="library-big"></i> Digital Library</a>
       <div class="sidebar-section">
         <div class="sidebar-section-title">Reports</div>
         <a class="nav-link nav-parent" data-navgroup="principal-reports" onclick="Sidebar.toggleGroup('principal-reports')">
@@ -268,8 +275,18 @@ const Sidebar = {
         <i data-lucide="graduation-cap"></i> My Academic Performance</a>
       <a class="nav-link" data-route="parent/reports" onclick="Router.go('parent/reports')">
         <i data-lucide="file-text"></i> Reports</a>
+      <a class="nav-link" href="digital-library.html" target="_blank" rel="noopener">
+        <i data-lucide="library-big"></i> Digital Library</a>
       <a class="nav-link" href="#parent/notifications" data-route="parent/notifications" onclick="Router.go('parent/notifications')" id="nav-notifications-link" aria-label="Notifications">
         <i data-lucide="bell" aria-hidden="true"></i> Notifications <span class="nav-badge" id="notif-badge" aria-hidden="true"></span></a>`;
+  },
+
+  learnerMenu() {
+    return `
+      <a class="nav-link" data-route="learner/examinations" onclick="Router.go('learner/examinations')">
+        <i data-lucide="clipboard-check"></i> My Examinations</a>
+      <a class="nav-link" href="digital-library.html" target="_blank" rel="noopener">
+        <i data-lucide="library-big"></i> Digital Library</a>`;
   },
 
 highlight() {

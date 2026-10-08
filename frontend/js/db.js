@@ -52,7 +52,12 @@ const DB = {
     announcement_acknowledgements: 60 * 1000,
     teacher_registration_audit: 10 * 60 * 1000,
     email_notifications: 10 * 60 * 1000,
-    sms_notifications: 10 * 60 * 1000
+    sms_notifications: 10 * 60 * 1000,
+    examinations: 15 * 1000,
+    exam_questions: 30 * 1000,
+    exam_attempts: 5 * 1000,
+    student_answers: 5 * 1000,
+    question_bank: 60 * 1000
   },
   DEFAULT_TTL: 5 * 60 * 1000,
 

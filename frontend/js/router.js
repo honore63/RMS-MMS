@@ -59,8 +59,15 @@ const Router = {
 
   async render() {
     const fullRoute = this.current || window.location.hash.slice(1);
-    const route = fullRoute.split('?')[0];
+    let route = fullRoute.split('?')[0];
     if (!route) return;
+    if (typeof Auth !== 'undefined' && Auth.getRole() === 'learner' && route !== 'learner/examinations') {
+      route = 'learner/examinations';
+      this.current = route;
+      this._lastHash = route;
+      this._pendingHash = route;
+      window.location.hash = route;
+    }
     this.current = route;
     this._lastHash = fullRoute;
     if (!['admin/notifications', 'teacher/notifications'].includes(route)

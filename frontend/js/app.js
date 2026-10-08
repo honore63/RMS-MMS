@@ -1,8 +1,16 @@
 async function initApp() {
   try {
     document.getElementById('login-year').textContent = String(new Date().getFullYear());
+    if (isGuestExaminationRoute()) {
+      showGuestExaminationPortal();
+      return;
+    }
     const hasSession = await Auth.init();
     document.getElementById('loading-screen').style.display = 'none';
+    if (isGuestExaminationRoute()) {
+      showGuestExaminationPortal();
+      return;
+    }
 
     if (hasSession) {
       if (Auth.currentUser && Auth.currentUser.status === 'inactive') {
@@ -24,7 +32,22 @@ async function initApp() {
   }
 }
 
+function isGuestExaminationRoute() {
+  return window.location.hash.split('?')[0] === '#guest-examinations';
+}
+
+function showGuestExaminationPortal() {
+  document.getElementById('loading-screen').style.display = 'none';
+  loadLoginBranding();
+  ExaminationCentre.openGuestPortal();
+}
+
 function showLogin(message) {
+  if (isGuestExaminationRoute()) {
+    showGuestExaminationPortal();
+    return;
+  }
+
   if (window.location.hash.startsWith('#parent-marks')) {
     window.location.replace('parent-marks.html');
     return;
@@ -32,6 +55,12 @@ function showLogin(message) {
 
   document.getElementById('login-page').style.display = 'flex';
   document.getElementById('app-layout').style.display = 'none';
+  const requestedRoute = window.location.hash.split('?')[0];
+  const publicHome = !message && (!requestedRoute || requestedRoute === '#public-home');
+  if (window.RMSPublicHome) {
+    if (publicHome) window.RMSPublicHome.show();
+    else window.RMSPublicHome.showStaffLogin();
+  }
 
   showSignInView();
   loadLoginBranding();
@@ -427,6 +456,7 @@ async function showApp() {
     if (role === 'dos') Router.go('admin/dashboard');
     else if (role === 'principal') Router.go('principal/dashboard');
     else if (role === 'parent') Router.go('parent/dashboard');
+    else if (role === 'learner') Router.go('learner/examinations');
     else if (role === 'teacher') Router.go('teacher/dashboard');
     else Router.go('admin/dashboard');
   } else {
@@ -470,8 +500,10 @@ function registerRoutes() {
   Router.register('admin/notifications', renderNotifications);
   Router.register('admin/settings', (typeof renderSettings !== 'undefined' ? renderSettings : () => { setHeader('School Settings', 'Configure school settings'); setContent('<div class="card"><div class="card-body"><p>Settings module under development.</p></div></div>'); }));
   Router.register('admin/digital-library', () => DigitalLibrary.renderDos());
+  Router.register('admin/examinations', () => ExaminationCentre.renderDos());
 
   Router.register('teacher/dashboard', renderTeacherDashboard);
+  Router.register('teacher/examinations', () => ExaminationCentre.renderTeacher());
   Router.register('teacher/library', () => DigitalLibrary.renderTeacher());
   Router.register('teacher/my-classes', renderMyClasses);
   Router.register('teacher/my-subjects', renderMySubjects);
@@ -489,6 +521,7 @@ function registerRoutes() {
   Router.register('parent/dashboard', renderParentDashboard);
   Router.register('parent/performance', renderParentPerformance);
   Router.register('parent/reports', renderParentReports);
+  Router.register('learner/examinations', () => ExaminationCentre.renderLearner());
 
   Router.registerPrefetch('admin/assessments', () => DB.prefetch([
     'classes', 'subjects', 'teachers', 'assessment_types', 'academic_years', 'terms'
@@ -1015,4 +1048,17 @@ NotificationCenter.showToast = function(notification) {
 document.addEventListener('DOMContentLoaded', () => {
   initApp();
   if (typeof Realtime !== 'undefined') Realtime.init();
+});
+
+window.addEventListener('hashchange', () => {
+  const route = window.location.hash.split('?')[0];
+  if (route === '#guest-examinations' && typeof ExaminationCentre !== 'undefined') {
+    showGuestExaminationPortal();
+  } else if (route === '#public-home' || !route) {
+    document.getElementById('app-layout').style.display = 'none';
+    showLogin();
+  } else if (route === '#staff-login') {
+    const layout = document.getElementById('app-layout');
+    if (layout?.style.display === 'none' || layout?.querySelector('.ec-guest-page')) showLogin();
+  }
 });

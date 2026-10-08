@@ -1192,9 +1192,17 @@ const DigitalLibrary = {
           upload_group_id: uploadGroupId
         });
       }
-      const insertResult = await sbClient.from('digital_library_resources').insert(resources);
+      const insertResult = await sbClient.from('digital_library_resources')
+        .insert(resources)
+        .select('id,status,visibility,is_published');
       if (insertResult.error) throw insertResult.error;
       recordsInserted = true;
+      const publishedResources = insertResult.data || [];
+      if (publishedResources.length !== resources.length
+        || publishedResources.some(resource =>
+          resource.status !== 'published' || resource.visibility !== 'public' || !resource.is_published)) {
+        throw new Error('The upload was saved, but the database did not confirm public publication. Contact the DOS before sharing the resource.');
+      }
       let indexingFailed = false;
       if (!isLink && this.isAIResourceSupported({ mime_type: mimeType })) {
         const { error } = await sbClient.functions.invoke('digital-library-index', {
@@ -1206,7 +1214,7 @@ const DigitalLibrary = {
           console.error('[DigitalLibrary] Resource uploaded but RMS AI indexing failed:', error);
         }
       }
-      Utils.toast(`${isLink ? 'Link shared' : 'Resource uploaded'} to ${selectedClasses.length} class${selectedClasses.length === 1 ? '' : 'es'}.`, 'success');
+      Utils.toast(`${isLink ? 'Link shared' : 'Resource uploaded'} and published to the Digital Library for ${selectedClasses.length} class${selectedClasses.length === 1 ? '' : 'es'}.`, 'success');
       if (indexingFailed) {
         Utils.toast('The resource was uploaded, but it could not be indexed for RMS AI yet. The assistant can retry when a learner asks about it.', 'warning');
       }
@@ -1220,7 +1228,9 @@ const DigitalLibrary = {
         } else Utils.toast(`Could not publish the resource: ${error.message || 'Please try again.'}`, 'error');
       } else {
         console.error('[DigitalLibrary] Upload failed:', error);
-        Utils.toast(`Could not upload the resource: ${error.message || 'Unknown error'}`, 'error');
+        Utils.toast(recordsInserted
+          ? `Resource saved, but public visibility could not be confirmed: ${error.message || 'Unknown error'}`
+          : `Could not upload the resource: ${error.message || 'Unknown error'}`, 'error');
       }
       if (submit) { submit.disabled = false; submit.innerHTML = '<i data-lucide="share-2"></i> Share resource'; }
       if (typeof lucide !== 'undefined') lucide.createIcons();

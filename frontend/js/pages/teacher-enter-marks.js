@@ -142,7 +142,8 @@ async function renderAssessmentList() {
     const editButton = a.status !== 'locked'
       ? `<button class="btn btn-sm btn-outline" onclick="openEditAssessment('${a.id}')"><i data-lucide="edit-3"></i> Edit Assessment</button>`
       : '';
-    return `${editButton}<button class="btn btn-sm ${a.status === 'rejected' ? 'btn-warning' : a.status === 'locked' ? 'btn-outline' : 'btn-primary'}" onclick="Router.go('teacher/enter-marks?assessment=${a.id}')"><i data-lucide="${icon}"></i> ${label}</button>`;
+    const deleteButton = `<button class="btn btn-sm btn-danger" onclick="teacherDeleteAssessment('${a.id}')"><i data-lucide="trash-2"></i> Delete</button>`;
+    return `${editButton}${deleteButton}<button class="btn btn-sm ${a.status === 'rejected' ? 'btn-warning' : a.status === 'locked' ? 'btn-outline' : 'btn-primary'}" onclick="Router.go('teacher/enter-marks?assessment=${a.id}')"><i data-lucide="${icon}"></i> ${label}</button>`;
   }
 
   function progressCell(a) {
@@ -327,6 +328,97 @@ async function openCreateAssessment(editAssessmentId = null) {
     casUpdatePreview();
   }
   if (typeof lucide !== 'undefined') lucide.createIcons();
+}
+
+function openEditAssessment(editAssessmentId) {
+  return openCreateAssessment(editAssessmentId);
+}
+
+async function teacherDeleteAssessment(assessmentId) {
+  if (!assessmentId) return Utils.toast('Assessment not found', 'error');
+  let assessment;
+  try {
+    [assessment] = await DB.getFresh('assessments', { id: assessmentId });
+  } catch (error) {
+    console.error('[TeacherAssessments] Failed to load assessment for deletion:', error);
+    return Utils.toast('Could not load this assessment. Please try again.', 'error');
+  }
+  if (!assessment || String(assessment.teacher_id) !== String(Auth.getTeacherId())) {
+    return Utils.toast('You can only delete assessments created by your teacher account.', 'error');
+  }
+  Modal.show('Permanently Delete Assessment?', `
+    <p class="text-sm text-muted mb-4">Delete <strong>${Utils.escapeHtml(Utils.buildAssessmentDisplayName(assessment, casTypes))}</strong> permanently?</p>
+    <div class="alert alert-danger" style="margin-bottom:0"><i data-lucide="alert-triangle"></i><div><strong>This cannot be undone.</strong> The assessment, all of its marks, and its results in reports will be permanently removed. This also applies to submitted, approved, or locked assessments.</div></div>`,
+    `<button class="btn btn-secondary" onclick="Modal.close()">Cancel</button>
+     <button class="btn btn-danger" onclick="confirmTeacherAssessmentDelete('${assessment.id}')"><i data-lucide="trash-2"></i> Permanently Delete</button>`, true);
+}
+
+async function confirmTeacherAssessmentDelete(assessmentId) {
+  try {
+    const [assessment] = await DB.getFresh('assessments', { id: assessmentId });
+    if (!assessment || String(assessment.teacher_id) !== String(Auth.getTeacherId())) {
+      throw new Error('This assessment is not owned by your teacher account or is no longer available.');
+    }
+    if (markAssessment && String(markAssessment.id) === String(assessmentId) && autoSaveTimer) {
+      clearTimeout(autoSaveTimer);
+      autoSaveTimer = null;
+    }
+    if (markAssessment && String(markAssessment.id) === String(assessmentId) && markSavePromise) {
+      await markSavePromise;
+    }
+    await teacherDeleteAssessmentWithMarks(assessmentId);
+    let auditError = null;
+    try {
+      await DB.insert('audit_logs', {
+        user_id: Auth.currentUser?.id,
+        user_name: Auth.currentUser?.full_name,
+        role: Auth.currentUser?.role,
+        action: 'delete_assessment',
+        assessment_id: null,
+        new_value: `Teacher deleted assessment ${assessment.name || assessmentId} (${assessmentId})`,
+        timestamp: new Date().toISOString()
+      });
+    } catch (error) {
+      auditError = error;
+      console.error('[TeacherAssessments] Assessment deleted but audit logging failed:', error);
+    }
+    Modal.close();
+    Utils.toast(auditError ? 'Assessment deleted, but the audit log could not be saved' : 'Assessment and its marks deleted', auditError ? 'warning' : 'success');
+    markAssessment = null;
+    markEntries = [];
+    Router.go('teacher/enter-marks');
+  } catch (error) {
+    console.error('[TeacherAssessments] Delete failed:', error);
+    const message = [error?.message, error?.details, error?.hint].filter(Boolean).join(' | ');
+    Utils.toast('Delete failed: ' + (message || 'Please try again.'), 'error');
+  }
+}
+
+async function teacherDeleteAssessmentWithMarks(assessmentId) {
+  const { data, error } = await sbClient.from('assessments')
+    .delete()
+    .eq('id', assessmentId)
+    .select('id')
+    .single();
+  if (!error) {
+    if (!data) throw new Error('Assessment was not deleted. Check your permissions and try again.');
+    DB.invalidate('assessments');
+    DB.invalidate('marks');
+    return;
+  }
+  if (!/foreign key constraint/i.test(error.message || '')) throw error;
+
+  const { error: marksError } = await sbClient.from('marks').delete().eq('assessment_id', assessmentId);
+  if (marksError) throw marksError;
+  const { data: deleted, error: retryError } = await sbClient.from('assessments')
+    .delete()
+    .eq('id', assessmentId)
+    .select('id')
+    .single();
+  if (retryError) throw retryError;
+  if (!deleted) throw new Error('Assessment was not deleted. Check your permissions and try again.');
+  DB.invalidate('assessments');
+  DB.invalidate('marks');
 }
 
 function casSubjectChanged() {
@@ -937,6 +1029,7 @@ async function renderMarksEntry(assessId) {
         <button class="btn btn-secondary" onclick="renderEnterMarks()"><i data-lucide="refresh-cw"></i> Refresh</button>
         <button class="btn btn-outline" onclick="downloadMarksTemplateForCurrentAssessment()" title="Download marks template"><i data-lucide="download"></i> Download</button>
         ${!isLocked ? `<button class="btn btn-outline" onclick="openEditAssessment('${markAssessment.id}')"><i data-lucide="edit-3"></i> Edit Assessment</button>` : ''}
+        <button class="btn btn-danger" onclick="teacherDeleteAssessment('${markAssessment.id}')"><i data-lucide="trash-2"></i> Delete Assessment</button>
         ${!isLocked && !isSubmitted && markAssessment.status !== 'approved' ? `<button class="btn btn-outline" onclick="openConvertMarks()" title="Proportionally convert marks to a new maximum"><i data-lucide="arrow-left-right"></i> Convert Marks</button>` : ''}
         ${!isLocked && !isSubmitted && markAssessment.status !== 'approved' ? `<button class="btn btn-primary" onclick="MarksImport.open({ assessmentId: '${markAssessment.id}' })"><i data-lucide="file-up"></i> Import</button>` : ''}
         ${!isLocked ? `<button class="btn btn-secondary" onclick="saveMarks()"><i data-lucide="save"></i> ${isSubmitted ? 'Save Changes' : 'Save Draft'}</button>` : ''}
