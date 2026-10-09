@@ -5,6 +5,9 @@ const Auth = {
   parentLearner: null,
 
   async signIn(email, password) {
+    if (!sbClient) {
+      throw new Error('Supabase is unavailable. Connect to the internet and try again.');
+    }
     const { data, error } = await sbClient.auth.signInWithPassword({ email, password });
 
     if (error) {
@@ -124,11 +127,11 @@ const Auth = {
   },
 
   async init() {
+    if (!sbClient) return false;
     const { data: { session } } = await sbClient.auth.getSession();
     if (session?.user) {
       if (typeof DB !== 'undefined' && DB.setUserScope) DB.setUserScope(session.user.id);
-      await this.fetchOrCreateProfile(session.user);
-      return true;
+      return Boolean(await this.fetchOrCreateProfile(session.user));
     }
     return false;
   },

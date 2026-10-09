@@ -5,7 +5,16 @@ async function initApp() {
       showGuestExaminationPortal();
       return;
     }
-    const hasSession = await Auth.init();
+    let authTimeoutId;
+    const hasSession = await Promise.race([
+      Auth.init(),
+      new Promise((resolve, reject) => {
+        authTimeoutId = window.setTimeout(
+          () => reject(new Error('Supabase authentication timed out; showing the public portal.')),
+          5000
+        );
+      })
+    ]).finally(() => window.clearTimeout(authTimeoutId));
     document.getElementById('loading-screen').style.display = 'none';
     if (isGuestExaminationRoute()) {
       showGuestExaminationPortal();
@@ -294,6 +303,10 @@ async function handleLogin(e) {
   }
   if (password.length < 6) {
     showLoginError('Your password must be at least 6 characters long.');
+    return;
+  }
+  if (!window.sbClient) {
+    showLoginError('Sign-in is unavailable while the school service is offline. Please reconnect and try again.');
     return;
   }
 

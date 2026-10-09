@@ -3,13 +3,18 @@
    Production-ready: caching, offline, push, background sync
    ============================================================ */
 
-const CACHE_NAME = 'rms-mis-v51';
+const CACHE_NAME = 'rms-mis-v52';
+const APP_SHELL_EXTERNAL = [
+  'https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2',
+  'https://unpkg.com/lucide@latest'
+];
 const APP_BASE = new URL('.', self.location.href);
 const APP_BASE_PATH = APP_BASE.pathname;
 const APP_SHELL = [
   '/',
   '/index.html',
   '/digital-library.html',
+  '/parent-marks.html',
   '/public/logo.webp',
   '/public/icon-192.svg',
   '/public/icon-512.svg',
@@ -48,6 +53,7 @@ const APP_SHELL = [
   '/js/pages/admin-settings.js',
   '/js/pages/principal-dashboard.js',
   '/js/pages/parent-portal.js',
+  '/js/pages/parent-marks-portal.js',
   '/js/pages/digital-library.js',
   '/js/reports/report-header.js',
   '/js/reports/report-utils.js',
@@ -80,9 +86,10 @@ const OFFLINE_URL = new URL('index.html', APP_BASE).pathname;
 self.addEventListener('install', (event) => {
   event.waitUntil(
     caches.open(CACHE_NAME)
-      .then((cache) => Promise.all(APP_SHELL.map(async (asset) => {
+      .then((cache) => Promise.all([...APP_SHELL, ...APP_SHELL_EXTERNAL].map(async (asset) => {
         try {
-          await cache.add(new Request(asset, { cache: 'reload' }));
+          const request = new Request(asset, { cache: 'reload' });
+          await cache.add(request);
         } catch (error) {
           console.warn('[SW] Precache failed:', asset, error);
         }
