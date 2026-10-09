@@ -846,8 +846,10 @@ CREATE TRIGGER academic_years_set_updated_at BEFORE UPDATE ON academic_years
 
 -- --- DOS scope helpers ------------------------------------------------------
 CREATE OR REPLACE FUNCTION public.rms_is_dos()
-RETURNS boolean LANGUAGE sql STABLE AS $fn$
-  SELECT EXISTS (SELECT 1 FROM users u WHERE u.id = auth.uid() AND u.role = 'dos' AND u.status = 'active');
+RETURNS boolean LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public, pg_temp AS $fn$
+  -- SECURITY DEFINER: allows the planner to treat this as a one-time evaluation
+  -- per statement instead of rerunning it for every learner row during RLS.
+  SELECT EXISTS (SELECT 1 FROM public.users u WHERE u.id = auth.uid() AND u.role = 'dos' AND u.status = 'active');
 $fn$;
 
 CREATE OR REPLACE FUNCTION public.rms_enforce_subject_class_level()
@@ -876,20 +878,23 @@ CREATE TRIGGER rms_assessment_subject_level_guard
   FOR EACH ROW EXECUTE FUNCTION public.rms_enforce_subject_class_level();
 
 CREATE OR REPLACE FUNCTION public.rms_dos_education_level()
-RETURNS TEXT LANGUAGE sql STABLE AS $fn$
+RETURNS TEXT LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public, pg_temp AS $fn$
   SELECT u.education_level FROM public.users u
   WHERE u.id = auth.uid() AND u.role = 'dos' AND u.status = 'active';
 $fn$;
 
 CREATE OR REPLACE FUNCTION public.rms_is_scoped_dos()
-RETURNS boolean LANGUAGE sql STABLE AS $fn$
+RETURNS boolean LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public, pg_temp AS $fn$
   SELECT public.rms_dos_education_level() IS NOT NULL;
 $fn$;
 
 -- Global DOS (education_level IS NULL) keeps full access; scoped DOS is
 -- limited to its own level. Fail-closed for unresolvable scoped DOS.
 CREATE OR REPLACE FUNCTION public.rms_dos_can_level(p_level TEXT)
-RETURNS boolean LANGUAGE sql STABLE AS $fn$
+RETURNS boolean LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public, pg_temp AS $fn$
+  -- SECURITY DEFINER: called inside RLS correlated subqueries on learners, classes,
+  -- assessments, marks, etc. Without SECURITY DEFINER the planner cannot hoist it
+  -- out of the per-row loop, causing 57014 timeouts on medium-to-large tables.
   SELECT CASE
     WHEN NOT public.rms_is_dos() THEN true
     WHEN public.rms_dos_education_level() IS NULL THEN true
@@ -900,7 +905,7 @@ RETURNS boolean LANGUAGE sql STABLE AS $fn$
 $fn$;
 
 CREATE OR REPLACE FUNCTION public.rms_dos_can_subject(p_level TEXT)
-RETURNS boolean LANGUAGE sql STABLE AS $fn$
+RETURNS boolean LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public, pg_temp AS $fn$
   SELECT CASE
     WHEN NOT public.rms_is_dos() THEN true
     WHEN public.rms_dos_education_level() IS NULL THEN true
@@ -1136,6 +1141,8 @@ $fn$;
 -- --- Account isolation helpers (authoritative, run last) --------------------
 CREATE OR REPLACE FUNCTION public.rms_account_role()
 RETURNS TEXT LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public, pg_temp AS $fn$
+  -- SECURITY DEFINER + STABLE: planner can evaluate once per statement
+  -- rather than once per row inside CASE WHEN blocks in RLS policies.
   SELECT u.role FROM public.users u WHERE u.id = auth.uid() AND u.status = 'active' LIMIT 1;
 $fn$;
 
@@ -1188,9 +1195,14 @@ $fn$;
 
 CREATE OR REPLACE FUNCTION public.rms_account_can_learner(p_learner_id UUID)
 RETURNS BOOLEAN LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public, pg_temp AS $fn$
+  -- SECURITY DEFINER is required: when Postgres evaluates the RESTRICTIVE
+  -- rms_account_learner_scope policy it calls this function as the
+  -- authenticated role. Without SECURITY DEFINER the function cannot read
+  -- teachers / teacher_assignments / classes through RLS and throws a 500.
   SELECT CASE public.rms_account_role()
-    -- DOS visibility is enforced by the separate learner level-scope policies.
-    -- Avoid looking up each learner row again from its own restrictive policy.
+    -- DOS visibility is enforced by the separate learner level-scope policies
+    -- (rms_dos_level_guard + rms_learners_select). Return true here to avoid
+    -- a redundant per-row class lookup inside this RESTRICTIVE policy.
     WHEN 'dos' THEN true
     WHEN 'teacher' THEN EXISTS (SELECT 1 FROM public.learners l JOIN public.teacher_assignments ta ON ta.class_id = l.class_id
       WHERE l.id = p_learner_id AND ta.teacher_id = public.rms_account_teacher_id())
