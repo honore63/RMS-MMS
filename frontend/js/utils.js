@@ -693,9 +693,11 @@ const Scope = {
 
   matchesSubject(subj) {
     if (!this.isScoped()) return true;
-    const s = String((subj && subj.level) || 'Both').trim().toUpperCase();
+    const level = String((subj && subj.level) || '').trim().toUpperCase().replace(/[_-]+/g, ' ').replace(/\s+/g, ' ');
+    const educationLevel = String((subj && subj.education_level) || '').trim().toUpperCase().replace(/[_-]+/g, ' ').replace(/\s+/g, ' ');
+    const s = !level || ['BOTH', 'ALL'].includes(level) ? (educationLevel || level || 'BOTH') : level;
     if (s === 'BOTH' || s === '' || s === 'NULL') return true;
-    if (this.isPrimary()) return s === 'PRIMARY';
+    if (this.isPrimary()) return ['PRIMARY', 'LOWER PRIMARY'].includes(s);
     if (this.isSecondary()) return ['SECONDARY', 'LOWER SECONDARY', 'UPPER SECONDARY'].includes(s);
     return true;
   },
@@ -764,15 +766,25 @@ const EducationLevels = {
   subjectMatchesClass(subject, cls) {
     if (!subject || !cls) return false;
     const classCategory = this.getCategory(cls);
-    const configuredLevel = subject.level && !['BOTH', 'ALL'].includes(String(subject.level).trim().toUpperCase())
-      ? subject.level
-      : subject.education_level || subject.level || 'Both';
+    const level = String(subject.level || '').trim().toUpperCase().replace(/[_-]+/g, ' ').replace(/\s+/g, ' ');
+    const educationLevel = String(subject.education_level || '').trim().toUpperCase().replace(/[_-]+/g, ' ').replace(/\s+/g, ' ');
+    const configuredLevel = level && !['BOTH', 'ALL'].includes(level)
+      ? level
+      : educationLevel || level || 'BOTH';
     const subjectLevel = String(configuredLevel)
-      .trim().toUpperCase().replace(/[_-]+/g, ' ');
-    const gradeMatch = String(cls.level || cls.name || '').toUpperCase().match(/\b([PS][1-6])\b/);
-    const subjectGrades = String(subject.grades || '').split(',').map(grade => grade.trim().toUpperCase()).filter(Boolean);
-    if (gradeMatch && subjectGrades.length && !subjectGrades.includes(gradeMatch[1])) return false;
+      .trim().toUpperCase().replace(/[_-]+/g, ' ').replace(/\s+/g, ' ');
+    const classText = [cls.education_level, cls.level, cls.name]
+      .filter(Boolean).join(' ').toUpperCase().replace(/[_-]+/g, ' ').replace(/\s+/g, ' ');
+    const gradeMatch = classText.match(/(?:^|[^A-Z0-9])([PS][1-6])(?:[A-Z]|[^A-Z0-9]|$)/);
+    const grade = gradeMatch && gradeMatch[1];
+    const subjectGrades = String(subject.grades || '').split(',')
+      .map(value => value.trim().toUpperCase().replace(/\s+/g, '')).filter(Boolean);
+    if (subjectGrades.length && (!grade || !subjectGrades.includes(grade))) return false;
     if (!subjectLevel || subjectLevel === 'BOTH' || subjectLevel === 'ALL') return true;
+    if (subjectLevel === 'LOWER PRIMARY') {
+      return classCategory === 'Primary'
+        && (['P1', 'P2', 'P3'].includes(grade) || (!grade && classText.includes('LOWER PRIMARY')));
+    }
     if (subjectLevel === 'PRIMARY') return classCategory === 'Primary';
     if (subjectLevel === 'SECONDARY') return String(classCategory).includes('Secondary');
     if (subjectLevel === 'LOWER SECONDARY') return classCategory === 'Lower Secondary';

@@ -90,9 +90,11 @@ AS $fn$
     WHEN NOT public.rms_is_dos()                       THEN true
     WHEN public.rms_dos_education_level() IS NULL      THEN true
     WHEN public.rms_dos_education_level() = 'PRIMARY'
-         THEN p_level = 'Primary'
+         THEN upper(regexp_replace(btrim(coalesce(p_level, '')), '[[:space:]_-]+', ' ', 'g'))
+           IN ('PRIMARY', 'LOWER PRIMARY')
     WHEN public.rms_dos_education_level() = 'SECONDARY'
-         THEN p_level IN ('Lower Secondary', 'Upper Secondary')
+         THEN upper(regexp_replace(btrim(coalesce(p_level, '')), '[[:space:]_-]+', ' ', 'g'))
+           IN ('SECONDARY', 'LOWER SECONDARY', 'UPPER SECONDARY')
     ELSE false
   END;
 $fn$;
@@ -105,11 +107,14 @@ AS $fn$
   SELECT CASE
     WHEN NOT public.rms_is_dos()                       THEN true
     WHEN public.rms_dos_education_level() IS NULL      THEN true
-    WHEN p_level IS NULL OR p_level = 'Both'           THEN true
+    WHEN p_level IS NULL
+      OR upper(regexp_replace(btrim(p_level), '[[:space:]_-]+', ' ', 'g')) IN ('BOTH', 'ALL') THEN true
     WHEN public.rms_dos_education_level() = 'PRIMARY'
-         THEN p_level = 'Primary'
+         THEN upper(regexp_replace(btrim(p_level), '[[:space:]_-]+', ' ', 'g'))
+           IN ('PRIMARY', 'LOWER PRIMARY')
     WHEN public.rms_dos_education_level() = 'SECONDARY'
-         THEN p_level IN ('Secondary', 'Lower Secondary', 'Upper Secondary')
+         THEN upper(regexp_replace(btrim(p_level), '[[:space:]_-]+', ' ', 'g'))
+           IN ('SECONDARY', 'LOWER SECONDARY', 'UPPER SECONDARY')
     ELSE false
   END;
 $fn$;

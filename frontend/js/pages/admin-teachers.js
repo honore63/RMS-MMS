@@ -472,11 +472,7 @@ function teacherLevelMatchesClass(level, classRecord) {
 }
 
 function teacherSubjectMatchesClass(subject, classRecord) {
-  const subjectLevel = String(subject?.level || subject?.education_level || 'Both').toUpperCase();
-  const classLevel = String(EducationLevels.getCategory(classRecord) || '').toUpperCase();
-  if (['BOTH', 'ALL', ''].includes(subjectLevel)) return true;
-  if (classLevel === 'PRIMARY') return subjectLevel === 'PRIMARY';
-  return ['SECONDARY', 'LOWER SECONDARY', 'UPPER SECONDARY'].includes(subjectLevel);
+  return EducationLevels.subjectMatchesClass(subject, classRecord);
 }
 
 function tfEducationLevelChanged() {

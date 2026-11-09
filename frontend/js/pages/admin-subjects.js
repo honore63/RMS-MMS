@@ -10,12 +10,13 @@ function subjectLevelOptionsHtml(selected) {
   const opts = [
     ['Both', 'All Levels'],
     ['Primary', 'Primary (P1 - P6)'],
+    ['Lower Primary', 'Lower Primary (P1 - P3)'],
     ['Lower Secondary', 'Lower Secondary (S1 - S3)'],
     ['Upper Secondary', 'Upper Secondary (S4 - S6)'],
     ['Secondary', 'Secondary (S1 - S6)']
   ];
   const allowed = (typeof Scope !== 'undefined' && Scope.isScoped())
-    ? (Scope.isPrimary() ? ['Both', 'Primary'] : ['Both', 'Lower Secondary', 'Upper Secondary', 'Secondary'])
+    ? (Scope.isPrimary() ? ['Both', 'Primary', 'Lower Primary'] : ['Both', 'Lower Secondary', 'Upper Secondary', 'Secondary'])
     : opts.map(o => o[0]);
   return opts
     .filter(o => allowed.includes(o[0]))

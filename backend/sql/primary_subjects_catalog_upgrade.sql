@@ -5,7 +5,7 @@ FROM (VALUES
   ('Mathematics', 'MATH', 'Both'),
   ('English', 'ENG', 'Both'),
   ('Kinyarwanda', 'KIN', 'Both'),
-  ('French', 'FRE', 'Both'),
+  ('French', 'FRE', 'Primary'),
   ('Science and Elementary Technology', 'SET', 'Primary'),
   ('Social and Religious Studies', 'SRS', 'Primary'),
   ('Creative Arts', 'CA', 'Primary'),
@@ -26,6 +26,7 @@ SET status = 'active',
       WHEN 'SRS' THEN 'Primary'
       WHEN 'CA' THEN 'Primary'
       WHEN 'PE' THEN 'Primary'
+      WHEN 'FRE' THEN 'Primary'
       ELSE 'Both'
     END,
     education_level = CASE upper(btrim(code))
@@ -33,6 +34,12 @@ SET status = 'active',
       WHEN 'SRS' THEN 'Primary'
       WHEN 'CA' THEN 'Primary'
       WHEN 'PE' THEN 'Primary'
+      WHEN 'FRE' THEN 'Primary'
       ELSE 'Both'
     END
 WHERE upper(btrim(code)) IN ('MATH', 'ENG', 'KIN', 'FRE', 'SET', 'SRS', 'CA', 'PE');
+
+UPDATE public.subjects
+SET grades = 'P1,P2,P3,P4,P5,P6'
+WHERE upper(btrim(code)) = 'FRE'
+   OR upper(btrim(name)) = 'FRENCH';

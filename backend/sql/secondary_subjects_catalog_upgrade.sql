@@ -5,7 +5,7 @@ FROM (VALUES
   ('Mathematics', 'MATH', 'Both'),
   ('English', 'ENG', 'Both'),
   ('Kinyarwanda', 'KIN', 'Both'),
-  ('French', 'FRE', 'Both'),
+  ('French', 'FRE', 'Primary'),
   ('Kiswahili', 'KISW', 'Secondary'),
   ('Physics', 'PHY', 'Secondary'),
   ('Chemistry', 'CHEM', 'Secondary'),
@@ -42,14 +42,14 @@ SET status = 'active',
       WHEN 'MATH' THEN 'Both'
       WHEN 'ENG' THEN 'Both'
       WHEN 'KIN' THEN 'Both'
-      WHEN 'FRE' THEN 'Both'
+      WHEN 'FRE' THEN 'Primary'
       ELSE 'Secondary'
     END,
     education_level = CASE upper(btrim(code))
       WHEN 'MATH' THEN 'Both'
       WHEN 'ENG' THEN 'Both'
       WHEN 'KIN' THEN 'Both'
-      WHEN 'FRE' THEN 'Both'
+      WHEN 'FRE' THEN 'Primary'
       ELSE 'Secondary'
     END
 WHERE upper(btrim(code)) IN (

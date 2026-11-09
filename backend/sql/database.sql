@@ -860,6 +860,25 @@ BEGIN
     RAISE EXCEPTION 'Subject is not available for the selected class education level'
       USING ERRCODE = 'check_violation';
   END IF;
+  IF TG_TABLE_NAME = 'teacher_assignments'
+    AND NEW.class_id IS NOT NULL AND NEW.subject_id IS NOT NULL THEN
+    -- Serialize writes for this class/subject/year before checking for conflicts.
+    PERFORM pg_advisory_xact_lock(hashtextextended(
+      NEW.class_id::TEXT || '|' || NEW.subject_id::TEXT || '|' || coalesce(NEW.academic_year_id::TEXT, '<NULL>'),
+      0
+    ));
+    IF EXISTS (
+      SELECT 1
+      FROM public.teacher_assignments existing
+      WHERE existing.class_id = NEW.class_id
+        AND existing.subject_id = NEW.subject_id
+        AND existing.academic_year_id IS NOT DISTINCT FROM NEW.academic_year_id
+        AND (TG_OP <> 'UPDATE' OR existing.id IS DISTINCT FROM NEW.id)
+    ) THEN
+      RAISE EXCEPTION 'This class and subject already have an assignment for the selected academic year.'
+        USING ERRCODE = 'unique_violation';
+    END IF;
+  END IF;
   RETURN NEW;
 END;
 $fn$;
@@ -870,7 +889,7 @@ CREATE TRIGGER rms_class_subject_level_guard
   FOR EACH ROW EXECUTE FUNCTION public.rms_enforce_subject_class_level();
 DROP TRIGGER IF EXISTS rms_teacher_assignment_level_guard ON public.teacher_assignments;
 CREATE TRIGGER rms_teacher_assignment_level_guard
-  BEFORE INSERT OR UPDATE OF class_id, subject_id ON public.teacher_assignments
+  BEFORE INSERT OR UPDATE OF class_id, subject_id, academic_year_id ON public.teacher_assignments
   FOR EACH ROW EXECUTE FUNCTION public.rms_enforce_subject_class_level();
 DROP TRIGGER IF EXISTS rms_assessment_subject_level_guard ON public.assessments;
 CREATE TRIGGER rms_assessment_subject_level_guard
@@ -898,8 +917,10 @@ RETURNS boolean LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public, p
   SELECT CASE
     WHEN NOT public.rms_is_dos() THEN true
     WHEN public.rms_dos_education_level() IS NULL THEN true
-    WHEN public.rms_dos_education_level() = 'PRIMARY' THEN p_level = 'Primary'
-    WHEN public.rms_dos_education_level() = 'SECONDARY' THEN p_level IN ('Lower Secondary', 'Upper Secondary')
+    WHEN public.rms_dos_education_level() = 'PRIMARY'
+      THEN upper(regexp_replace(btrim(coalesce(p_level, '')), '[[:space:]_-]+', ' ', 'g')) IN ('PRIMARY', 'LOWER PRIMARY')
+    WHEN public.rms_dos_education_level() = 'SECONDARY'
+      THEN upper(regexp_replace(btrim(coalesce(p_level, '')), '[[:space:]_-]+', ' ', 'g')) IN ('SECONDARY', 'LOWER SECONDARY', 'UPPER SECONDARY')
     ELSE false
   END;
 $fn$;
@@ -909,9 +930,11 @@ RETURNS boolean LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public, p
   SELECT CASE
     WHEN NOT public.rms_is_dos() THEN true
     WHEN public.rms_dos_education_level() IS NULL THEN true
-    WHEN p_level IS NULL OR p_level = 'Both' THEN true
-    WHEN public.rms_dos_education_level() = 'PRIMARY' THEN p_level = 'Primary'
-    WHEN public.rms_dos_education_level() = 'SECONDARY' THEN p_level IN ('Secondary', 'Lower Secondary', 'Upper Secondary')
+    WHEN p_level IS NULL OR upper(regexp_replace(btrim(p_level), '[[:space:]_-]+', ' ', 'g')) IN ('BOTH', 'ALL') THEN true
+    WHEN public.rms_dos_education_level() = 'PRIMARY'
+      THEN upper(regexp_replace(btrim(p_level), '[[:space:]_-]+', ' ', 'g')) IN ('PRIMARY', 'LOWER PRIMARY')
+    WHEN public.rms_dos_education_level() = 'SECONDARY'
+      THEN upper(regexp_replace(btrim(p_level), '[[:space:]_-]+', ' ', 'g')) IN ('SECONDARY', 'LOWER SECONDARY', 'UPPER SECONDARY')
     ELSE false
   END;
 $fn$;
@@ -1280,36 +1303,49 @@ RETURNS BOOLEAN LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public, p
   SELECT coalesce(bool_or(CASE
     WHEN s.grades IS NOT NULL AND btrim(s.grades) <> ''
       AND NOT EXISTS (
-        SELECT 1 FROM unnest(string_to_array(s.grades, ',')) AS g
-        WHERE upper(btrim(g)) = substring(
-          upper(coalesce(c.level, '') || ' ' || coalesce(c.name, ''))
-          FROM '(P[1-6]|S[1-6])'
-        )
+        SELECT 1 FROM unnest(string_to_array(s.grades, ',')) AS configured_grade(value)
+        WHERE upper(regexp_replace(btrim(configured_grade.value), '[[:space:]_-]+', '', 'g')) = class_info.class_grade
       ) THEN false
-    WHEN coalesce(nullif(upper(btrim(s.level)), 'BOTH'),
-      nullif(upper(btrim(s.education_level)), 'BOTH'), 'BOTH') IN ('', 'BOTH', 'ALL') THEN true
-    WHEN coalesce(nullif(upper(btrim(s.level)), 'BOTH'),
-      nullif(upper(btrim(s.education_level)), 'BOTH'), '') = 'PRIMARY'
-      THEN upper(coalesce(c.education_level, '') || ' ' || coalesce(c.level, '') || ' ' || coalesce(c.name, '')) LIKE '%PRIMARY%'
-        OR upper(coalesce(c.level, '') || ' ' || coalesce(c.name, '')) ~ '(^|[^A-Z0-9])P[1-6]'
-    WHEN coalesce(nullif(upper(btrim(s.level)), 'BOTH'),
-      nullif(upper(btrim(s.education_level)), 'BOTH'), '') = 'SECONDARY'
-      THEN upper(coalesce(c.education_level, '') || ' ' || coalesce(c.level, '') || ' ' || coalesce(c.name, '')) LIKE '%SECONDARY%'
-        OR upper(coalesce(c.level, '') || ' ' || coalesce(c.name, '')) ~ '(^|[^A-Z0-9])S[1-6]'
-    WHEN coalesce(nullif(upper(btrim(s.level)), 'BOTH'),
-      nullif(upper(btrim(s.education_level)), 'BOTH'), '') = 'LOWER SECONDARY'
-      THEN upper(coalesce(c.education_level, '') || ' ' || coalesce(c.level, '') || ' ' || coalesce(c.name, '')) LIKE '%LOWER SECONDARY%'
-        OR upper(coalesce(c.level, '') || ' ' || coalesce(c.name, '')) ~ '(^|[^A-Z0-9])S[1-3]'
-    WHEN coalesce(nullif(upper(btrim(s.level)), 'BOTH'),
-      nullif(upper(btrim(s.education_level)), 'BOTH'), '') = 'UPPER SECONDARY'
-      THEN upper(coalesce(c.education_level, '') || ' ' || coalesce(c.level, '') || ' ' || coalesce(c.name, '')) LIKE '%UPPER SECONDARY%'
-        OR upper(coalesce(c.level, '') || ' ' || coalesce(c.name, '')) ~ '(^|[^A-Z0-9])S[4-6]'
-    ELSE coalesce(nullif(upper(btrim(s.level)), 'BOTH'),
-      nullif(upper(btrim(s.education_level)), 'BOTH'), '')
-      = upper(btrim(coalesce(c.education_level, c.level, c.name, '')))
+    WHEN subject_info.subject_level IN ('', 'BOTH', 'ALL') THEN true
+    WHEN subject_info.subject_level = 'LOWER PRIMARY'
+      THEN class_info.class_grade IN ('P1', 'P2', 'P3')
+        OR (class_info.class_grade IS NULL AND class_info.class_text LIKE '%LOWER PRIMARY%')
+    WHEN subject_info.subject_level = 'PRIMARY'
+      THEN class_info.class_text LIKE '%PRIMARY%'
+        OR class_info.class_grade IN ('P1', 'P2', 'P3', 'P4', 'P5', 'P6')
+    WHEN subject_info.subject_level = 'SECONDARY'
+      THEN class_info.class_text LIKE '%SECONDARY%'
+        OR class_info.class_grade IN ('S1', 'S2', 'S3', 'S4', 'S5', 'S6')
+    WHEN subject_info.subject_level = 'LOWER SECONDARY'
+      THEN class_info.class_text LIKE '%LOWER SECONDARY%'
+        OR class_info.class_grade IN ('S1', 'S2', 'S3')
+    WHEN subject_info.subject_level = 'UPPER SECONDARY'
+      THEN class_info.class_text LIKE '%UPPER SECONDARY%'
+        OR class_info.class_grade IN ('S4', 'S5', 'S6')
+    ELSE subject_info.subject_level = class_info.class_level
   END), false)
   FROM public.classes c
   JOIN public.subjects s ON s.id = p_subject_id
+  CROSS JOIN LATERAL (
+    SELECT upper(regexp_replace(
+        coalesce(c.education_level, '') || ' ' || coalesce(c.level, '') || ' ' || coalesce(c.name, ''),
+        '[[:space:]_-]+', ' ', 'g')) AS class_text,
+      upper(regexp_replace(
+        coalesce(c.education_level, ''),
+        '[[:space:]_-]+', ' ', 'g')) AS class_level,
+      (regexp_match(
+        upper(regexp_replace(coalesce(c.level, '') || ' ' || coalesce(c.name, ''),
+          '[[:space:]_-]+', ' ', 'g')),
+        '(^|[^A-Z0-9])(P[1-6]|S[1-6])([A-Z]|[^A-Z0-9]|$)'
+      ))[2] AS class_grade
+  ) AS class_info
+  CROSS JOIN LATERAL (
+    SELECT coalesce(
+      nullif(upper(regexp_replace(btrim(s.level), '[[:space:]_-]+', ' ', 'g')), 'BOTH'),
+      nullif(upper(regexp_replace(btrim(s.education_level), '[[:space:]_-]+', ' ', 'g')), 'BOTH'),
+      'BOTH'
+    ) AS subject_level
+  ) AS subject_info
   WHERE c.id = p_class_id;
 $fn$;
 
@@ -2459,7 +2495,13 @@ SET status = 'active', level = 'Primary', education_level = 'Primary'
 WHERE upper(btrim(code)) IN ('SET', 'SRS', 'CA', 'PE');
 UPDATE public.subjects
 SET status = 'active', level = 'Both', education_level = 'Both'
-WHERE upper(btrim(code)) IN ('MATH', 'ENG', 'KIN', 'FRE');
+WHERE upper(btrim(code)) IN ('MATH', 'ENG', 'KIN');
+UPDATE public.subjects
+SET status = 'active', level = 'Primary', education_level = 'Primary'
+WHERE upper(btrim(code)) = 'FRE' OR upper(btrim(name)) = 'FRENCH';
+UPDATE public.subjects
+SET grades = 'P1,P2,P3,P4,P5,P6'
+WHERE upper(btrim(code)) = 'FRE' OR upper(btrim(name)) = 'FRENCH';
 UPDATE public.subjects
 SET level = 'Secondary', education_level = 'Secondary'
 WHERE upper(btrim(code)) IN (

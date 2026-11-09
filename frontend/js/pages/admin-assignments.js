@@ -1,8 +1,63 @@
 let assignFilter = 'all';
 let assignmentQueue = [];
+let assignmentTeachers = [];
 let assignmentSubjects = [];
 let assignmentClassLookup = {};
 let assignmentClassData = {};
+
+function assignmentTeacherLevelAllows(teacher, classRecord, subject) {
+  const teacherLevel = String(teacher?.education_level || '').trim().toUpperCase().replace(/[_-]+/g, ' ').replace(/\s+/g, ' ');
+  const classCategory = EducationLevels.getCategory(classRecord).toUpperCase();
+  const teacherCategories = teacherLevel === 'BOTH' || teacherLevel === 'ALL'
+    ? ['PRIMARY', 'LOWER SECONDARY', 'UPPER SECONDARY']
+    : teacherLevel === 'PRIMARY'
+      ? ['PRIMARY']
+      : teacherLevel === 'SECONDARY'
+        ? ['LOWER SECONDARY', 'UPPER SECONDARY']
+        : [];
+  if (!teacherCategories.includes(classCategory)) return false;
+
+  const subjectLevel = String(subject?.level || '').trim().toUpperCase().replace(/[_-]+/g, ' ').replace(/\s+/g, ' ');
+  const normalizedSubjectLevel = !subjectLevel || ['BOTH', 'ALL'].includes(subjectLevel)
+    ? String(subject?.education_level || subjectLevel || 'BOTH').trim().toUpperCase().replace(/[_-]+/g, ' ').replace(/\s+/g, ' ')
+    : subjectLevel;
+  if (['BOTH', 'ALL', ''].includes(normalizedSubjectLevel)) return true;
+  if (['PRIMARY', 'LOWER PRIMARY'].includes(normalizedSubjectLevel)) return teacherLevel === 'PRIMARY' || ['BOTH', 'ALL'].includes(teacherLevel);
+  if (['SECONDARY', 'LOWER SECONDARY', 'UPPER SECONDARY'].includes(normalizedSubjectLevel)) {
+    return teacherLevel === 'SECONDARY' || ['BOTH', 'ALL'].includes(teacherLevel);
+  }
+  return false;
+}
+
+function renderAssignmentTeacherOptions() {
+  const picker = document.getElementById('af-teacher');
+  if (!picker || picker.disabled) return;
+
+  const required = assignmentQueue.flatMap(item =>
+    (item.subject_ids || []).map(subjectId => ({ classId: item.class_id, subjectId }))
+  );
+  const selectedClassId = document.getElementById('af-class-picker')?.value || '';
+  if (selectedClassId) {
+    const selectedSubjectIds = [...document.querySelectorAll('input[name="af-subject"]:checked')].map(input => input.value);
+    if (selectedSubjectIds.length) {
+      selectedSubjectIds.forEach(subjectId => required.push({ classId: selectedClassId, subjectId }));
+    } else {
+      required.push({ classId: selectedClassId, subjectId: null });
+    }
+  }
+
+  const compatibleTeachers = assignmentTeachers.filter(teacher => required.every(pair => {
+    const classRecord = assignmentClassData[pair.classId];
+    const subject = pair.subjectId
+      ? assignmentSubjects.find(row => String(row.id) === String(pair.subjectId))
+      : null;
+    return classRecord && assignmentTeacherLevelAllows(teacher, classRecord, subject);
+  }));
+  const selectedTeacherId = picker.value;
+  picker.innerHTML = `<option value="">${compatibleTeachers.length ? 'Select' : 'No compatible active teachers'}</option>`
+    + compatibleTeachers.map(teacher => `<option value="${Utils.escapeHtml(String(teacher.id))}" ${String(teacher.id) === selectedTeacherId ? 'selected' : ''}>${Utils.escapeHtml(teacher.full_name || 'Teacher')} (${Utils.escapeHtml(teacher.teacher_code || '')})</option>`).join('');
+  if (!compatibleTeachers.some(teacher => String(teacher.id) === selectedTeacherId)) picker.value = '';
+}
 
 function renderAssignmentClassSubjects() {
   const classId = document.getElementById('af-class-picker')?.value || '';
@@ -11,6 +66,7 @@ function renderAssignmentClassSubjects() {
 
   if (!classId) {
     panel.innerHTML = '<div class="text-sm text-muted">Select a class first to choose the subjects taught in that class.</div>';
+    renderAssignmentTeacherOptions();
     return;
   }
 
@@ -19,11 +75,21 @@ function renderAssignmentClassSubjects() {
   const cls = assignmentClassData[classId];
   const classSubjects = (assignmentSubjects || [])
     .filter(subject => !cls || EducationLevels.subjectMatchesClass(subject, cls));
+  const isPrimaryClass = cls && EducationLevels.getCategory(cls) === 'Primary';
+  const french = assignmentSubjects.find(subject =>
+    String(subject.code || '').trim().toUpperCase() === 'FRE'
+    || String(subject.name || '').trim().toUpperCase() === 'FRENCH'
+  );
+  const frenchWarning = isPrimaryClass && (!french || !EducationLevels.subjectMatchesClass(french, cls))
+    ? `<div class="alert alert-warning" style="margin-bottom:8px"><i data-lucide="alert-triangle"></i><div>${french
+      ? 'French is in the active catalogue, but its level or grade restrictions do not match this class. Check the French subject record in Supabase.'
+      : 'French was not returned by the active subject catalogue. Run the Primary assignment SQL migration in Supabase, then refresh this page.'}</div></div>`
+    : '';
   const allowedIds = new Set(classSubjects.map(subject => String(subject.id)));
   const visibleChecked = new Set([...checked].filter(id => allowedIds.has(String(id))));
   const list = classSubjects.map(s => `
     <label style="display:flex;align-items:center;gap:8px;padding:4px 0">
-      <input type="checkbox" name="af-subject" value="${s.id}" ${visibleChecked.has(String(s.id)) ? 'checked' : ''} onchange="renderAssignmentSubjectCount()">
+      <input type="checkbox" name="af-subject" value="${s.id}" ${visibleChecked.has(String(s.id)) ? 'checked' : ''} onchange="renderAssignmentSubjectCount();renderAssignmentTeacherOptions()">
       ${Utils.escapeHtml(s.name)}
     </label>
   `).join('') || '<div class="text-sm text-muted">No active subjects available for this class.</div>';
@@ -36,23 +102,28 @@ function renderAssignmentClassSubjects() {
         <button type="button" class="btn btn-xs btn-outline" onclick="assignClearSubjects()">Clear</button>
       </span>
     </div>
+    ${frenchWarning}
     ${list}`;
+  renderAssignmentTeacherOptions();
 }
 
 function renderAssignmentSubjectCount() {
   const count = document.querySelectorAll('input[name="af-subject"]:checked').length;
   const el = document.getElementById('af-subject-count');
   if (el) el.textContent = count ? count + ' subject(s) selected' : 'Select one or more subjects';
+  renderAssignmentTeacherOptions();
 }
 
 function assignSelectAllSubjects() {
   document.querySelectorAll('input[name="af-subject"]').forEach(cb => cb.checked = true);
   renderAssignmentSubjectCount();
+  renderAssignmentTeacherOptions();
 }
 
 function assignClearSubjects() {
   document.querySelectorAll('input[name="af-subject"]').forEach(cb => cb.checked = false);
   renderAssignmentSubjectCount();
+  renderAssignmentTeacherOptions();
 }
 
 // ---- Shared rule: one subject in one class = one teacher per academic year.
@@ -146,6 +217,7 @@ function renderAssignmentQueue() {
 function assignRemoveClassFromQueue(classId) {
   assignmentQueue = assignmentQueue.filter(item => item.class_id !== classId);
   renderAssignmentQueue();
+  renderAssignmentTeacherOptions();
   const picker = document.getElementById('af-class-picker');
   if (picker && picker.value === classId) {
     picker.value = '';
@@ -169,6 +241,7 @@ function assignAddClassToQueue() {
   }
 
   renderAssignmentQueue();
+  renderAssignmentTeacherOptions();
   const picker = document.getElementById('af-class-picker');
   if (picker) picker.value = '';
   renderAssignmentClassSubjects();
@@ -178,11 +251,11 @@ async function renderAssignments() {
   setHeader('Teacher Assignments', 'Manage teaching schedules and matrix');
   setContent(Utils.loading());
   const [assignments, teachers, classes, subjects, years] = await Promise.all([
-    DB.query('teacher_assignments', '*'),
-    DB.query('teachers', '*', { status: 'active' }),
-    DB.get('classes'),
-    DB.query('subjects', '*', { status: 'active' }),
-    DB.get('academic_years')
+    DB.query('teacher_assignments', '*', {}, null, null, { fresh: true }),
+    DB.query('teachers', '*', { status: 'active' }, null, null, { fresh: true }),
+    DB.getFresh('classes'),
+    DB.query('subjects', '*', { status: 'active' }, null, null, { fresh: true }),
+    DB.getFresh('academic_years')
   ]);
   
   const filtered = assignFilter === 'all' ? assignments : assignments.filter(a => a.teacher_id === assignFilter);
@@ -270,14 +343,14 @@ async function renderAssignments() {
 
 async function buildAssignmentModal(title, preSelectedTeacher = null, preSelectedYear = null, selectedClassSubjects = {}) {
   const [teachers, classes, subjects, years] = await Promise.all([
-    DB.query('teachers', '*', { status: 'active' }),
-    DB.get('classes'),
-    DB.query('subjects', '*', { status: 'active' }),
-    DB.get('academic_years')
+    DB.query('teachers', '*', { status: 'active' }, null, null, { fresh: true }),
+    DB.getFresh('classes'),
+    DB.query('subjects', '*', { status: 'active' }, null, null, { fresh: true }),
+    DB.getFresh('academic_years')
   ]);
   const scopedClasses = typeof Scope !== 'undefined' && Scope.isScoped() ? Scope.filterClasses(classes) : classes;
-  const scopedSubjects = typeof Scope !== 'undefined' && Scope.isScoped() ? Scope.filterSubjects(subjects) : subjects;
-  assignmentSubjects = scopedSubjects || [];
+  assignmentTeachers = teachers || [];
+  assignmentSubjects = subjects || [];
   assignmentClassLookup = Object.fromEntries((scopedClasses || []).map(c => [c.id, c.name]));
   assignmentClassData = Object.fromEntries((scopedClasses || []).map(c => [c.id, c]));
   assignmentQueue = Object.entries(selectedClassSubjects || {}).map(([class_id, subject_ids]) => ({
@@ -285,7 +358,7 @@ async function buildAssignmentModal(title, preSelectedTeacher = null, preSelecte
     subject_ids: Array.isArray(subject_ids) ? subject_ids : [...new Set((subject_ids || []).map(s => s))]
   }));
 
-  const teacherOpts = teachers.map(t => `<option value="${t.id}" ${preSelectedTeacher === t.id ? 'selected' : ''}>${t.full_name} (${t.teacher_code})</option>`).join('');
+  const teacherOpts = assignmentTeachers.map(t => `<option value="${Utils.escapeHtml(String(t.id))}" ${preSelectedTeacher === t.id ? 'selected' : ''}>${Utils.escapeHtml(t.full_name || 'Teacher')} (${Utils.escapeHtml(t.teacher_code || '')})</option>`).join('');
   const defYear = preSelectedYear || (typeof getActiveYearId === 'function' ? getActiveYearId(years) : null) || '';
   const yearOpts = years.map(y => `<option value="${y.id}" ${defYear === y.id ? 'selected' : ''}>${y.name}</option>`).join('');
   const classOpts = (scopedClasses || []).map(c => `<option value="${c.id}">${Utils.escapeHtml(c.name)}</option>`).join('');
@@ -302,7 +375,7 @@ async function buildAssignmentModal(title, preSelectedTeacher = null, preSelecte
     </div>
     <div class="form-group">
       <label>1. Select a class <span class="required">*</span></label>
-      <select id="af-class-picker" class="select-field" onchange="renderAssignmentClassSubjects()">
+      <select id="af-class-picker" class="select-field" onchange="renderAssignmentClassSubjects();renderAssignmentTeacherOptions()">
         <option value="">Select class</option>
         ${classOpts}
       </select>

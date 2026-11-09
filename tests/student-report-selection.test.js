@@ -103,7 +103,7 @@ test('Primary report cards include the complete active curriculum despite partia
     { id: 'math', name: 'Mathematics', level: 'Both' },
     { id: 'english', name: 'English', level: 'Both' },
     { id: 'kin', name: 'Kinyarwanda', level: 'Both' },
-    { id: 'french', name: 'French', level: 'Both' },
+    { id: 'french', name: 'French', level: 'Primary' },
     { id: 'set', name: 'Science and Elementary Technology', level: 'Primary' },
     { id: 'srs', name: 'Social and Religious Studies', level: 'Primary' },
     { id: 'ca', name: 'Creative Arts', level: 'Primary' },
@@ -127,7 +127,7 @@ test('Secondary report cards include shared and Secondary subjects but exclude P
     { id: 'math', name: 'Mathematics', level: 'Both' },
     { id: 'english', name: 'English', level: 'Both' },
     { id: 'kin', name: 'Kinyarwanda', level: 'Both' },
-    { id: 'french', name: 'French', level: 'Both' },
+    { id: 'french', name: 'French', level: 'Primary' },
     { id: 'kisw', name: 'Kiswahili', level: 'Secondary' },
     { id: 'physics', name: 'Physics', level: 'Secondary' },
     { id: 'set', name: 'Science and Elementary Technology', level: 'Primary' }
@@ -135,12 +135,12 @@ test('Secondary report cards include shared and Secondary subjects but exclude P
   const selected = studentReport.subjectsForClass(
     subjects,
     { education_level: 'Lower Secondary', level: 'S1', name: 'S1A' },
-    [{ id: 'kisw' }],
+    [],
     'S1'
   );
 
   assert.deepEqual(Array.from(selected, subject => subject.id), [
-    'english', 'french', 'kin', 'kisw', 'math', 'physics'
+    'english', 'kin', 'kisw', 'math', 'physics'
   ]);
 });
 

@@ -169,12 +169,16 @@ SECURITY DEFINER
 SET search_path = public, pg_temp
 AS $fn$
   SELECT CASE
-    WHEN upper(COALESCE(t.education_level, '')) IN ('BOTH', 'ALL') THEN
-      upper(COALESCE(p_education_level, '')) IN ('PRIMARY', 'SECONDARY', 'LOWER SECONDARY', 'UPPER SECONDARY')
-    WHEN upper(COALESCE(t.education_level, '')) = 'PRIMARY' THEN
-      upper(COALESCE(p_education_level, '')) = 'PRIMARY'
-    WHEN upper(COALESCE(t.education_level, '')) = 'SECONDARY' THEN
-      upper(COALESCE(p_education_level, '')) IN ('SECONDARY', 'LOWER SECONDARY', 'UPPER SECONDARY')
+  WHEN upper(regexp_replace(btrim(coalesce(t.education_level, '')), '[[:space:]_-]+', ' ', 'g'))
+    IN ('BOTH', 'ALL') THEN
+    upper(regexp_replace(btrim(coalesce(p_education_level, '')), '[[:space:]_-]+', ' ', 'g'))
+      IN ('PRIMARY', 'LOWER PRIMARY', 'SECONDARY', 'LOWER SECONDARY', 'UPPER SECONDARY')
+  WHEN upper(regexp_replace(btrim(coalesce(t.education_level, '')), '[[:space:]_-]+', ' ', 'g')) = 'PRIMARY' THEN
+    upper(regexp_replace(btrim(coalesce(p_education_level, '')), '[[:space:]_-]+', ' ', 'g'))
+      IN ('PRIMARY', 'LOWER PRIMARY')
+  WHEN upper(regexp_replace(btrim(coalesce(t.education_level, '')), '[[:space:]_-]+', ' ', 'g')) = 'SECONDARY' THEN
+    upper(regexp_replace(btrim(coalesce(p_education_level, '')), '[[:space:]_-]+', ' ', 'g'))
+      IN ('SECONDARY', 'LOWER SECONDARY', 'UPPER SECONDARY')
     ELSE false
   END
   FROM public.teachers t
@@ -192,11 +196,16 @@ SECURITY DEFINER
 SET search_path = public, pg_temp
 AS $fn$
   SELECT CASE
-    WHEN upper(COALESCE(t.education_level, '')) IN ('BOTH', 'ALL') THEN true
-    WHEN upper(COALESCE(p_subject_level, '')) IN ('BOTH', 'ALL') THEN true
-    WHEN upper(t.education_level) = 'PRIMARY' THEN upper(COALESCE(p_subject_level, '')) = 'PRIMARY'
-    WHEN upper(t.education_level) = 'SECONDARY' THEN
-      upper(COALESCE(p_subject_level, '')) IN ('SECONDARY', 'LOWER SECONDARY', 'UPPER SECONDARY')
+  WHEN upper(regexp_replace(btrim(coalesce(t.education_level, '')), '[[:space:]_-]+', ' ', 'g'))
+    IN ('BOTH', 'ALL') THEN true
+  WHEN upper(regexp_replace(btrim(coalesce(p_subject_level, '')), '[[:space:]_-]+', ' ', 'g'))
+    IN ('BOTH', 'ALL') THEN true
+  WHEN upper(regexp_replace(btrim(coalesce(t.education_level, '')), '[[:space:]_-]+', ' ', 'g')) = 'PRIMARY' THEN
+    upper(regexp_replace(btrim(coalesce(p_subject_level, '')), '[[:space:]_-]+', ' ', 'g'))
+      IN ('PRIMARY', 'LOWER PRIMARY')
+  WHEN upper(regexp_replace(btrim(coalesce(t.education_level, '')), '[[:space:]_-]+', ' ', 'g')) = 'SECONDARY' THEN
+    upper(regexp_replace(btrim(coalesce(p_subject_level, '')), '[[:space:]_-]+', ' ', 'g'))
+      IN ('SECONDARY', 'LOWER SECONDARY', 'UPPER SECONDARY')
     ELSE false
   END
   FROM public.teachers t

@@ -54,8 +54,10 @@ CREATE OR REPLACE FUNCTION public.rms_dos_can_level(p_level TEXT)
 RETURNS boolean LANGUAGE sql STABLE AS $fn$
   SELECT CASE
     WHEN NOT public.rms_is_dos() THEN true
-    WHEN public.rms_dos_education_level() = 'PRIMARY' THEN p_level = 'Primary'
-    WHEN public.rms_dos_education_level() = 'SECONDARY' THEN p_level IN ('Lower Secondary', 'Upper Secondary')
+    WHEN public.rms_dos_education_level() = 'PRIMARY'
+      THEN upper(regexp_replace(btrim(coalesce(p_level, '')), '[[:space:]_-]+', ' ', 'g')) IN ('PRIMARY', 'LOWER PRIMARY')
+    WHEN public.rms_dos_education_level() = 'SECONDARY'
+      THEN upper(regexp_replace(btrim(coalesce(p_level, '')), '[[:space:]_-]+', ' ', 'g')) IN ('SECONDARY', 'LOWER SECONDARY', 'UPPER SECONDARY')
     ELSE false
   END;
 $fn$;
@@ -64,8 +66,12 @@ CREATE OR REPLACE FUNCTION public.rms_dos_can_subject(p_level TEXT)
 RETURNS boolean LANGUAGE sql STABLE AS $fn$
   SELECT CASE
     WHEN NOT public.rms_is_dos() THEN true
-    WHEN public.rms_dos_education_level() = 'PRIMARY' THEN p_level = 'Primary'
-    WHEN public.rms_dos_education_level() = 'SECONDARY' THEN p_level IN ('Secondary', 'Lower Secondary', 'Upper Secondary')
+    WHEN p_level IS NULL
+      OR upper(regexp_replace(btrim(p_level), '[[:space:]_-]+', ' ', 'g')) IN ('BOTH', 'ALL') THEN true
+    WHEN public.rms_dos_education_level() = 'PRIMARY'
+      THEN upper(regexp_replace(btrim(p_level), '[[:space:]_-]+', ' ', 'g')) IN ('PRIMARY', 'LOWER PRIMARY')
+    WHEN public.rms_dos_education_level() = 'SECONDARY'
+      THEN upper(regexp_replace(btrim(p_level), '[[:space:]_-]+', ' ', 'g')) IN ('SECONDARY', 'LOWER SECONDARY', 'UPPER SECONDARY')
     ELSE false
   END;
 $fn$;

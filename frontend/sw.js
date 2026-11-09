@@ -3,7 +3,7 @@
    Production-ready: caching, offline, push, background sync
    ============================================================ */
 
-const CACHE_NAME = 'rms-mis-v52';
+const CACHE_NAME = 'rms-mis-v53';
 const APP_SHELL_EXTERNAL = [
   'https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2',
   'https://unpkg.com/lucide@latest'
